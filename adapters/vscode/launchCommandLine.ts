@@ -7,7 +7,7 @@
  */
 
 /** The quoting rules a terminal's shell follows. */
-export type LaunchShell = 'posix' | 'powershell' | 'cmd';
+export type LaunchShell = 'posix' | 'fish' | 'powershell' | 'cmd';
 
 /** What the host knows about the shell a new terminal opens. */
 export interface TerminalShell {
@@ -34,6 +34,7 @@ export function launchShellOf({ platform, executable, profileName }: TerminalShe
   // Windows opens PowerShell when nothing says otherwise.
   if (platform === 'win32' && (!shell || shell.includes('powershell'))) return 'powershell';
   if (shell === 'cmd' || shell.includes('command prompt')) return 'cmd';
+  if (shell === 'fish') return 'fish';
   return 'posix';
 }
 
@@ -54,20 +55,35 @@ function isPlainWord(word: string, shell: LaunchShell): boolean {
   return shell !== 'powershell' || !word.startsWith('-') || POWERSHELL_PLAIN_FLAG_RE.test(word);
 }
 
+/** What PowerShell reads as a single quote: the ASCII one and the four
+ *  typographic ones (U+2018 to U+201B), any of which would end the string. */
+const POWERSHELL_QUOTES_RE = /['\u2018-\u201B]/g;
+
 /**
  * One word, quoted for the shell so the program receives exactly it.
  *
- * - posix and PowerShell: single quotes, in which nothing is special but the
- *   quote itself (`'\''` and `''`). fish follows the posix rule for everything
- *   but a backslash, which a home folder on the systems it runs on never has.
- * - cmd: double quotes, a `"` doubled. cmd still expands `%NAME%` inside them
- *   and has no escape for it at a prompt.
+ * - POSIX shells: single quotes, in which nothing is special; a quote leaves
+ *   them (`'\''`).
+ * - fish: single quotes too, but a backslash escapes inside them, so a
+ *   backslash and a quote are each written after one.
+ * - PowerShell: single quotes, each quote character doubled (which keeps the
+ *   character it was).
+ * - cmd: double quotes, a `"` doubled. Two things it cannot carry, neither of
+ *   which a launch holds: `%NAME%` is expanded even inside the quotes, and a
+ *   word ending in a backslash escapes the closing quote.
  */
 export function shellWord(word: string, shell: LaunchShell): string {
   if (isPlainWord(word, shell)) return word;
-  if (shell === 'powershell') return `'${word.replace(/'/g, "''")}'`;
-  if (shell === 'posix') return `'${word.replace(/'/g, "'\\''")}'`;
-  return `"${word.replace(/"/g, '""')}"`;
+  switch (shell) {
+    case 'posix':
+      return `'${word.replace(/'/g, "'\\''")}'`;
+    case 'fish':
+      return `'${word.replace(/[\\']/g, '\\$&')}'`;
+    case 'powershell':
+      return `'${word.replace(POWERSHELL_QUOTES_RE, '$&$&')}'`;
+    case 'cmd':
+      return `"${word.replace(/"/g, '""')}"`;
+  }
 }
 
 /** The whole command (the program, then its arguments) as one line for the
