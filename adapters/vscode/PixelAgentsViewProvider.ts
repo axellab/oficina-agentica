@@ -46,6 +46,7 @@ import {
   setHooksEnabled as persistHooksEnabled,
   writeConfig,
 } from '../../server/src/configPersistence.js';
+import { recordConversationLooks } from '../../server/src/conversations.js';
 import {
   handleDirectoryClientMessage,
   type HostDirectoryEntry,
@@ -546,6 +547,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         // Store seat assignments in a separate key (never touched by persistAgents)
         console.log(`[Pixel Agents] State: saveAgentSeats:`, JSON.stringify(message.seats));
         this.adapter.saveSeats(message.seats);
+        recordConversationLooks(this.store, message.seats);
       } else if (message.type === 'saveCardOrder') {
         const loaded = saveCardOrder(this.adapter, message.order, (id) => this.store.has(id));
         if (loaded) this.sendOrBuffer(loaded);
