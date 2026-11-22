@@ -233,6 +233,39 @@ describe('Roles through the Pixel Office MCP (composed server, mock-claude in a 
     expect(h.starts()).toHaveLength(starts);
   });
 
+  it('refuses a name several Roles go by, naming their ids, and launches the one an id names', async () => {
+    fs.mkdirSync(path.join(h.home, '.pixel-agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(h.home, '.pixel-agents', 'roles.json'),
+      JSON.stringify({
+        roles: [{ id: 'our-qa', name: 'QA Engineer', prompt: 'Test it our way.' }],
+      }),
+    );
+    const caller = await fromDrawer();
+    const before = h.store.size;
+    const starts = h.starts().length;
+
+    const reply = await h.callToolCaught(caller.client, 'launch_agent', {
+      directory: 'proj',
+      role: 'qa engineer',
+    });
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toMatch(
+      /2 Roles in this office are called qa engineer: qa-engineer, our-qa\./,
+    );
+    expect(reply.text).toMatch(/by its id/);
+    expect(h.store.size).toBe(before);
+    expect(h.starts()).toHaveLength(starts);
+
+    // An id names one Role only, whatever the others are called.
+    const ours = await launched(caller.client, { directory: 'proj', role: 'our-qa' });
+    expect(ours.role).toEqual({ id: 'our-qa', name: 'QA Engineer' });
+    expect(rolePromptOf(ours.session_id)).toBe(promptFile('our-qa'));
+    const team = await launched(caller.client, { directory: 'proj', role: 'qa-engineer' });
+    expect(team.role).toEqual({ id: 'qa-engineer', name: 'QA Engineer' });
+    expect(rolePromptOf(team.session_id)).toBe(promptFile('qa-engineer'));
+  });
+
   it('a resumed conversation comes back as the Role it had, unless the launch names another', async () => {
     const caller = await fromDrawer();
     const projectDir = path.join(h.home, '.claude', 'projects', normalizeProjectPath(h.workspace));

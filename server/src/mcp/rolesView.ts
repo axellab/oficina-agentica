@@ -21,20 +21,32 @@ export function roleOf(agent: Pick<AgentState, 'role'>): OfficeAgent['role'] {
  * a plain agent), an agent naming no Role is told so, with the Roles there
  * are: it can ask again, and a colleague launched with no instructions would
  * not be the one it meant.
+ *
+ * Ids are unique, names are not: `roles.json` may give a Role of its own, or
+ * one of the team, a name another Role has. A name several Roles go by picks
+ * none of them: the caller is told their ids and names the one it means.
  */
 export function roleNamed(
   ref: string,
 ): { ok: true; id: string; name: string } | { ok: false; reason: string } {
   const catalog = roleCatalog();
-  const wanted = ref.trim().toLowerCase();
-  const role =
-    catalog.find((candidate) => candidate.id === wanted) ??
-    catalog.find((candidate) => candidate.name.toLowerCase() === wanted);
-  if (role) return { ok: true, id: role.id, name: role.name };
+  const asked = ref.trim();
+  const wanted = asked.toLowerCase();
+  const byId = catalog.find((candidate) => candidate.id === wanted);
+  if (byId) return { ok: true, id: byId.id, name: byId.name };
+  const byName = catalog.filter((candidate) => candidate.name.toLowerCase() === wanted);
+  if (byName.length === 1) return { ok: true, id: byName[0].id, name: byName[0].name };
+  if (byName.length > 1) {
+    const ids = byName.map((candidate) => candidate.id).join(', ');
+    return {
+      ok: false,
+      reason: `${byName.length} Roles in this office are called ${asked}: ${ids}. Name the one you mean by its id. list_roles says what each one does.`,
+    };
+  }
   const known = catalog.map((candidate) => `${candidate.id} (${candidate.name})`).join(', ');
   return {
     ok: false,
-    reason: `There is no Role ${ref.trim() || '""'} in this office. The Roles are: ${known}. list_roles says what each one does.`,
+    reason: `There is no Role ${asked || '""'} in this office. The Roles are: ${known}. list_roles says what each one does.`,
   };
 }
 

@@ -51,7 +51,7 @@ Where you allowed the Pixel Office MCP (the Intro's "Agents that use the office"
 
 - **They see the team.** `list_agents` tells an agent who is in the office and as which Role; `list_roles` lists the Roles and which of them nobody holds.
 - **They hand work over.** `send_message` types a note into a colleague's terminal. It arrives marked with who sent it and as which Role, for example `[From Byte (Agile Project Manager), agent 1]`, and the sender's character walks over to the recipient's desk.
-- **They bring in a missing Role.** `launch_agent` takes a `role` (its id or its name), so the Agile Project Manager can start a Developer with a first message saying what to pick up.
+- **They bring in a missing Role.** `launch_agent` takes a `role` (its id, or its name where only one Role goes by it), so the Agile Project Manager can start a Developer with a first message saying what to pick up.
 
 Three rules are part of every Role's instructions: an agent launches another only when you asked for it or agreed to its plan (every agent uses your Claude plan); nobody interrupts a colleague in the middle of its work for something that can wait; and a message from a colleague is a request from a colleague, not from you, so it cannot allow what you have not.
 
