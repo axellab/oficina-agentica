@@ -27,6 +27,7 @@ import { directoryAt } from '../directories.js';
 import { startFileWatching } from '../fileWatcher.js';
 import { directoryNameFor, hostDirectory } from '../hostDirectory.js';
 import { assignPaletteIfNeeded } from '../paletteAssigner.js';
+import { prepareRoleLaunch } from '../roles/roleCatalog.js';
 import type { AgentState } from '../types.js';
 import { inheritedEnv, terminalEnv } from './terminalEnv.js';
 import type { TerminalSession, TerminalSessions } from './terminalSessions.js';
@@ -52,6 +53,9 @@ export interface LaunchStandaloneAgentOptions {
    *  id, same transcript (read from its end), and the seat its agent sat in
    *  when that one is free. */
   resume?: { sessionId: string; transcript: string; seatId?: string };
+  /** The Role to launch as (a catalog id, roles/roleCatalog.ts). Absent or
+   *  naming no Role of this host, the agent launches without one. */
+  roleId?: unknown;
   cols?: number;
   rows?: number;
 }
@@ -74,9 +78,13 @@ export function launchStandaloneAgent(
   const cwd = options.directoryPath ?? process.cwd();
   const sessionId = options.resume?.sessionId ?? crypto.randomUUID();
 
+  // The Role's instructions are written before the command that names them.
+  const roleLaunch = prepareRoleLaunch(options.roleId);
   const launch = provider.buildLaunchCommand?.(sessionId, cwd, {
     bypassPermissions: options.bypassPermissions,
     resume: options.resume !== undefined,
+    model: roleLaunch?.model,
+    appendSystemPromptFile: roleLaunch?.appendSystemPromptFile,
   });
   if (!launch) {
     console.error('[Pixel Agents] Terminal: provider.buildLaunchCommand is not implemented');
@@ -114,6 +122,7 @@ export function launchStandaloneAgent(
     directoryName: directory?.name ?? directoryNameFor(cwd),
     providerId: provider.id,
     seatId: options.resume?.seatId,
+    role: roleLaunch?.role,
   });
   if (options.resume) {
     // Its history is the past: replaying it would resurrect finished tools.

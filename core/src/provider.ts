@@ -194,7 +194,17 @@ export interface HookProvider {
   buildLaunchCommand?(
     sessionId: string,
     cwd: string,
-    opts?: { bypassPermissions?: boolean; resume?: boolean },
+    opts?: {
+      bypassPermissions?: boolean;
+      resume?: boolean;
+      /** The model to run (the CLI's own model names and aliases). */
+      model?: string;
+      /** A file holding instructions to add to the CLI's own system prompt for
+       *  this session (the agent's Role). A path, never the text itself: a long
+       *  prompt on a command line is quoted differently by every shell a
+       *  surface types it into. A CLI with no such option ignores it. */
+      appendSystemPromptFile?: string;
+    },
   ): {
     command: string;
     args: string[];

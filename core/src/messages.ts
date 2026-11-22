@@ -48,6 +48,7 @@ export type ServerMessage =
   | DirectorySaved
   | DirectoryRejected
   | DirectorySuggestions
+  | RolesLoaded
   | ConversationsLoaded
   | ConversationSearchResults
   | TerminalAvailability
@@ -105,7 +106,17 @@ export interface AgentCreated {
   palette?: number;
   repeat?: number;
   seatId?: string;
+  role?: AgentRole;
 }
+
+export interface AgentRole {
+  id: string;
+  name: string;
+  color: RoleColor;
+}
+
+export type RoleColor =
+  'red' | 'orange' | 'yellow' | 'green' | 'cyan' | 'blue' | 'purple' | 'pink' | 'gray';
 
 export interface AgentClosed {
   type: 'agentClosed';
@@ -123,6 +134,7 @@ export interface ExistingAgents {
   agentMeta: Record<string, AgentSeatMeta>;
   directoryNames: Record<string, string>;
   externalAgents: Record<string, boolean>;
+  roles?: Record<string, AgentRole>;
 }
 
 export interface AgentSeatMeta {
@@ -467,6 +479,21 @@ export interface DirectorySuggestions {
   paths: string[];
 }
 
+export interface RolesLoaded {
+  type: 'rolesLoaded';
+  roles: Role[];
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  color: RoleColor;
+  source: RoleSource;
+}
+
+export type RoleSource = 'builtin' | 'user';
+
 export interface ConversationsLoaded {
   type: 'conversationsLoaded';
   directories: DirectoryConversations[];
@@ -533,6 +560,7 @@ export interface LaunchAgent {
   type: 'launchAgent';
   directoryPath?: string;
   palette?: number;
+  roleId?: string;
 }
 
 export interface FocusAgent {

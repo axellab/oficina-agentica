@@ -1,4 +1,10 @@
-import { CARD_CONTEXT_BAR_HEIGHT_PX, CARD_MUGSHOT_CROP_TOP_ROW } from '../constants.js';
+import type { AgentRole } from '../../../core/src/messages.js';
+import {
+  CARD_CONTEXT_BAR_HEIGHT_PX,
+  CARD_MUGSHOT_CROP_TOP_ROW,
+  CARD_ROLE_STRIP_HEIGHT_PX,
+  ROLE_COLOR_HEX,
+} from '../constants.js';
 import { ContextBar } from '../office/ContextBar.js';
 import { contextLeft, useAgentContextUsed } from '../office/contextGauge.js';
 import type { CardVariant, CloseMode } from './cardBar.js';
@@ -11,6 +17,9 @@ import { PixelIcon } from './ui/PixelIcon.js';
 export interface AgentAppearance {
   palette: number;
   repeat: number;
+  /** The Role the agent was launched as, if any: a strip of its colour along
+   *  the card's top, and its name in the card's tooltip. */
+  role?: AgentRole;
 }
 
 /** Agent activity reflected by the tab's status dot. */
@@ -65,8 +74,19 @@ export function AgentCard({
     <div
       className={`group relative pointer-events-auto flex items-stretch gap-1 p-1 cursor-pointer border-2 shrink-0 ${CARD_VARIANT[variant]}`}
       onClick={() => onSelect(agentId)}
-      title={`Agent ${agentId}`}
+      title={appearance.role ? `Agent ${agentId} · ${appearance.role.name}` : `Agent ${agentId}`}
+      data-role-id={appearance.role?.id}
     >
+      {appearance.role && (
+        <span
+          aria-hidden="true"
+          className="absolute left-0 right-0 top-0 pointer-events-none"
+          style={{
+            height: CARD_ROLE_STRIP_HEIGHT_PX,
+            background: ROLE_COLOR_HEX[appearance.role.color],
+          }}
+        />
+      )}
       <CharacterMugShot
         palette={appearance.palette}
         repeat={appearance.repeat}

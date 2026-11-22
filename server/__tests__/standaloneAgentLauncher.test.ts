@@ -126,6 +126,69 @@ describe('launchStandaloneAgent', () => {
     expect(harness.spawnArgs[0].args).toEqual(['--resume', sessionId]);
   });
 
+  // ── Roles ────────────────────────────────────────────────────
+
+  it("launches as a Role: its instructions' file on the command line, the Role on the agent", () => {
+    const harness = workingPtyManager();
+
+    const id = launch(harness, { directoryPath: tempDir, roleId: 'qa-engineer' });
+
+    const agent = store.get(id!);
+    expect(agent?.role).toEqual({ id: 'qa-engineer', name: 'QA Engineer', color: 'green' });
+    const promptFile = path.join(os.homedir(), '.pixel-agents', 'role-prompts', 'qa-engineer.md');
+    expect(harness.spawnArgs[0].args).toEqual([
+      '--session-id',
+      agent?.sessionId,
+      '--append-system-prompt-file',
+      promptFile,
+    ]);
+    // Written before the process that reads it starts.
+    expect(fs.readFileSync(promptFile, 'utf-8')).toContain('## Your role: QA Engineer');
+  });
+
+  it("launches on a Role's model, and as it again when its conversation is resumed", () => {
+    const harness = workingPtyManager();
+    const rolesFile = path.join(os.homedir(), '.pixel-agents', 'roles.json');
+    fs.mkdirSync(path.dirname(rolesFile), { recursive: true });
+    fs.writeFileSync(rolesFile, JSON.stringify({ roles: [{ id: 'architect', model: 'opus' }] }));
+    const sessionId = '0b8a701c-400d-41ea-801f-40de5e070a8d';
+    const transcript = path.join(projectDir, `${sessionId}.jsonl`);
+    fs.writeFileSync(transcript, '{"type":"user"}\n');
+
+    try {
+      const id = launch(harness, {
+        directoryPath: tempDir,
+        roleId: 'architect',
+        resume: { sessionId, transcript },
+      });
+
+      expect(store.get(id!)?.role?.id).toBe('architect');
+      expect(harness.spawnArgs[0].args).toEqual([
+        '--resume',
+        sessionId,
+        '--model',
+        'opus',
+        '--append-system-prompt-file',
+        path.join(os.homedir(), '.pixel-agents', 'role-prompts', 'architect.md'),
+      ]);
+    } finally {
+      fs.rmSync(rolesFile);
+    }
+  });
+
+  it('launches a plain agent for a Role this host does not have', () => {
+    const harness = workingPtyManager();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const id = launch(harness, { directoryPath: tempDir, roleId: 'no-such-role' });
+
+    const agent = store.get(id!);
+    expect(agent?.role).toBeUndefined();
+    expect(harness.spawnArgs[0].args).toEqual(['--session-id', agent?.sessionId]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
   it('a fresh launch reports an empty context (a full gauge) at once; a resume does not', () => {
     const harness = workingPtyManager();
     const id = launch(harness, { directoryPath: tempDir });

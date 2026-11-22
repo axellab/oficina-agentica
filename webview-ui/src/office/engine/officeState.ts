@@ -1,3 +1,4 @@
+import type { AgentRole } from '../../../../core/src/messages.js';
 import { chooseLook } from '../../../../core/src/paletteUtils.js';
 import {
   CHARACTER_HIT_HALF_WIDTH,
@@ -1176,6 +1177,13 @@ export class OfficeState {
     if (wasUnlinked && leadAgentId !== undefined && !isTeamLead) {
       this.reseatNextToLead(id, leadAgentId);
     }
+  }
+
+  /** Name the Role an agent was launched as (undefined leaves it as it is:
+   *  an agent never loses its Role). */
+  setAgentRole(id: number, role: AgentRole | undefined): void {
+    const ch = this.characters.get(id);
+    if (ch && role) ch.role = role;
   }
 
   /** Mark an agent as headless (adopted, no terminal to focus). */

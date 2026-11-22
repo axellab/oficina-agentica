@@ -9,6 +9,8 @@
  * the contract, hence the @public tags.
  */
 
+import type { AgentRole } from './messages.js';
+
 // ── Agent State ──────────────────────────────────────────────
 
 /** Persisted agent data (survives F5 reload / restart) */
@@ -49,6 +51,10 @@ export interface PersistedAgent {
    *  "a repeat" (non-zero = 1); never written. */
   clothesHue?: number;
   hueShift?: number;
+  /** The Role the agent was launched as (core roles.ts), as it was then: its
+   *  process keeps those instructions whatever the catalog says later. Read
+   *  back through parseAgentRole. */
+  role?: AgentRole;
 }
 
 /** Agent seat assignment with visual identity

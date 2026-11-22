@@ -11,6 +11,7 @@ import type {
   FoundConversation,
 } from '../../core/src/messages.js';
 import type { HookProvider } from '../../core/src/provider.js';
+import { isRoleId } from '../../core/src/roles.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import {
   CONVERSATION_LOOKS_MAX,
@@ -40,6 +41,8 @@ import type { AgentState } from './types.js';
 
 export type ConversationLook = Omit<AgentLook, 'id'> & {
   seatId?: string;
+  /** The Role its agent was launched as, so a resume launches as it again. */
+  roleId?: string;
   /** When it was last recorded (ms), for pruning. */
   at: number;
 };
@@ -62,6 +65,7 @@ function readLooks(): Looks {
         palette: l.palette!,
         repeat: l.repeat!,
         seatId: typeof l.seatId === 'string' ? l.seatId : undefined,
+        roleId: isRoleId(l.roleId) ? l.roleId : undefined,
         at: typeof l.at === 'number' ? l.at : 0,
       };
     }
@@ -132,13 +136,15 @@ export function recordConversationLooks(
       palette: agent.palette,
       repeat: agent.repeat ?? 0,
       seatId: typeof meta.seatId === 'string' ? meta.seatId : before?.seatId,
+      roleId: agent.role?.id,
       at: now,
     };
     if (
       before &&
       before.palette === look.palette &&
       before.repeat === look.repeat &&
-      before.seatId === look.seatId
+      before.seatId === look.seatId &&
+      before.roleId === look.roleId
     ) {
       continue;
     }

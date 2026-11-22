@@ -219,6 +219,13 @@ export const WARDROBE_ITEMS_FILE_NAME = 'wardrobe-items.json';
  *  hand-edited source corrupting the stored values with out-of-range values. */
 export const MAX_CHARACTER_REPEAT = 1_000;
 
+// ── Roles ───────────────────────────────────────────────────
+/** The host's own Roles and its changes to the built-in ones, in the persistence dir. */
+export const ROLES_FILE_NAME = 'roles.json';
+/** Where each Role's standing instructions are written for the coding agent to
+ *  read at launch (one `<role id>.md` per Role), in the persistence dir. */
+export const ROLE_PROMPTS_DIR_NAME = 'role-prompts';
+
 // ── Recent conversations (the sidebar) ──────────────────────
 /** What each conversation's agent wore and where it sat, in the persistence dir. */
 export const CONVERSATIONS_FILE_NAME = 'conversations.json';

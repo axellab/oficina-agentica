@@ -127,6 +127,8 @@ components:
         - $ref: '#/components/schemas/DirectorySaved'
         - $ref: '#/components/schemas/DirectoryRejected'
         - $ref: '#/components/schemas/DirectorySuggestions'
+        # Roles (what an agent can be launched as)
+        - $ref: '#/components/schemas/RolesLoaded'
         - $ref: '#/components/schemas/ConversationsLoaded'
         - $ref: '#/components/schemas/ConversationSearchResults'
         # Terminal (standalone embedded terminal control plane)
@@ -225,6 +227,8 @@ components:
             The seat the agent should take when it is free (a resumed
             conversation's agent returns to where it sat). Absent, the office
             picks one.
+        role:
+          $ref: '#/components/schemas/AgentRole'
 
     AgentClosed:
       description: An agent has been removed from the office.
@@ -277,6 +281,14 @@ components:
           description: Map of agent ID (string) to external flag.
           additionalProperties:
             type: boolean
+        roles:
+          type: object
+          description: >-
+            Map of agent ID (string) to the Role the agent was launched as, for
+            every agent that has one, so a reload or reconnect keeps it on the
+            label and card.
+          additionalProperties:
+            $ref: '#/components/schemas/AgentRole'
 
     AgentStatus:
       description: Active vs waiting state for an agent (drives character animation).
@@ -1043,6 +1055,24 @@ components:
           items:
             type: string
 
+    RolesLoaded:
+      description: |
+        The Roles an agent can be launched as: the built-in catalog merged with
+        the host's own `~/.pixel-agents/roles.json` (an entry there replaces the
+        built-in Role of the same id, or adds one). Sent on `webviewReady`. A
+        Role's standing instructions never travel: the office only names Roles,
+        the host applies them at launch.
+      type: object
+      additionalProperties: false
+      required: [type, roles]
+      properties:
+        type:
+          const: rolesLoaded
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+
     ConversationsLoaded:
       description: |
         The sidebar's recent conversations: for each Directory, the ones an
@@ -1250,6 +1280,11 @@ components:
             Character the agent wears, as an index into the character profiles
             (picked from the roster). Absent, the Directory's default characters
             apply, else the server picks one at random.
+        roleId:
+          type: string
+          description: >-
+            The Role to launch the agent as (a `rolesLoaded` id). Absent, or an
+            id the host does not know, launches an agent with no Role.
 
     FocusAgent:
       description: Focus an agent's terminal.
@@ -1812,6 +1847,59 @@ components:
         and are read-only in the office; `user` entries are defined by the user.
       type: string
       enum: [user, host]
+
+    Role:
+      description: |
+        A Role as the office lists it: a named part in the software lifecycle an
+        agent can be launched as (Architect, Developer, QA Engineer, …). The
+        Role's standing instructions stay on the host.
+      type: object
+      additionalProperties: false
+      required: [id, name, description, color, source]
+      properties:
+        id:
+          type: string
+          description: Permanent id (lower-case letters, digits and hyphens).
+        name:
+          type: string
+          description: Display name, shown on the agent's label and card.
+        description:
+          type: string
+          description: One line on what an agent launched as this Role does.
+        color:
+          $ref: '#/components/schemas/RoleColor'
+        source:
+          $ref: '#/components/schemas/RoleSource'
+
+    RoleSource:
+      description: |
+        Where a Role came from. `builtin` Roles ship with the office; `user`
+        Roles are defined (or redefined) in the host's `~/.pixel-agents/roles.json`.
+      type: string
+      enum: [builtin, user]
+
+    AgentRole:
+      description: |
+        The Role an agent was launched as, as its label and card show it. A
+        snapshot taken at launch: it stays with the agent even if the Role is
+        later renamed or removed from the catalog.
+      type: object
+      additionalProperties: false
+      required: [id, name, color]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        color:
+          $ref: '#/components/schemas/RoleColor'
+
+    RoleColor:
+      description: |
+        The colour the office marks a Role with, by name. The contract knows no
+        colour values: the office draws each name in its own palette.
+      type: string
+      enum: [red, orange, yellow, green, cyan, blue, purple, pink, gray]
 
     WardrobeItem:
       description: |
