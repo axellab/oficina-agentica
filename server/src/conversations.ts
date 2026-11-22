@@ -37,6 +37,10 @@ import type { AgentState } from './types.js';
  * per session in ~/.pixel-agents/conversations.json whenever the office saves
  * its seats — an agent's seat is only known to the office — so it outlives the
  * agent, and the newest CONVERSATION_LOOKS_MAX are kept.
+ *
+ * The Role the agent was launched as is remembered beside the look, and is
+ * not the look's: it outlives the character (deleted from the cast) and an
+ * office that tracks the session without knowing its Role (an adopted one).
  */
 
 export type ConversationLook = Omit<AgentLook, 'id' | 'palette' | 'repeat'> & {
@@ -147,6 +151,9 @@ export function recordConversationLooks(
       palette: agent.palette,
       repeat: agent.repeat ?? 0,
       seatId: typeof meta.seatId === 'string' ? meta.seatId : before?.seatId,
+      // An agent without a Role says nothing about the session's: an office
+      // that adopted it (or tracks it from another surface) never knew the
+      // Role it was launched as, and must not erase what the launcher wrote.
       roleId: agent.role?.id ?? before?.roleId,
       at: now,
     };

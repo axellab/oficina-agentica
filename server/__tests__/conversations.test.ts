@@ -19,6 +19,7 @@ import {
   listConversations,
   liveSessions,
   recordConversationLooks,
+  remapConversationLooks,
   resumeRequest,
   searchConversations,
 } from '../src/conversations.js';
@@ -328,6 +329,92 @@ describe('conversations', () => {
 
     expect(conversationLook(uuid(1))).toMatchObject({ palette: 2, seatId: 'chair-3' });
     expect(conversationLook(uuid(1))?.roleId).toBeUndefined();
+  });
+
+  it('keeps the Role when an office that never knew it tracks the session', () => {
+    const launched = new AgentStateStore();
+    const agent = {
+      id: 4,
+      sessionId: uuid(1),
+      projectDir,
+      jsonlFile: path.join(projectDir, `${uuid(1)}.jsonl`),
+      isExternal: false,
+      palette: 2,
+      repeat: 0,
+    };
+    launched.set(
+      4,
+      createAgentState({ ...agent, role: { id: 'architect', name: 'Architect', color: 'purple' } }),
+    );
+    recordConversationLooks(launched, { '4': { seatId: 'chair-3' } });
+
+    // Another office adopts the session: its agent has no Role, and a new seat.
+    const adopted = new AgentStateStore();
+    adopted.set(9, createAgentState({ ...agent, id: 9, isExternal: true, palette: 5 }));
+    recordConversationLooks(adopted, { '9': { seatId: 'chair-7' } });
+
+    expect(conversationLook(uuid(1))).toMatchObject({
+      palette: 5,
+      seatId: 'chair-7',
+      roleId: 'architect',
+    });
+  });
+
+  it('forgets a deleted character but not the Role its agent was launched as', () => {
+    const store = new AgentStateStore();
+    const session = (id: number, n: number, palette: number, roleId?: string) =>
+      store.set(
+        id,
+        createAgentState({
+          id,
+          sessionId: uuid(n),
+          projectDir,
+          jsonlFile: path.join(projectDir, `${uuid(n)}.jsonl`),
+          isExternal: false,
+          palette,
+          repeat: 0,
+          role: roleId ? { id: roleId, name: 'QA Engineer', color: 'green' } : undefined,
+        }),
+      );
+    session(1, 1, 2, 'qa-engineer');
+    session(2, 2, 2);
+    session(3, 3, 4, 'qa-engineer');
+    recordConversationLooks(store, {
+      '1': { seatId: 'chair-1' },
+      '2': { seatId: 'chair-2' },
+      '3': { seatId: 'chair-3' },
+    });
+
+    // Character 2 is deleted: the ones after it move down one.
+    remapConversationLooks((palette) =>
+      palette === 2 ? undefined : palette > 2 ? palette - 1 : palette,
+    );
+
+    // The Role outlives the character; with no Role there is nothing left to remember.
+    const kept = conversationLook(uuid(1));
+    expect(kept).toMatchObject({ seatId: 'chair-1', roleId: 'qa-engineer' });
+    expect(kept?.palette).toBeUndefined();
+    expect(kept?.repeat).toBeUndefined();
+    expect(conversationLook(uuid(2))).toBeUndefined();
+    expect(conversationLook(uuid(3))).toMatchObject({ palette: 3, roleId: 'qa-engineer' });
+
+    // A later rewrite of the cast leaves the character-less entry alone.
+    remapConversationLooks((palette) => palette + 1);
+    expect(conversationLook(uuid(1))).toMatchObject({ roleId: 'qa-engineer' });
+    expect(conversationLook(uuid(1))?.palette).toBeUndefined();
+
+    // Resumed, it launches as the Role again, in a look picked afresh.
+    transcript(uuid(1), line({ type: 'ai-title', aiTitle: 'Tested' }), 1);
+    store.delete(1);
+    const resume = resumeRequest(store, provider, {
+      sessionId: uuid(1),
+      directoryPath: directory.path,
+    });
+    expect(resume?.look).toMatchObject({ roleId: 'qa-engineer' });
+    expect(resume?.look?.palette).toBeUndefined();
+    const [listed] = listConversations([directory], provider, new Map());
+    expect(listed.conversations[0]).toMatchObject({ sessionId: uuid(1), title: 'Tested' });
+    expect(listed.conversations[0].palette).toBeUndefined();
   });
 
   describe('title cache', () => {

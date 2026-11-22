@@ -547,6 +547,9 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         // Store seat assignments in a separate key (never touched by persistAgents)
         console.log(`[Pixel Agents] State: saveAgentSeats:`, JSON.stringify(message.seats));
         this.adapter.saveSeats(message.seats);
+        // Kept per session for every office on this machine, as the standalone
+        // server does: a conversation started here and resumed from the
+        // standalone sidebar comes back as the character, and the Role, it had.
         recordConversationLooks(this.store, message.seats);
       } else if (message.type === 'saveCardOrder') {
         const loaded = saveCardOrder(this.adapter, message.order, (id) => this.store.has(id));
