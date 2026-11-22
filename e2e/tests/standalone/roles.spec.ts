@@ -255,3 +255,112 @@ test.describe('Standalone / roles', () => {
     expect(fs.existsSync(path.join(repo, '.claude', 'worktrees', worktree))).toBe(true);
   });
 });
+
+/**
+ * The Roles reaching each other through the Pixel Office MCP: the agent that
+ * coordinates launches a colleague as its Role and asks it for its status.
+ *
+ * The agent's side of the wire is the mock claude's (e2e/README.md "Mocking
+ * model & rules"): its scenario calls the tools the way Claude Code's MCP
+ * client would, with the endpoint and token of the `--mcp-config` file the
+ * office launched it with. The test only clicks and reads the page, plus the
+ * command line the colleague was started with.
+ */
+test.describe('Standalone / roles over the Pixel Office MCP', () => {
+  test.skip(process.platform === 'win32', 'PTY spawn of the .cmd mock shim is untested on Windows');
+  test.use({
+    standaloneOptions: {
+      mockClaude: true,
+      // The user allowed the Pixel Office MCP in the Intro: every launch gets it.
+      seedConfig: { officeMcpConsent: 'granted' },
+      // The mock reads its terminal like Claude Code's TUI and shows what is typed.
+      hostEnv: { PIXEL_AGENTS_MOCK_STDIN: 'record' },
+    },
+  });
+
+  test('the Agile Project Manager launches a Developer as its Role and asks for its status, saying who asks @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    test.setTimeout(120_000);
+    const firstMessage = 'Pick up story 1';
+    const text = 'Daily: what is done, what is next, what is blocked?';
+    await setSettings(page, { alwaysShowLabels: true });
+    await waitForClaudeHookSetup(standalone.tmpHome);
+
+    // The manager: once running, it launches the Role the plan needs with a
+    // first message, reads the newcomer's screen and asks it for its status.
+    await arrangeNextClaudeInvocation(
+      standalone.tmpHome,
+      claudeScenario('role manager')
+        .at(1_000)
+        .callOfficeMcp(
+          'launch_agent',
+          { directory: standalone.workspaceDir, role: 'Developer', first_message: firstMessage },
+          { saveAs: 'launched' },
+        )
+        // The Developer's screen settles (banner, prompt) before it is read.
+        .at(1_000)
+        .callOfficeMcp(
+          'read_agent_terminal',
+          { agent_id: '{{mcp.launched.agent_id}}' },
+          { saveAs: 'screen', waitMs: 2_000 },
+        )
+        .at(1_000)
+        .callOfficeMcp(
+          'send_message',
+          {
+            to: ['{{mcp.launched.agent_id}}'],
+            text,
+            gist: 'Daily: status?',
+            screen_tokens: { '{{mcp.launched.agent_id}}': '{{mcp.screen.screen_token}}' },
+          },
+          { saveAs: 'sent', waitMs: 3_000 },
+        )
+        .holdOpenFor(90_000)
+        .build(),
+    );
+    // The Developer it launches: it only shows its prompt and what is typed.
+    await arrangeNextClaudeInvocation(
+      standalone.tmpHome,
+      claudeScenario('role developer').holdOpenFor(90_000).build(),
+    );
+
+    const drawer = await openLaunchDrawer(page);
+    await pickRole(drawer, 'Agile Project Manager');
+    const directoryName = path.basename(standalone.workspaceDir);
+    await drawer.getByRole('button', { name: directoryName, exact: true }).click();
+
+    // Both are in the office, each marked with its Role: on its card and over
+    // its character.
+    await expect(page.getByTitle('Agent 1 · Agile Project Manager', { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    const developerCard = page.getByTitle('Agent 2 · Developer', { exact: true });
+    await expect(developerCard).toBeVisible({ timeout: 30_000 });
+    await expectOverlayCount(page, 2);
+    await expectOverlayVisibleWithTexts(page, ['Agile Project Manager', directoryName]);
+    await expectOverlayVisibleWithTexts(page, ['Developer', directoryName]);
+
+    // The Developer was started as its Role (the instructions file on its
+    // command line) with the manager's first message.
+    const promptFile = path.join(
+      standalone.tmpHome,
+      '.pixel-agents',
+      'role-prompts',
+      'developer.md',
+    );
+    await expect
+      .poll(() => invocations(standalone.mockLogFile))
+      .toContain(`--append-system-prompt-file ${promptFile}`);
+    await developerCard.click();
+    const developerTerminal = page.locator('.xterm:visible');
+    await expect(developerTerminal).toContainText(`> ${firstMessage}`, { timeout: 15_000 });
+
+    // The manager's question reached the Developer's terminal, tagged with
+    // which Role is asking.
+    await expect(developerTerminal).toContainText(`(Agile Project Manager), agent 1] ${text}`, {
+      timeout: 30_000,
+    });
+  });
+});

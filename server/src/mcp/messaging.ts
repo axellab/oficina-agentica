@@ -191,7 +191,8 @@ export function createMessaging(
       }
       const sender = store.get(from);
       const failed = await typed({
-        text: messageTag(from, sender ? agentLabel(sender) : null) + content.text,
+        text:
+          messageTag(from, sender ? agentLabel(sender) : null, sender?.role?.name) + content.text,
       });
       if (failed) return refused(failed);
       if (!content.submit) return { id, delivered: true };

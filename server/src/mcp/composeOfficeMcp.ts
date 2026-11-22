@@ -45,6 +45,7 @@ import { type AgentMcpAccess, OfficeMcp } from './officeMcp.js';
 import { handleOfficeMcpMessage } from './officeMcpMessages.js';
 import type { AgentLaunch, AgentLaunchOutcome, OfficeOperations } from './officeOperations.js';
 import { createPcShellOps, type McpPcShells } from './pcShellOps.js';
+import { createRoleOps } from './rolesView.js';
 import type { OfficeTool } from './tool.js';
 import { createVisitOps } from './visitsOps.js';
 
@@ -230,6 +231,7 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
     visits,
     characters: createCharacterOps(facts, characterEdits),
     directories,
+    roles: createRoleOps(store),
     tutorial,
     // launch_agent's launch gives the agent this MCP, like any other launch.
     ...(launch ? { launch: createLaunching(facts, (request) => launch(request, officeMcp)) } : {}),

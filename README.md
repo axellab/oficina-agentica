@@ -134,7 +134,7 @@ Your workspace folders (VS Code) or the directory the CLI started in (standalone
 
 ### Roles
 
-A Role is the part an agent plays in the team. In the launch drawer, press the **Role** row, pick one (Architect, Developer, QA Engineer, DevSecOps Engineer, Security Engineer, Cloud Engineer, Agile Project Manager), then pick the Directory: the agent starts with that Role's instructions and wears its name on its label. To change what a Role is told, give it a model, or add Roles of your own, write `~/.pixel-agents/roles.json`. See [docs/roles.md](docs/roles.md).
+A Role is the part an agent plays in the team. In the launch drawer, press the **Role** row, pick one (Architect, Developer, QA Engineer, DevSecOps Engineer, Security Engineer, Cloud Engineer, Agile Project Manager), then pick the Directory: the agent starts with that Role's instructions and wears its name on its label. To change what a Role is told, give it a model, or add Roles of your own, write `~/.pixel-agents/roles.json`. Where you allowed the Pixel Office MCP, the Roles also see who is in the office, message each other, and the Agile Project Manager can launch a missing Role once you agree. See [docs/roles.md](docs/roles.md).
 
 ### Characters
 

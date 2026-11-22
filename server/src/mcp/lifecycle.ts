@@ -1,6 +1,6 @@
 /**
  * Agents coming and going at the Pixel Office MCP's word (launch_agent,
- * close_agent), on a surface that can do it: the character and seat a launch
+ * close_agent), on a surface that can do it: the character, seat and Role a launch
  * names checked against the office, then the surface's own launch (the
  * drawer's); a close through the card's × rules (closeAgentAsking), the
  * surface ending the terminal. An agent closing itself is ended once its turn
@@ -23,6 +23,7 @@ import type {
   OfficeCloseOutcome,
 } from './officeOperations.js';
 import { noAgentReason } from './officeOperations.js';
+import { roleNamed, roleOf } from './rolesView.js';
 
 export function createLaunching(
   facts: OfficeFacts,
@@ -38,6 +39,12 @@ export function createLaunching(
         const picked = paletteOf(request.character);
         if (!picked.ok) return picked;
         palette = picked.palette;
+      }
+      let roleId: string | undefined;
+      if (request.role !== undefined) {
+        const role = roleNamed(request.role);
+        if (!role.ok) return role;
+        roleId = role.id;
       }
       let seatId: string | undefined;
       if (request.seat !== undefined) {
@@ -57,15 +64,23 @@ export function createLaunching(
             notes.push(`Seat ${request.seat} is agent ${holder}'s, so the office picked another.`);
         }
       }
-      const { character: _character, seat: _seat, asks, ...where } = request;
-      const outcome = await launch({ ...where, palette, asks: { ...asks, seatId } });
+      const { character: _character, seat: _seat, role: _role, asks, ...where } = request;
+      const outcome = await launch({ ...where, palette, roleId, asks: { ...asks, seatId } });
       if (!outcome.ok) return outcome;
       const agent = store.get(outcome.id);
+      const role = agent ? roleOf(agent) : null;
+      if (roleId !== undefined && role?.id !== roleId) {
+        // The launch itself never fails over a Role (roleCatalog's prepareRoleLaunch).
+        notes.push(
+          `It launched without the Role ${roleId}: the Role's instructions could not be prepared (the office's log says why). Close it and launch again, or tell it its part yourself.`,
+        );
+      }
       return {
         ok: true,
         id: outcome.id,
         seat: officeSnapshot(facts).seatOf(outcome.id) ?? null,
         character: agent ? characterOf(agent) : null,
+        role,
         session: agent?.sessionId ?? '',
         notes,
       };

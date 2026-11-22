@@ -12,7 +12,8 @@ export const sendMessage = defineTool({
     '`submit` is false), or press named keys to answer a prompt or menu on its screen. Read each ' +
     "recipient's screen first (read_agent_terminal) and pass its `screen_token` in `screen_tokens` " +
     '(keyed by agent id): a recipient whose screen changed since is refused, with its new screen and ' +
-    'token in the result. Text arrives tagged `[From <your nickname, else your character, else your Directory>, agent <your id>] `; keys go bare. ' +
+    'token in the result. Text arrives tagged `[From <your nickname, else your character, else your Directory>, agent <your id>] `, ' +
+    'your Role in brackets after the name when you were launched as one; keys go bare. ' +
     'Each recipient is reported on its own (delivered, or refused and why). `gist` (at most ' +
     `${MESSAGE_GIST_MAX_LENGTH} characters) is what the office shows over your character as you ` +
     'walk over. Agents without a terminal of this office (headless, adopted) cannot be messaged. ' +

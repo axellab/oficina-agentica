@@ -10,6 +10,7 @@ import type { AgentState } from '../types.js';
 import { currentVisit } from '../visits.js';
 import { type OfficeFacts, officeSnapshot } from './officeFacts.js';
 import type { AgentsView, OfficeAgent, OfficeAgentStatus } from './officeOperations.js';
+import { roleOf } from './rolesView.js';
 
 /** An agent's status as every office shows it: its permission bubble, else its turn. */
 export function statusOf(
@@ -96,6 +97,7 @@ export function createAgentsView(
         agents.push({
           id,
           nickname: agent.nickname ?? null,
+          role: roleOf(agent),
           directory,
           workingDirectory: agent.cwd ?? agent.worktree?.path ?? directory?.path ?? null,
           worktree: agent.worktree

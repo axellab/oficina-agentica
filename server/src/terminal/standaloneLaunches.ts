@@ -133,11 +133,19 @@ export async function launchIntoDirectory(
  * Resume the conversation `sessionId` of the Directory at `directoryPath`
  * (worktreeResume's rules: its Worktree brought back first, refused with
  * `rejectedAt` when it can't be). It comes back as the agent it was (look,
- * seat) unless `palette` or the asked seat say otherwise.
+ * seat, Role) unless `palette`, the asked seat or `roleId` say otherwise.
  */
 export async function resumeInDirectory(
   deps: StandaloneLaunchDeps,
-  request: { sessionId: unknown; directoryPath: unknown; palette?: number; asks?: LaunchAsks },
+  request: {
+    sessionId: unknown;
+    directoryPath: unknown;
+    palette?: number;
+    asks?: LaunchAsks;
+    /** The Role to come back as (a catalog id). Absent, it comes back as the
+     *  Role its conversation remembers. */
+    roleId?: string;
+  },
 ): Promise<LaunchOutcome> {
   const { store, ptyManager, provider } = deps;
   const checked = checkedAsks(deps, request.asks);
@@ -154,6 +162,7 @@ export async function resumeInDirectory(
           // The asked seat wins over the one it sat in; without one, its old seat.
           asks: checked.asks,
           palette: request.palette ?? options.palette,
+          roleId: request.roleId ?? options.roleId,
         });
         if (id !== null && request.palette !== undefined) recordPick(store, request.palette);
         return id;
@@ -289,6 +298,7 @@ async function launchOrResume(
       directoryPath: where.path,
       palette: request.palette,
       asks,
+      roleId: request.roleId,
     });
   }
   let worktree: { name?: string; from?: WorktreeBranch } | undefined;
@@ -305,6 +315,7 @@ async function launchOrResume(
     palette: request.palette,
     worktree,
     asks,
+    roleId: request.roleId,
   });
 }
 

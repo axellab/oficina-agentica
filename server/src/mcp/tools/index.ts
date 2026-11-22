@@ -12,6 +12,7 @@ import { listCatalog } from './listCatalog.js';
 import { listCharacters } from './listCharacters.js';
 import { listDirectories } from './listDirectories.js';
 import { listPcShells } from './listPcShells.js';
+import { listRoles } from './listRoles.js';
 import { listWardrobe } from './listWardrobe.js';
 import { openPcShell } from './openPcShell.js';
 import { readAgentTerminal } from './readAgentTerminal.js';
@@ -27,6 +28,7 @@ import { visit } from './visit.js';
  *  its own file in this folder plus one line here. */
 export const OFFICE_TOOLS: readonly OfficeTool[] = [
   listAgents,
+  listRoles,
   getLayout,
   listCatalog,
   listWardrobe,
