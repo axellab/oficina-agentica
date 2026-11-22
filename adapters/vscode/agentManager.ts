@@ -46,37 +46,34 @@ export function getProjectDirPath(cwd?: string): string {
   return projectDir;
 }
 
-type TerminalShell = 'cmd' | 'powershell' | 'posix';
+type LaunchShell = 'posix' | 'powershell' | 'cmd';
 
-function configuredTerminalShell(): TerminalShell {
+function launchShell(): LaunchShell {
   const platform =
     process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'osx' : 'linux';
   const config = vscode.workspace.getConfiguration('terminal.integrated');
   const profileName = config.get<string>(`defaultProfile.${platform}`);
-  const profiles = config.get<Record<string, unknown>>(`profiles.${platform}`);
-  const profile = profileName ? profiles?.[profileName] : undefined;
-  const shellPath =
-    typeof profile === 'string'
-      ? profile
-      : profile && typeof profile === 'object' && 'path' in profile
-        ? (profile as { path?: string | string[] }).path
-        : undefined;
-  const executable = Array.isArray(shellPath) ? shellPath[0] : shellPath;
-  const name = executable
-    ?.split(/[\\/]/)
-    .pop()
-    ?.toLowerCase()
+  const profiles = config.get<Record<string, { path?: string | string[] }>>(`profiles.${platform}`);
+  const profilePath = profileName ? profiles?.[profileName]?.path : undefined;
+  const executable = Array.isArray(profilePath) ? profilePath[0] : profilePath;
+  const shell = path
+    .basename(executable || profileName || '')
+    .toLowerCase()
     .replace(/\.exe$/, '');
-  if (name === 'pwsh' || name === 'powershell') return 'powershell';
-  if (name === 'cmd') return 'cmd';
-  if (name === 'bash' || name === 'sh' || name === 'zsh' || name === 'fish' || name === 'wsl') {
-    return 'posix';
+
+  if (
+    /^(pwsh|powershell)$/.test(shell) ||
+    (platform === 'windows' && (!shell || shell.includes('powershell')))
+  ) {
+    return 'powershell';
   }
-  return process.platform === 'win32' ? 'powershell' : 'posix';
+  if (shell === 'cmd' || shell.includes('command prompt')) return 'cmd';
+  if (['bash', 'sh', 'zsh', 'fish', 'wsl'].includes(shell)) return 'posix';
+  return 'posix';
 }
 
-/** Quote a command word for the shell selected by VS Code. */
-function shellWord(word: string, shell: TerminalShell): string {
+/** Quote one word for the configured terminal shell. */
+function shellWord(word: string, shell: LaunchShell): string {
   if (/^[\w@%+=:,./-]+$/.test(word)) return word;
   if (shell === 'powershell') return `'${word.replace(/'/g, "''")}'`;
   if (shell === 'posix') return `'${word.replace(/'/g, "'\\''")}'`;
@@ -148,7 +145,7 @@ export async function launchNewTerminal(
   if (!launch) {
     throw new Error('claudeProvider.buildLaunchCommand is not implemented');
   }
-  const shell = configuredTerminalShell();
+  const shell = launchShell();
   terminal.sendText(
     [launch.command, ...launch.args].map((word) => shellWord(word, shell)).join(' '),
   );
