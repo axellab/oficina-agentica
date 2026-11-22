@@ -1179,11 +1179,10 @@ export class OfficeState {
     }
   }
 
-  /** Name the Role an agent was launched as (undefined leaves it as it is:
-   *  an agent never loses its Role). */
+  /** Apply the server's Role, clearing it when the agent has none. */
   setAgentRole(id: number, role: AgentRole | undefined): void {
     const ch = this.characters.get(id);
-    if (ch && role) ch.role = role;
+    if (ch) ch.role = role;
   }
 
   /** Mark an agent as headless (adopted, no terminal to focus). */
