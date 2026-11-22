@@ -136,7 +136,7 @@ export function recordConversationLooks(
       palette: agent.palette,
       repeat: agent.repeat ?? 0,
       seatId: typeof meta.seatId === 'string' ? meta.seatId : before?.seatId,
-      roleId: agent.role?.id,
+      roleId: agent.role?.id ?? before?.roleId,
       at: now,
     };
     if (
