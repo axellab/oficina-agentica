@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizeProjectPath } from '../../core/src/normalizeProjectPath.js';
 import { getCharacterProfiles } from '../src/characterProfilesStore.js';
 import { messageTag } from '../src/mcp/agentLabel.js';
+import { BUILTIN_ROLES } from '../src/roles/builtinRoles.js';
 import { type Json, useStandaloneOffice, waitFor } from './helpers/officeMcpHarness.js';
 
 const ESC = '\x1b';
@@ -144,6 +145,23 @@ describe('Roles through the Pixel Office MCP (composed server, mock-claude in a 
     expect(reply.role).toEqual({ id: 'tech-writer', name: 'Technical Writer' });
     expect(rolePromptOf(reply.session_id)).toBe(promptFile('tech-writer'));
     expect((await roles(caller.client)).at(-1)!.agents).toEqual([reply.agent_id]);
+  });
+
+  it('the feature guide has a roles topic that names the whole team and the tools it works together with', async () => {
+    const caller = await fromDrawer();
+
+    const topic = await h.callJson(caller.client, 'get_feature_guide', { topic: 'roles' });
+    expect(topic.title).toMatch(/^Roles/);
+    // The guide is prose, the catalog is data: a Role added to the team must be added here too.
+    for (const role of BUILTIN_ROLES) expect(topic.body).toContain(role.name);
+    for (const tool of ['list_roles', 'list_agents', 'send_message', 'launch_agent']) {
+      expect(topic.body).toContain(tool);
+    }
+    // Its example of a tagged Message is the tag a Message really gets.
+    expect(topic.body).toContain(messageTag(1, 'Byte', 'Agile Project Manager').trim());
+
+    const all = await h.callJson(caller.client, 'get_feature_guide', {});
+    expect((all.topics as Json[]).map((t) => t.id)).toContain('roles');
   });
 
   // ── launch_agent ────────────────────────────────────────────

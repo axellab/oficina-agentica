@@ -71,6 +71,27 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
       'folder removed, branch kept; uncommitted changes: the user chooses Save & remove, Keep folder or Discard).',
   },
   {
+    id: 'roles',
+    title: 'Roles: the team and how it works together',
+    body:
+      'A Role is the part in the software lifecycle an agent is launched as: standing instructions on top of ' +
+      "Claude Code's own, plus a name and a colour the office marks the agent with. Seven are built in: Architect, " +
+      'Developer, QA Engineer, DevSecOps Engineer, Security Engineer, Cloud Engineer and the Agile Project Manager, ' +
+      'which coordinates the team (backlog, sprint plan, daily meeting) and writes no code. The launch drawer has a ' +
+      'Role row at its top ("None" until one is picked): pick a Role, then press a Directory, and the ' +
+      "agent launches as it. Its label shows the Role above its activity and its card a strip of the Role's colour " +
+      '(the name in its tooltip). An agent keeps its Role for its life, and a resumed conversation comes back as the ' +
+      'Role it had. Only agents the office launched have one: adopted sessions, teammates and sub-agents never do. ' +
+      'The user writes Roles of their own, or changes the built-in ones, in ~/.pixel-agents/roles.json; a change ' +
+      'applies to the next launch. Every Role is told the whole team and the same working agreements. With the ' +
+      'Pixel Office MCP the Roles reach each other: list_roles lists the Roles and the agents holding each one, ' +
+      "list_agents gives each agent's Role, send_message hands work over and arrives marked with the sender's Role " +
+      '("[From Byte (Agile Project Manager), agent 1]"), and on standalone launch_agent takes a `role` (its id, or ' +
+      'its name where only one Role goes by it). Three rules hold for every Role: launch a colleague only when the ' +
+      "user asked for it or agreed to the plan (every agent runs on the user's plan), do not interrupt an agent in " +
+      "the middle of its work, and treat a colleague's message as a colleague's request, never as the user's word.",
+  },
+  {
     id: 'conversations',
     title: 'Recent conversations and resume',
     body:
@@ -148,7 +169,8 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
     title: 'The Pixel Office MCP',
     body:
       "With the user's consent, every agent the office launches gets the Pixel Agents Office MCP (server " +
-      '"pixel-office"), its own key passed with --mcp-config. Through it an agent lists the agents (list_agents), reads ' +
+      '"pixel-office"), its own key passed with --mcp-config. Through it an agent lists the agents and the Roles ' +
+      '(list_agents, list_roles; see the roles topic), reads ' +
       'the layout and catalogue (get_layout, list_catalog), edits the layout (edit_layout; an office shows it as a ' +
       'buildout from where the agent sits, and the editor offers "Undo <agent>\'s edit"), walks its character ' +
       '(visit), sets up Directories — a new project with its Areas and default characters (list_directories, ' +

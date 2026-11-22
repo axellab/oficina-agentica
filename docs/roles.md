@@ -63,6 +63,8 @@ _From the test suite: the terminal on the right is its stand-in for Claude Code,
 
 In VS Code the agents can list the team and message each other, but they cannot launch one another: there, you launch each Role from the drawer.
 
+An agent with the office's tools can also explain all of this to you: the office's feature guide (`get_feature_guide`) has a topic on Roles.
+
 ## Your own Roles: `roles.json`
 
 Create `~/.pixel-agents/roles.json` to change a built-in Role or add your own. Both the VS Code extension and the standalone office read it.
