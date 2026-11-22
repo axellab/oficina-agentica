@@ -4,9 +4,14 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import type { StateAdapter } from '../../core/src/adapter.js';
+import type { Directory } from '../../core/src/messages.js';
 import type { PersistedAgent } from '../../core/src/schemas.js';
 import { resendAgentActivity } from '../../server/src/agentActivityResend.js';
-import { existingAgentRoles } from '../../server/src/agentMessages.js';
+import {
+  existingAgentNicknames,
+  existingAgentRoles,
+  existingAgentWorktrees,
+} from '../../server/src/agentMessages.js';
 import {
   isPersistedSpawnChild,
   restoredAgentInit,
@@ -14,9 +19,9 @@ import {
 } from '../../server/src/agentPersistence.js';
 import { createAgentState } from '../../server/src/agentState.js';
 import { AgentStateStore } from '../../server/src/agentStateStore.js';
-import { JSONL_POLL_INTERVAL_MS } from '../../server/src/constants.js';
+import { JSONL_POLL_INTERVAL_MS, OFFICE_MCP_SERVER_NAME } from '../../server/src/constants.js';
 import { clearContextUsage } from '../../server/src/contextUsage.js';
-import { directoryAt } from '../../server/src/directories.js';
+import { transcriptSuffix } from '../../server/src/directorySuggestions.js';
 import {
   ensureProjectScan,
   readNewLines,
@@ -24,13 +29,18 @@ import {
   startFileWatching,
 } from '../../server/src/fileWatcher.js';
 import { loadLayout } from '../../server/src/layoutPersistence.js';
+import type { AgentMcpAccess } from '../../server/src/mcp/officeMcp.js';
 import { assignPaletteIfNeeded } from '../../server/src/paletteAssigner.js';
 import { CLAUDE_TERMINAL_NAME_PREFIX } from '../../server/src/providers/hook/claude/constants.js';
 import { claudeProvider } from '../../server/src/providers/index.js';
+import { resumedTranscript } from '../../server/src/resumedTranscript.js';
 import { prepareRoleLaunch } from '../../server/src/roles/roleCatalog.js';
 import { sessionMarkersUnset } from '../../server/src/terminal/terminalEnv.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from '../../server/src/timerManager.js';
-import { workspaceDirectories } from './hostDirectories.js';
+import type { AgentState } from '../../server/src/types.js';
+import { visitSnapshot } from '../../server/src/visits.js';
+import { retireWorktreesLeftBy } from '../../server/src/worktreeLeave.js';
+import { savedOccupant, type WorktreeOccupant } from '../../server/src/worktreeOccupancy.js';
 import { launchCommandLine, type LaunchShell, launchShellOf } from './launchCommandLine.js';
 
 export function getProjectDirPath(cwd?: string): string {
@@ -66,8 +76,13 @@ function launchShell(): LaunchShell {
 
 /** What a launch asks for, beyond the runtime it registers with. */
 export interface LaunchTerminalOptions {
-  /** The Directory to launch into; absent = the first workspace folder, else home. */
-  directoryPath?: string;
+  /** The Directory launched into, as the launch request named it (resolved by
+   *  the caller): the agent's name, its default characters and, through the
+   *  name, its Area seating. Never derived here from the folder it runs in. */
+  directory?: Directory;
+  /** The folder the terminal runs in; absent = the Directory's path, else the
+   *  first workspace folder, else home. It need not be the Directory's path. */
+  cwd?: string;
   /** The host's persisted permission posture (never a per-launch choice). */
   bypassPermissions?: boolean;
   /** Keep the panel on Pixel Agents instead of showing the terminal. */
@@ -78,6 +93,27 @@ export interface LaunchTerminalOptions {
   /** The Role to launch as (a catalog id). Absent or naming no Role of this
    *  host, the agent launches without one. */
   roleId?: unknown;
+  /** The Worktree `cwd` is, when the launch made one: its agent wears the
+   *  marker and branch (still named after `directory`), and the terminal
+   *  closing applies the leave rules to it. */
+  worktree?: AgentState['worktree'];
+  /** The new session's id, when the caller already chose it (a Worktree
+   *  records the session it was made for). Absent = a fresh UUID. */
+  sessionId?: string;
+  /** The Pixel Office MCP: with the user's consent, the agent is launched
+   *  with `--mcp-config <its own file>` (a token minted for it alone). */
+  mcp?: AgentMcpAccess;
+  /** The Guide's asks: its first message (the CLI's starting
+   *  prompt), Nickname, permission mode, and the Pixel Office MCP tools it may
+   *  call without a prompt (only with the MCP given). The drawer asks none. */
+  firstMessage?: string;
+  nickname?: string;
+  permissionMode?: string;
+  /** The model the CLI runs (the Guide's). */
+  model?: string;
+  preapprovedMcpTools?: readonly string[];
+  /** A plugin folder this session alone loads (the tutorial's onboarding skill). */
+  pluginDir?: string;
 }
 
 export async function launchNewTerminal(
@@ -93,13 +129,29 @@ export async function launchNewTerminal(
   jsonlPollTimers: Map<number, ReturnType<typeof setInterval>>,
   projectScanTimerRef: { current: ReturnType<typeof setInterval> | null },
   persistAgents: () => void,
-  { directoryPath, bypassPermissions, suppressShow, palette, roleId }: LaunchTerminalOptions = {},
-): Promise<void> {
+  {
+    directory,
+    cwd: launchCwd,
+    bypassPermissions,
+    suppressShow,
+    palette,
+    roleId,
+    worktree,
+    sessionId: chosenSessionId,
+    mcp,
+    firstMessage,
+    nickname,
+    permissionMode,
+    model,
+    preapprovedMcpTools,
+    pluginDir,
+  }: LaunchTerminalOptions = {},
+): Promise<number> {
   const folders = vscode.workspace.workspaceFolders;
   // Use home directory as fallback cwd when no workspace is open (common on Linux/macOS).
   // This ensures the terminal starts in a predictable location that matches the project
   // dir hash Claude Code will use for JSONL transcript files.
-  const cwd = directoryPath || folders?.[0]?.uri.fsPath || os.homedir();
+  const cwd = launchCwd || directory?.path || folders?.[0]?.uri.fsPath || os.homedir();
   const isMultiRoot = !!(folders && folders.length > 1);
   const idx = nextTerminalIndexRef.current++;
   const terminal = vscode.window.createTerminal({
@@ -118,41 +170,55 @@ export async function launchNewTerminal(
     terminal.show();
   }
 
-  const sessionId = crypto.randomUUID();
-  // The Role's instructions are written before the command that names them.
+  const sessionId = chosenSessionId ?? crypto.randomUUID();
+  // Before the token is minted: nothing between it and the agent joining the
+  // store throws, so a token never outlives a launch that didn't happen.
+  const projectDir = getProjectDirPath(cwd);
+  // The Role's instructions are written before the command that names them
+  // (a failed write is logged and launches a plain agent, it never throws).
   const roleLaunch = prepareRoleLaunch(roleId);
+  // The id first: the Pixel Office MCP mints its token for this agent (the
+  // file's path on the command line, never the token).
+  const id = nextAgentIdRef.current++;
+  const mcpConfig = mcp?.configFor(id);
   const launch = claudeProvider.buildLaunchCommand?.(sessionId, cwd, {
     bypassPermissions,
-    model: roleLaunch?.model,
+    mcpConfig,
+    permissionMode,
+    // A model the launch asks for by name wins over its Role's usual one.
+    model: model ?? roleLaunch?.model,
     appendSystemPromptFile: roleLaunch?.appendSystemPromptFile,
+    prompt: firstMessage,
+    preapprovedMcpTools:
+      mcpConfig && preapprovedMcpTools
+        ? { server: OFFICE_MCP_SERVER_NAME, tools: preapprovedMcpTools }
+        : undefined,
+    pluginDirs: pluginDir ? [pluginDir] : undefined,
   });
   if (!launch) {
+    mcp?.revoke(id);
     throw new Error('claudeProvider.buildLaunchCommand is not implemented');
   }
   terminal.sendText(launchCommandLine([launch.command, ...launch.args], launchShell()));
 
-  const projectDir = getProjectDirPath(cwd);
-
   // Pre-register expected JSONL file so project scan won't treat it as a /clear file
-  const expectedFile = path.join(projectDir, `${sessionId}.jsonl`);
+  const suffix = transcriptSuffix(claudeProvider.sessionFilePattern);
+  const expectedFile = path.join(projectDir, `${sessionId}${suffix}`);
   knownJsonlFiles.add(expectedFile);
 
   // Create agent immediately (before JSONL file exists)
-  const id = nextAgentIdRef.current++;
   // The character's origin label, and the key areaMappings is looked up by.
   //
-  // A launch the office aimed somewhere (a Directory row, or the Default
-  // directory the caller resolved — both arrive as directoryPath) wears that
-  // Directory's name as the user wrote it, so "Side Project" doesn't come out
-  // as "side-project" and the Areas assigned to it in the modal match.
+  // A launch the office aimed at a Directory (the caller resolved it from the
+  // launch request) wears that Directory's name as the user wrote it, so
+  // "Side Project" doesn't come out as "side-project" and the Areas assigned
+  // to it in the modal match.
   //
   // Everything else keeps the old multi-root rule: the most specific containing
   // workspace folder (longest path wins for nested folders), and nothing at all
   // in a single-root window, where an origin label would say what the whole
   // office already says.
-  const chosenDirectory =
-    directoryPath === undefined ? undefined : directoryAt(cwd, workspaceDirectories());
-  const chosenDirectoryName = chosenDirectory?.name;
+  const chosenDirectoryName = directory?.name;
   const owningFolder = (folders ?? [])
     .filter((f) => cwd === f.uri.fsPath || cwd.startsWith(f.uri.fsPath + path.sep))
     .sort((a, b) => b.uri.fsPath.length - a.uri.fsPath.length)[0];
@@ -168,10 +234,14 @@ export async function launchNewTerminal(
     jsonlFile: expectedFile,
     directoryName,
     role: roleLaunch?.role,
+    worktree,
+    nickname,
+    // Where its session runs: a hook naming this folder is no move.
+    cwd,
   });
 
   // Only a launch the office aimed at a Directory wears its defaults.
-  assignPaletteIfNeeded(agent, agents, { picked: palette, directory: chosenDirectory });
+  assignPaletteIfNeeded(agent, agents, { picked: palette, directory });
   agents.set(id, agent);
   // A fresh session starts with an empty context: a full gauge from the spawn on.
   clearContextUsage(id, agents);
@@ -222,7 +292,7 @@ export async function launchNewTerminal(
         let dirContents = '';
         if (dirExists) {
           try {
-            const files = fs.readdirSync(projectDir).filter((f) => f.endsWith('.jsonl'));
+            const files = fs.readdirSync(projectDir).filter((f) => f.endsWith(suffix));
             dirContents =
               files.length > 0
                 ? `Dir has ${files.length} JSONL file(s): ${files.slice(0, 3).join(', ')}${files.length > 3 ? '...' : ''}`
@@ -241,26 +311,21 @@ export async function launchNewTerminal(
         // Possible /resume: terminal started a different session than expected.
         // Check every tick for a file modified after the agent was created.
         try {
-          const trackedFiles = new Set([...agents.values()].map((a) => path.resolve(a.jsonlFile)));
-          const candidates = fs
-            .readdirSync(projectDir)
-            .filter((f) => f.endsWith('.jsonl'))
-            .map((f) => {
-              const full = path.join(projectDir, f);
-              return { file: full, mtime: fs.statSync(full).mtimeMs };
-            })
-            .filter((c) => !trackedFiles.has(path.resolve(c.file)) && c.mtime > createdAt)
-            .sort((a, b) => b.mtime - a.mtime); // newest first
-
-          if (candidates.length > 0) {
+          const resumed = resumedTranscript(
+            agents,
+            projectDir,
+            createdAt,
+            claudeProvider.sessionFilePattern,
+          );
+          if (resumed) {
             console.log(
-              `[Pixel Agents] Terminal: Agent ${id} - /resume detected, reassigning to ${path.basename(candidates[0].file)}`,
+              `[Pixel Agents] Terminal: Agent ${id} - /resume detected, reassigning to ${path.basename(resumed)}`,
             );
             clearInterval(pollTimer);
             jsonlPollTimers.delete(id);
             reassignAgentToFile(
               id,
-              candidates[0].file,
+              resumed,
               agents,
               fileWatchers,
               pollingTimers,
@@ -278,6 +343,7 @@ export async function launchNewTerminal(
     }
   }, JSONL_POLL_INTERVAL_MS);
   jsonlPollTimers.set(id, pollTimer);
+  return id;
 }
 
 export function removeAgent(
@@ -362,6 +428,9 @@ export function restoreAgents(
   // webviewReady) must not be culled by this restore-time grace period, since
   // their JSONL may still be on its way (heuristic /resume path waits ~11s).
   const justRestoredTerminalIds: number[] = [];
+  // The Worktrees of saved terminal agents whose terminal is gone: the leave
+  // rules apply to them once the store holds everyone who did come back.
+  const leftAgents: WorktreeOccupant[] = [];
 
   for (const p of persisted) {
     // Skip agents already in the map — prevents duplicate file watchers on re-entry
@@ -386,7 +455,11 @@ export function restoreAgents(
     } else {
       // Terminal agents — find matching terminal by name
       terminal = liveTerminals.find((t) => t.name === p.terminalName);
-      if (!terminal) continue;
+      if (!terminal) {
+        // Its terminal closed while no window watched it: the agent left.
+        leftAgents.push(savedOccupant(p));
+        continue;
+      }
     }
 
     const agent = createAgentState({
@@ -488,6 +561,8 @@ export function restoreAgents(
             permissionTimers,
             jsonlPollTimers,
           );
+          // Claude is no longer running there: the agent has left its Worktree.
+          void retireWorktreesLeftBy(store, agent);
         }
       }
     }, 10_000); // 10 seconds grace period
@@ -503,6 +578,7 @@ export function restoreAgents(
 
   // Re-persist cleaned-up list (removes entries whose terminals are gone)
   store.persist();
+  for (const left of leftAgents) void retireWorktreesLeftBy(store, left);
 
   // Start project scan for /clear detection
   if (restoredProjectDir) {
@@ -559,6 +635,8 @@ export function sendExistingAgents(
     directoryNames,
     externalAgents,
     roles: existingAgentRoles(agents),
+    worktrees: existingAgentWorktrees(agents),
+    nicknames: existingAgentNicknames(agents),
   });
   // Note: sendCurrentAgentStatuses is called separately AFTER layoutLoaded
   // so that agentStatus/agentToolStart messages arrive after characters are created.
@@ -570,6 +648,7 @@ export function sendCurrentAgentStatuses(
 ): void {
   if (!webview) return;
   resendAgentActivity((msg) => webview.postMessage(msg), agents);
+  for (const msg of visitSnapshot(agents)) void webview.postMessage(msg);
 }
 
 export function sendLayout(

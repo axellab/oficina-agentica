@@ -19,12 +19,18 @@ import {
   loadExternalCharacters,
 } from './assetReload.js';
 import { getCharacterProfiles, watchCharacterProfiles } from './characterProfilesPersistence.js';
-import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.js';
+import {
+  type AssetCache,
+  type ReloadAssetsSideEffect,
+  sharedCharacterRefsMessages,
+} from './clientMessageHandler.js';
+import { cliSignIns } from './cliSignIn.js';
 import {
   getHooksConsent,
   getHooksEnabled,
   grantHooksConsent,
   readConfig,
+  writeConfig,
 } from './configPersistence.js';
 import {
   MAX_PORT,
@@ -32,8 +38,20 @@ import {
   PTY_HOST_SCRIPT,
   TERMINAL_DISABLED_BY_FLAG_REASON,
   WILDCARD_HOSTNAMES,
+  WORKTREE_SHUTDOWN_WAIT_MS,
+  WORKTREE_SWEEP_DELAY_MS,
 } from './constants.js';
+import {
+  listDirectoryLocations,
+  shownHostDirectories,
+  userDirectoryDefaults,
+} from './directories.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
+import { hostDirectory } from './hostDirectory.js';
+import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
+import { composeOfficeMcp, type OfficeMcpFeature } from './mcp/composeOfficeMcp.js';
+import { screenTokenGuard } from './mcp/messaging.js';
+import type { OfficePlaceFacts } from './officeFacts.js';
 import {
   claudeProvider,
   copyHookScript,
@@ -41,6 +59,8 @@ import {
   hookProviders,
 } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
+import { ptyAgentTerminals } from './terminal/agentTerminals.js';
+import { StandalonePcShells } from './terminal/pcShells.js';
 import {
   defaultPtyHostSocket,
   ptyHostLogFile,
@@ -49,7 +69,13 @@ import {
 import { PtySessionManager } from './terminal/ptySessionManager.js';
 import { RemotePtySessions, startPtyHostProcess } from './terminal/remotePtySessions.js';
 import { reattachTerminalAgents } from './terminal/standaloneAgentLauncher.js';
+import { closeStandaloneAgent } from './terminal/standaloneClose.js';
+import { launchForOffice } from './terminal/standaloneLaunches.js';
+import { standaloneTutorialSurface } from './terminal/standaloneTutorial.js';
 import type { TerminalSessions } from './terminal/terminalSessions.js';
+import { setTrustDirectories } from './terminal/trustPrompt.js';
+import { setAttributionDirectories } from './worktreeAttribution.js';
+import { holdWorktreesOf, stopRetiring, sweepWorktrees } from './worktreeLeave.js';
 import { isLoopbackHost, normalizeHostname } from './wsAuth.js';
 
 // ── Argument parsing ──────────────────────────────────────────
@@ -73,6 +99,9 @@ export interface CliArgs {
   ptyHost: boolean;
   /** --pty-host-socket: where that process listens (default under ~/.pixel-agents). */
   ptyHostSocket?: string;
+  /** --trust-directories: answer the CLI's "do you trust this folder?" question
+   *  for every agent the office launches (terminal/trustPrompt.ts). */
+  trustDirectories: boolean;
 }
 
 /** Thrown by parseArgs on an invalid --port. Kept separate from process.exit so
@@ -87,6 +116,7 @@ export function parseArgs(argv: string[]): CliArgs {
     allowedHosts: [],
     rotateToken: false,
     ptyHost: false,
+    trustDirectories: false,
   };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port' || argv[i] === '-p') {
@@ -123,6 +153,8 @@ export function parseArgs(argv: string[]): CliArgs {
       args.rotateToken = true;
     } else if (argv[i] === '--no-terminal') {
       args.terminal = false;
+    } else if (argv[i] === '--trust-directories') {
+      args.trustDirectories = true;
     } else if (argv[i] === '--pty-host') {
       args.ptyHost = true;
     } else if (argv[i] === '--pty-host-socket') {
@@ -144,6 +176,10 @@ Options:
                         old one (bookmarks, other devices) stops working
   --no-terminal         Disable the embedded terminal (watch agents only; no
                         launching or attaching from the browser)
+  --trust-directories   Say yes to Claude Code's "do you trust this folder?"
+                        question for every agent launched from the office.
+                        Only for a machine whose folders are all your own
+                        (e.g. a remote server): the question is a safeguard
   --pty-host            Development only: run agents' terminals in a separate
                         process that outlives the server, so restarting it
                         (e.g. to update it) leaves agents running
@@ -302,17 +338,24 @@ async function main(): Promise<void> {
   const store = new AgentStateStore();
   const adapter = new FileStateAdapter({ namespace: 'standalone' });
   store.setAdapter(adapter);
+  // This process holds the Worktrees its agents run in (before the reattach
+  // below adds any), so another Pixel Agents process never retires them.
+  holdWorktreesOf(store);
 
   // characters.json is shared with the VS Code surface (and hand-editable): follow it.
-  const characterProfilesWatcher = watchCharacterProfiles(
-    (message) => store.broadcast(message),
-    store,
-  );
+  // The office's Pixel Office MCP, once composed below.
+  let officeMcpFeature: OfficeMcpFeature | undefined;
+  const characterProfilesWatcher = watchCharacterProfiles((message) => {
+    store.broadcast(message);
+    // The roster changed on disk: an agent's Character edit may no longer be undoable.
+    officeMcpFeature?.charactersChanged();
+  }, store);
 
   // ── Create server ──
   const server = new PixelAgentsServer();
 
   // Terminals for agents this server launches.
+  setTrustDirectories(args.trustDirectories);
   const ptyManager = await openTerminalSessions(args, distRoot).catch((err: unknown) => {
     console.error(`[Pixel Agents] --pty-host: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
@@ -414,6 +457,90 @@ async function main(): Promise<void> {
       console.log('[Pixel Agents] Assets reloaded (external directory change)');
     };
 
+    // The Pixel Office MCP: served at /mcp, its tools acting on this office;
+    // agents launched (or resumed) here get it once the user consents.
+    // The office's layout and places, read alike by the MCP and the PC shells.
+    const places: OfficePlaceFacts = {
+      layout: () => readLayoutFromFile() ?? assetCache.defaultLayout,
+      catalog: () => assetCache.furniture?.catalog ?? [],
+      directories: () => listDirectoryLocations([hostDirectory()]),
+      readAreaMappings: () => readConfig().standalone.areaMappings,
+    };
+    // PC shells: a PC's plain login shell, on the agents' terminal sessions
+    // (never an agent: agents reach them only through the MCP's shell tools).
+    const pcShells = new StandalonePcShells({
+      ptyManager,
+      saves: adapter,
+      facts: places,
+      // The Directories every office is shown: a hidden host one isn't offered.
+      directories: () => listDirectoryLocations(shownHostDirectories(adapter, [hostDirectory()])),
+      broadcast: (message) => store.broadcast({ ...message }),
+      providers: hookProviders,
+    });
+    const terminals = ptyAgentTerminals(ptyManager);
+    const officeMcp = composeOfficeMcp({
+      facts: {
+        ...places,
+        store,
+        provider: claudeProvider,
+        writeLayout: writeLayoutToFile,
+        assets: () => ({
+          floorPatterns: assetCache.floorTiles?.length ?? 0,
+          wallSets: assetCache.wallTiles?.length ?? 0,
+          carpets: assetCache.carpetTiles?.length ?? 0,
+          pets: assetCache.pets?.manifests ?? [],
+        }),
+        userDirectories: userDirectoryDefaults,
+        seats: () => adapter.loadSeats(),
+        writeAreaMappings: (mappings) => {
+          const cfg = readConfig();
+          cfg.standalone.areaMappings = mappings;
+          writeConfig(cfg);
+        },
+        characterRefsChanged: () => {
+          for (const m of sharedCharacterRefsMessages({ store, ptyManager })) store.broadcast(m);
+        },
+      },
+      terminals,
+      deliveryGuard: screenTokenGuard(terminals),
+      // launch_agent: the drawer's launch, as this host runs it.
+      launch: (request, mcp) =>
+        launchForOffice(
+          {
+            store,
+            runtime,
+            ptyManager,
+            provider: claudeProvider,
+            mcp,
+            hostDirectories: [hostDirectory()],
+          },
+          request,
+        ),
+      // close_agent: the card's ×, as this host ends an agent.
+      close: (id) => closeStandaloneAgent(ptyManager, runtime, id),
+      // The PC shell tools: this host's shells, read and written through their registry.
+      pcShells,
+      // The tutorial: the Guide launched into the start Directory, ended as its card's ×.
+      tutorial: standaloneTutorialSurface(
+        {
+          store,
+          runtime,
+          ptyManager,
+          provider: claudeProvider,
+          hostDirectories: [hostDirectory()],
+        },
+        (id) => closeStandaloneAgent(ptyManager, runtime, id),
+      ),
+    });
+    officeMcpFeature = officeMcp;
+
+    // Shells whose terminals outlived the last server (--pty-host): back
+    // before any browser connects; the saved ones with no terminal are dropped.
+    const reattachedShells = pcShells.restore();
+    if (reattachedShells.length > 0) {
+      console.log(`[Pixel Agents] Reattached ${reattachedShells.length} running PC shell(s)`);
+    }
+
     const config = await server.start({
       store,
       runtime,
@@ -425,9 +552,12 @@ async function main(): Promise<void> {
       onSetHooksEnabled,
       onReloadAssets,
       ptyManager,
+      pcShells,
+      pcShellControl: pcShells,
       packageRoot,
       allowedHosts: args.allowedHosts,
       rotateToken: args.rotateToken,
+      officeMcp,
     });
     currentConfig = { port: config.port, token: config.token };
     if (args.rotateToken) {
@@ -484,6 +614,10 @@ async function main(): Promise<void> {
       );
     }
 
+    // Sessions in a Directory's worktrees (ours or Claude's own) belong to
+    // that Directory: every Directory, the start directory included.
+    setAttributionDirectories(() => listDirectoryLocations([hostDirectory()]));
+
     // Start scanning for external sessions (Claude running in user's terminal)
     const cwd = process.cwd();
     const dirs = claudeProvider.getSessionDirs?.(cwd);
@@ -494,6 +628,18 @@ async function main(): Promise<void> {
       runtime.startExternalScanning(projectDir);
       runtime.startStaleCheck();
     }
+
+    // The startup tidy-up of the Worktrees a crash or a closed window left
+    // behind. After the reattach above (a Worktree whose agent outlived the
+    // last server is locked, never retired), and a moment after the server
+    // is up, so the first office's handshake never waits on git.
+    // Saved external agents hold their Worktrees (restored when an office
+    // connects); saved terminal agents were reattached before this, or died
+    // with the last server.
+    setTimeout(
+      () => void sweepWorktrees(store, { savedAgentsHold: (saved) => saved.isExternal === true }),
+      WORKTREE_SWEEP_DELAY_MS,
+    ).unref();
 
     // The URL the operator opens has to be REACHABLE (a wildcard bind address
     // is a bind target, not an address you can browse to — `--host 0.0.0.0`
@@ -514,12 +660,18 @@ async function main(): Promise<void> {
       if (shuttingDown) return;
       shuttingDown = true;
       console.log('\nShutting down...');
+      // No Worktree is retired while the server ends its own agents (the next
+      // sweep does it unhurried); git work already under way finishes first.
+      await stopRetiring(WORKTREE_SHUTDOWN_WAIT_MS);
       // In process: kill child terminals and wait for them (each exit closes
-      // its agent): exiting now would cancel the SIGKILL escalation and leave
+      // its agent or PC shell, so no saved shell outlives them): exiting now would cancel the SIGKILL escalation and leave
       // a child that ignores SIGHUP orphaned on a dead server. With the PTY
       // host: just disconnect; the agents keep running.
       await ptyManager.shutdown();
       characterProfilesWatcher.dispose();
+      cliSignIns.dispose();
+      // Every agent's token dies with this server (and its config files go).
+      officeMcp.dispose();
       // With the PTY host, stop, not dispose: the saved list keeps whoever is
       // still running, for the next server to reattach. In process, dispose:
       // every terminal is gone, and the next server starts with no agents.

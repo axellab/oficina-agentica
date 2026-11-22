@@ -1,9 +1,14 @@
 import type { StateAdapter } from '../../core/src/adapter.js';
+import type { Directory } from '../../core/src/messages.js';
 import { rosterPick } from '../../core/src/paletteUtils.js';
 import type { HookProvider } from '../../core/src/provider.js';
 import { resendAgentActivity } from './agentActivityResend.js';
 import { buildAgentDiagnostics } from './agentDiagnostics.js';
-import { existingAgentRoles } from './agentMessages.js';
+import {
+  existingAgentNicknames,
+  existingAgentRoles,
+  existingAgentWorktrees,
+} from './agentMessages.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
@@ -13,6 +18,7 @@ import {
   handleCharacterProfilesClientMessage,
   refusedSaveAnswer,
 } from './characterProfilesPersistence.js';
+import { cliSignIns } from './cliSignIn.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -27,27 +33,49 @@ import {
   listConversations,
   liveSessions,
   recordConversationLooks,
-  resumeRequest,
   searchConversations,
 } from './conversations.js';
 import {
+  directoryAt,
   handleDirectoryClientMessage,
   type HostDirectoryEntry,
+  KEY_SHOW_HOST_DIRECTORIES,
   listDirectories,
+  shownHostDirectories,
 } from './directories.js';
 import { collectDirectorySuggestions } from './directorySuggestions.js';
 import { hostDirectory } from './hostDirectory.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
+import type { OfficeMcpFeature } from './mcp/composeOfficeMcp.js';
 import { getPaletteCount } from './paletteAssigner.js';
+import { handlePcShellMessage, type PcShellRegistry, type PcShellView } from './pcShells.js';
 import type { ConsentEffects } from './providers/hook/consentExecutor.js';
 import { applyConsentChoice } from './providers/hook/consentExecutor.js';
-import { hooksConsentRequest } from './providers/hook/consentGate.js';
+import { hooksConsentRequest, replayedConsentRequest } from './providers/hook/consentGate.js';
 import { claudeProvider, hookProviderById, hookProviders } from './providers/index.js';
-import { recentCharactersMessage, recordCharacterUse } from './recentCharacters.js';
+import { recentCharactersMessage } from './recentCharacters.js';
 import { rolesLoadedMessage } from './roles/roleCatalog.js';
-import { launchStandaloneAgent } from './terminal/standaloneAgentLauncher.js';
+import { parseUploadDirectory, resolveUploadDirectory } from './terminal/fileUploads.js';
+import { closeStandaloneAgent } from './terminal/standaloneClose.js';
+import {
+  KEY_BYPASS_PERMISSIONS,
+  launchIntoDirectory,
+  type LaunchOutcome,
+  resumeInDirectory,
+  type StandaloneLaunchDeps,
+} from './terminal/standaloneLaunches.js';
 import type { TerminalSessions } from './terminal/terminalSessions.js';
 import { applyUsageBridgeChoice, usageSnapshotMessages } from './usageLimits.js';
+import { visitSnapshot } from './visits.js';
+import { worktreeRejectedMessage } from './worktreeLaunch.js';
+import {
+  handleCloseAgent,
+  handleDecideWorktree,
+  handleRequestWorktrees,
+  worktreesSnapshot,
+} from './worktreeLeave.js';
+import { handleRequestWorktreeOptions, launchWorktreeChoices } from './worktreeOptions.js';
+import { worktreeLocations } from './worktreeResume.js';
 
 type WsSend = (message: Record<string, unknown>) => void;
 
@@ -98,6 +126,20 @@ export interface ClientMessageContext {
   /** PTY terminals for standalone-launched agents. Absent in VS Code embedded
    *  mode, where the editor owns terminal lifecycle. */
   ptyManager?: TerminalSessions;
+  /** The surface's PC shells as every office sees them: the list in each
+   *  connect's snapshot, and their ids in the card order. Both surfaces. */
+  pcShells?: PcShellView;
+  /** The PC shells opened and closed over /ws, by privileged offices only (the
+   *  gate above every message). Standalone only: VS Code's are opened by its
+   *  own webview, never by its embedded server's /ws clients. */
+  pcShellControl?: PcShellRegistry;
+  /** The Pixel Office MCP, on a server that offers it: launches and resumes
+   *  get its per-agent config; its consent and settings messages, the editing
+   *  lock and the editor's "Undo <agent>'s edit" are answered. Absent = no MCP,
+   *  those messages ignored. */
+  officeMcp?: OfficeMcpFeature;
+  /** This connection, as the editing lock keys its report (dropped when it closes). */
+  client?: object;
 }
 
 // ── Setting key constants (mirror adapters/vscode/constants.ts) ──
@@ -106,10 +148,8 @@ const KEY_LAST_SEEN_VERSION = 'pixel-agents.lastSeenVersion';
 const KEY_ALWAYS_SHOW_LABELS = 'pixel-agents.alwaysShowLabels';
 const KEY_GHOST_HEADLESS_AGENTS = 'pixel-agents.ghostHeadlessAgents';
 const KEY_WATCH_ALL_SESSIONS = 'pixel-agents.watchAllSessions';
-const KEY_HOOKS_INFO_SHOWN = 'pixel-agents.hooksInfoShown';
 const KEY_SHOW_AREAS = 'pixel-agents.showAreas';
-const KEY_BYPASS_PERMISSIONS = 'pixel-agents.bypassPermissions';
-const KEY_SHOW_HOST_DIRECTORIES = 'pixel-agents.showHostDirectories';
+const KEY_UPLOAD_DIRECTORY = 'pixel-agents.uploadDirectory';
 
 /** The provider whose conversations the sidebar lists and resumes: the first
  *  that names them and can launch (HookProvider.conversationTitle). */
@@ -123,7 +163,7 @@ const conversationProvider = hookProviders.find(
  * ptyManager means VS Code embedded mode, whose adapter contributes its
  * workspace folders instead and must not have this server's cwd added to them.
  */
-function hostDirectoriesFor(ctx: ClientMessageContext): HostDirectoryEntry[] {
+function hostDirectoriesFor(ctx: Pick<ClientMessageContext, 'ptyManager'>): HostDirectoryEntry[] {
   return ctx.ptyManager ? [hostDirectory()] : [];
 }
 
@@ -134,18 +174,66 @@ function hostDirectoriesFor(ctx: ClientMessageContext): HostDirectoryEntry[] {
  * in the start directory keeps its name (and its Area mapping) either way, and
  * a hidden start directory becomes something the suggestions can offer.
  */
-function shownHostDirectoriesFor(ctx: ClientMessageContext): HostDirectoryEntry[] {
-  return ctx.store.getAdapter()?.getSetting(KEY_SHOW_HOST_DIRECTORIES, false)
-    ? hostDirectoriesFor(ctx)
-    : [];
+function shownHostDirectoriesFor(
+  ctx: Pick<ClientMessageContext, 'store' | 'ptyManager'>,
+): HostDirectoryEntry[] {
+  return shownHostDirectories(ctx.store.getAdapter(), hostDirectoriesFor(ctx));
+}
+
+/**
+ * The Directory a launch request names: the one at its `directoryPath` (no
+ * path = the server cwd, the host entry), or none when the path is no
+ * Directory. Matched against every host Directory, shown or not, so a hidden
+ * start directory still names its agents. The launcher gets it explicitly,
+ * beside the folder to run in, and never re-derives it from that folder.
+ */
+function launchDirectoryFor(
+  ctx: ClientMessageContext,
+  directoryPath: string | undefined,
+): Directory | undefined {
+  return directoryAt(directoryPath ?? process.cwd(), hostDirectoriesFor(ctx));
+}
+
+/** A launch or resume the office is told it couldn't make (`worktreeRejected`). */
+function answerRejected(outcome: LaunchOutcome, send: WsSend): void {
+  if (!outcome.ok && outcome.rejectedAt !== undefined) {
+    send({ ...worktreeRejectedMessage(outcome.rejectedAt, outcome.reason) });
+  }
+}
+
+/** What this client's launches and resumes run with. */
+function launchDepsFor(
+  ctx: ClientMessageContext,
+  runtime: AgentRuntime,
+  ptyManager: TerminalSessions,
+): StandaloneLaunchDeps {
+  return {
+    store: ctx.store,
+    runtime,
+    ptyManager,
+    provider: claudeProvider,
+    mcp: ctx.officeMcp,
+    hostDirectories: hostDirectoriesFor(ctx),
+  };
 }
 
 /** The drawer's Directories as this client is sent them (shown host entries + the user's). */
-function directoriesMessage(ctx: ClientMessageContext) {
+function directoriesMessage(ctx: Pick<ClientMessageContext, 'store' | 'ptyManager'>) {
   return {
     type: 'directoriesLoaded',
     directories: listDirectories(shownHostDirectoriesFor(ctx)),
   } as const;
+}
+
+/**
+ * What standalone re-sends to every office when what names characters by index
+ * moved (the Directories' default characters, the roster's recency): after a
+ * Characters-view save or an agent's Character edit.
+ */
+export function sharedCharacterRefsMessages(
+  ctx: Pick<ClientMessageContext, 'store' | 'ptyManager'>,
+) {
+  return [directoriesMessage(ctx), recentCharactersMessage()] as const;
 }
 
 /**
@@ -179,41 +267,39 @@ export function handleClientMessage(
     case 'launchAgent': {
       // Standalone can launch: the agent runs in a server-side PTY streamed to
       // the browser drawer (a shell running as the operator -- privileged, like
-      // every message past the read-only gate above).
+      // every message past the read-only gate above). Permission posture is a
+      // persisted per-host setting, never a per-launch field: the client sends
+      // only where to launch (no directoryPath = the server cwd).
       if (!runtime || !ctx.ptyManager) break;
-      // Permission posture is a persisted per-host setting, never a per-launch
-      // field: the client sends only where to launch. Every launch comes from a
-      // drawer row and carries its Directory's path; no directoryPath falls
-      // back to the server cwd (launchStandaloneAgent's own default).
-      const picked = rosterPick(msg.palette, getPaletteCount());
-      const launched = launchStandaloneAgent(
-        { store, runtime, ptyManager: ctx.ptyManager, provider: claudeProvider },
-        {
-          directoryPath: msg.directoryPath as string | undefined,
-          bypassPermissions: adapter?.getSetting(KEY_BYPASS_PERMISSIONS, false) ?? false,
-          palette: picked,
-          roleId: msg.roleId,
-        },
-      );
-      // A roster pick moves to the front of every office's roster, once an
-      // agent wears it: a launch that failed (no PTY, no command) records nothing.
-      if (launched === null) break;
-      const recent = recordCharacterUse(picked);
-      if (recent) store.broadcast(recent);
+      void launchIntoDirectory(launchDepsFor(ctx, runtime, ctx.ptyManager), {
+        directoryPath: msg.directoryPath as string | undefined,
+        palette: rosterPick(msg.palette, getPaletteCount()),
+        worktree: msg.worktree === true ? launchWorktreeChoices(msg) : undefined,
+        roleId: msg.roleId,
+      })
+        .then((outcome) => answerRejected(outcome, send))
+        .catch((err: unknown) => console.error('[Pixel Agents] Launch failed:', err));
       break;
     }
 
     case 'requestConversations': {
       if (!ctx.ptyManager || !conversationProvider) break;
-      send({
-        type: 'conversationsLoaded',
-        directories: listConversations(
-          listDirectories(shownHostDirectoriesFor(ctx)),
-          conversationProvider,
-          liveSessions(store),
-          conversationLimitsFrom(msg.limits),
-        ),
-      });
+      // Each Directory's Worktrees too (Claude Code's are found through git).
+      const directories = listDirectories(shownHostDirectoriesFor(ctx));
+      void worktreeLocations(directories)
+        .then((worktreesOf) =>
+          send({
+            type: 'conversationsLoaded',
+            directories: listConversations(
+              directories,
+              conversationProvider,
+              liveSessions(store),
+              worktreesOf,
+              conversationLimitsFrom(msg.limits),
+            ),
+          }),
+        )
+        .catch((err: unknown) => console.error('[Pixel Agents] Conversations: failed:', err));
       break;
     }
 
@@ -221,60 +307,72 @@ export function handleClientMessage(
       if (!ctx.ptyManager || !conversationProvider) break;
       const query = conversationQueryFrom(msg);
       if (!query) break;
-      send({
-        type: 'conversationSearchResults',
-        ...query,
-        ...searchConversations(
-          listDirectories(shownHostDirectoriesFor(ctx)),
-          conversationProvider,
-          liveSessions(store),
-          query,
-        ),
-      });
+      const directories = listDirectories(shownHostDirectoriesFor(ctx));
+      void worktreeLocations(directories)
+        .then((worktreesOf) =>
+          send({
+            type: 'conversationSearchResults',
+            ...query,
+            ...searchConversations(
+              directories,
+              conversationProvider,
+              liveSessions(store),
+              worktreesOf,
+              query,
+            ),
+          }),
+        )
+        .catch((err: unknown) => console.error('[Pixel Agents] Conversation search: failed:', err));
       break;
     }
 
     case 'resumeConversation': {
       if (!runtime || !ctx.ptyManager || !conversationProvider) break;
-      const resume = resumeRequest(store, conversationProvider, msg);
-      if (!resume) break;
-      launchStandaloneAgent(
-        { store, runtime, ptyManager: ctx.ptyManager, provider: conversationProvider },
+      // The CLI whose conversation list it is resumes it.
+      void resumeInDirectory(
+        { ...launchDepsFor(ctx, runtime, ctx.ptyManager), provider: conversationProvider },
         {
-          directoryPath: resume.directoryPath,
-          bypassPermissions: adapter?.getSetting(KEY_BYPASS_PERMISSIONS, false) ?? false,
-          palette: resume.look?.palette,
-          resume: {
-            sessionId: resume.sessionId,
-            transcript: resume.transcript,
-            seatId: resume.look?.seatId,
-          },
-          // As the Role it was first launched as: its instructions belong to
-          // the process, not to the saved session.
-          roleId: resume.look?.roleId,
+          sessionId: msg.sessionId,
+          directoryPath: msg.directoryPath,
         },
-      );
+      )
+        .then((outcome) => answerRejected(outcome, send))
+        .catch((err: unknown) => console.error('[Pixel Agents] Resume failed:', err));
       break;
     }
 
     case 'closeAgent': {
-      // Two shapes now: a PTY-backed agent we launched (kill the process -- the
-      // counterpart of VS Code's terminalRef.dispose()), or an external agent we
-      // merely observed (dismiss the file so the scanner doesn't re-adopt it,
-      // then remove). removeAgent fires agentRemoved, which httpServer maps to
-      // an agentClosed broadcast.
-      const id = msg.id as number;
-      const agent = store.get(id);
-      if (agent && runtime) {
-        // dispose() is a no-op for agents with no terminal, so this is safe for
-        // both shapes. The PTY's onExit handler does the store cleanup for
-        // PTY-backed agents; do it here too so external agents (and a PTY that
-        // never exits) are still removed promptly.
-        ctx.ptyManager?.dispose(id);
-        runtime.closeAgent(id);
-      }
+      // A Worktree agent with uncommitted files is asked about first
+      // (handleCloseAgent), and closed by the answer's closeAgent.
+      if (!runtime) break;
+      void handleCloseAgent(store, msg, send, (id) =>
+        closeStandaloneAgent(ctx.ptyManager, runtime, id),
+      ).catch((err: unknown) => console.error('[Pixel Agents] Close failed:', err));
       break;
     }
+
+    case 'openPcShell':
+    case 'closePcShell':
+      // A PC's shell: privileged (past the gate above), and only where this
+      // office opens them over /ws (the registry refuses without terminals).
+      if (ctx.pcShellControl) handlePcShellMessage(ctx.pcShellControl, msg, (m) => send({ ...m }));
+      break;
+
+    case 'requestWorktrees':
+      void handleRequestWorktrees(store, msg, send);
+      break;
+
+    case 'requestWorktreeOptions':
+      void handleRequestWorktreeOptions(
+        msg.directoryPath,
+        launchDirectoryFor(ctx, msg.directoryPath as string | undefined),
+        send,
+      );
+      break;
+
+    case 'decideWorktree':
+      void handleDecideWorktree(store, msg, send);
+      break;
 
     case 'requestDiagnostics':
       // Point-to-point reply to the requesting socket (NOT a broadcast).
@@ -286,7 +384,24 @@ export function handleClientMessage(
         // A /ws client's save: the VS Code panel learns of it through its layout
         // watcher (the standalone server has none), so don't silence it.
         writeLayoutToFile(msg.layout as Record<string, unknown>, { reportToWatchers: true });
+        // An editor save over an agent's edit takes away what its undo would restore.
+        ctx.officeMcp?.layoutSaved();
       }
+      break;
+
+    case 'layoutEditing':
+    case 'undoAgentLayoutEdit':
+    case 'charactersEditing':
+    case 'undoAgentCharacterEdit':
+    case 'officeMcpConsentResponse':
+    case 'setOfficeMcpEnabled':
+    case 'setOfficeMcpReadOnly':
+    case 'startTutorial':
+    case 'skipTutorialQuest':
+    case 'quitTutorial':
+      // The Pixel Office MCP's consent, its switches, the editing lock and undo,
+      // and the tutorial that runs on it.
+      ctx.officeMcp?.handleMessage(msg, ctx.client, (m) => send({ ...m }));
       break;
 
     case 'saveCharacterProfiles':
@@ -297,10 +412,11 @@ export function handleClientMessage(
         reply: send,
         store,
         sharedRefsChanged: () => {
-          store.broadcast(directoriesMessage(ctx));
-          store.broadcast(recentCharactersMessage());
+          for (const m of sharedCharacterRefsMessages(ctx)) store.broadcast(m);
         },
       });
+      // A Save over an agent's Character edit takes away what its undo would restore.
+      ctx.officeMcp?.charactersChanged();
       break;
 
     case 'saveAgentSeats':
@@ -391,6 +507,22 @@ export function handleClientMessage(
       break;
     }
 
+    case 'requestCliSignInStatus':
+    case 'startCliSignIn':
+    case 'submitCliSignInCode':
+      // The Intro's sign-in step. Shared with the VS Code adapter; a sign-in
+      // belongs to the connection that started it.
+      cliSignIns.handle(msg, ctx.client ?? ctx, (m) => send({ ...m }));
+      break;
+
+    case 'replayIntro': {
+      // The Intro's asks again, to this office alone, in the handshake's order
+      // (the hooks asks, then the MCP's); the answers are the usual ones.
+      for (const provider of hookProviders) send({ ...replayedConsentRequest(provider) });
+      ctx.officeMcp?.replayAsk((m) => send({ ...m }));
+      break;
+    }
+
     case 'hooksConsentResponse': {
       // Fail-closed on the provider exactly like on the choice: an id naming
       // no registered provider writes nothing.
@@ -403,10 +535,6 @@ export function handleClientMessage(
       );
       break;
     }
-
-    case 'setHooksInfoShown':
-      adapter?.setSetting(KEY_HOOKS_INFO_SHOWN, true);
-      break;
 
     case 'addExternalAssetDirectory': {
       const newPath = msg.path as string | undefined;
@@ -433,7 +561,12 @@ export function handleClientMessage(
     }
 
     case 'saveCardOrder': {
-      const loaded = saveCardOrder(adapter, msg.order, (id) => store.has(id));
+      // Agents' cards and PC shells' cards share the one order.
+      const loaded = saveCardOrder(
+        adapter,
+        msg.order,
+        (id) => store.has(id) || ctx.pcShells?.has(id) === true,
+      );
       // Every open office follows the reorder, the sender's included.
       if (loaded) store.broadcast(loaded);
       break;
@@ -447,6 +580,8 @@ export function handleClientMessage(
       const cfg = readConfig();
       cfg.standalone.areaMappings = rawMappings as Record<string, string[]>;
       writeConfig(cfg);
+      // Mappings an agent's edit wrote, changed by hand: its undo no longer applies.
+      ctx.officeMcp?.layoutSaved();
       break;
     }
 
@@ -478,6 +613,15 @@ export function handleClientMessage(
       break;
     }
 
+    case 'setUploadDirectory': {
+      const stored = parseUploadDirectory(msg.path);
+      if (stored !== null && adapter) adapter.setSetting(KEY_UPLOAD_DIRECTORY, stored);
+      // The field shows the folder as it now stands: the new one resolved, the
+      // default after a reset, the old one when the path was refused.
+      send(settingsSnapshot(adapter));
+      break;
+    }
+
     case 'saveDirectory':
     case 'removeDirectory':
     case 'requestDirectorySuggestions':
@@ -492,6 +636,8 @@ export function handleClientMessage(
         suggestions: () =>
           collectDirectorySuggestions(claudeProvider, shownHostDirectoriesFor(ctx)),
       });
+      // A Directory's default characters an agent's Character edit wrote, changed by hand.
+      if (msg.type !== 'requestDirectorySuggestions') ctx.officeMcp?.charactersChanged();
       break;
 
     default:
@@ -663,13 +809,14 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   // provider checks are async, so these land as follow-ups right after the
   // synchronous handshake; the webview's default (not installed) is the safe
   // assumption until each arrives. One status + at most one ask PER PROVIDER.
+  const hookAsks: Array<Promise<void>> = [];
   for (const provider of hookProviders) {
     // One provider's unreadable settings file must degrade to
     // installed=false (matching the executor's fail-closed read: no choice
     // ever uninstalls on a guess) rather than surface as an unhandled
     // rejection that can take the process down — and must never block the
     // other providers' statuses.
-    void provider
+    const ask = provider
       .areHooksInstalled()
       .catch((err: unknown) => {
         console.error(`[Pixel Agents] hooks status check failed for provider ${provider.id}:`, err);
@@ -692,11 +839,32 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
         );
         if (request) send({ ...request }); // spread: WsSend takes an index-signature shape
       });
+    hookAsks.push(ask);
   }
 
-  // 4a-ter. Usage bars: the operator's account usage, privileged clients only.
+  // 4a-ter. The Pixel Office MCP: its settings, and its Intro step while
+  // unanswered — privileged clients only, and the ask strictly AFTER the hooks
+  // asks, so an office asked both opens the full tour with this step after
+  // the hooks one (an office asked only this shows the step alone).
+  // What the editor's "Undo <agent>'s edit" would revert comes with it.
+  if (ctx.privileged) {
+    ctx.officeMcp?.handshake((m) => send({ ...m }), Promise.allSettled(hookAsks));
+  }
+
+  // 4a-quater. Usage bars: the operator's account usage, privileged clients only.
   if (ctx.privileged) {
     for (const message of usageSnapshotMessages()) send({ ...message });
+  }
+
+  // 4a-quinquies. The Worktrees we made, privileged clients only: one waiting on
+  // a decision opens its dialog in this office too. Async (git reads); lands
+  // as a follow-up to the handshake.
+  if (ctx.privileged) {
+    void worktreesSnapshot(store)
+      .then((messages) => {
+        for (const message of messages) send({ ...message });
+      })
+      .catch((err: unknown) => console.error('[Pixel Agents] Worktrees: snapshot failed:', err));
   }
 
   // 4b. Directory→Area mappings (must arrive before existingAgents so the
@@ -763,7 +931,17 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     directoryNames,
     externalAgents,
     roles: existingAgentRoles(store),
+    worktrees: existingAgentWorktrees(store),
+    nicknames: existingAgentNicknames(store),
   });
+
+  // 6b. The live PC shells, privileged offices only: a view-only office sees
+  // the agents, never the operator's shells (no card, no Directory). Every
+  // office is told which pieces are in use: the PC lit, its label "Busy".
+  if (ctx.pcShells) {
+    if (ctx.privileged) send({ ...ctx.pcShells.message() });
+    send({ ...ctx.pcShells.inUseMessage() });
+  }
 
   // 7. Layout last (see step 3): flushes the webview's buffered existingAgents
   // into characters once seats are rebuilt.
@@ -774,6 +952,8 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   // exist once the layout flush creates them. Without this a reconnecting
   // client shows bare characters until each agent takes another turn.
   resendAgentActivity(send, store);
+  // 8b. Visits, after the activity a reconnect replays (visits.ts).
+  for (const message of visitSnapshot(store)) send({ ...message });
 
   // 9. Re-announce live terminals AFTER existingAgents, so a browser that
   // reloaded (or a second tab) rebuilds its drawer tabs. The PTY outlives the
@@ -807,12 +987,18 @@ function settingsSnapshot(adapter: StateAdapter | undefined) {
     // Settings UI grows a per-provider list -- its sole webview reader is the
     // hooks tooltip gate.
     hooksEnabled: getHooksEnabled(claudeProvider.id),
-    hooksInfoShown: adapter?.getSetting(KEY_HOOKS_INFO_SHOWN, false) ?? false,
     externalAssetDirectories: readConfig().externalAssetDirectories,
     showAreas: adapter?.getSetting(KEY_SHOW_AREAS, false) ?? false,
     bypassPermissions: adapter?.getSetting(KEY_BYPASS_PERMISSIONS, false) ?? false,
     showHostDirectories: adapter?.getSetting(KEY_SHOW_HOST_DIRECTORIES, false) ?? false,
+    uploadDirectory: uploadDirectoryOf(adapter),
   } as const;
+}
+
+/** Where files sent to a terminal are saved on this host, absolute: the
+ *  user's setting, else our own uploads folder (terminal/fileUploads.ts). */
+export function uploadDirectoryOf(adapter: StateAdapter | undefined): string {
+  return resolveUploadDirectory(adapter?.getSetting(KEY_UPLOAD_DIRECTORY, '') ?? '');
 }
 
 /** Message types already reported as refused, so a read-only client that keeps
@@ -853,6 +1039,7 @@ function refuseReadOnly(
     case 'setShowAreas':
     case 'setBypassPermissions':
     case 'setShowHostDirectories':
+    case 'setUploadDirectory':
       send(settingsSnapshot(ctx.store.getAdapter()));
       return;
     case 'addExternalAssetDirectory':

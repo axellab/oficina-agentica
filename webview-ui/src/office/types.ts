@@ -7,25 +7,20 @@ export {
   TILE_SIZE,
 } from '../constants.js';
 
-export const TileType = {
-  WALL: 0,
-  FLOOR_1: 1,
-  FLOOR_2: 2,
-  FLOOR_3: 3,
-  FLOOR_4: 4,
-  FLOOR_5: 5,
-  FLOOR_6: 6,
-  FLOOR_7: 7,
-  FLOOR_8: 8,
-  FLOOR_9: 9,
-  VOID: 255,
-} as const;
-export type TileType = (typeof TileType)[keyof typeof TileType];
-
-/** Re-export ColorValue for consumers that import color types from office/types */
-export type { ColorValue } from '../components/ui/types.js';
-import type { AgentRole } from '../../../core/src/messages.js';
-import type { ColorValue } from '../components/ui/types.js';
+// The layout model lives in core (the server reads and edits layouts too).
+export type {
+  AreaDefinition,
+  CarpetTile,
+  ColorValue,
+  OfficeLayout,
+  PlacedFurniture,
+  PlacedPet,
+  Seat,
+} from '../../../core/src/layout/types.js';
+export { Direction, TileType } from '../../../core/src/layout/types.js';
+import type { FurnitureInteractive } from '../../../core/src/furniture/interactive.js';
+import type { Direction } from '../../../core/src/layout/types.js';
+import type { AgentRole, AgentWorktree } from '../../../core/src/messages.js';
 
 export const CharacterState = {
   IDLE: 'idle',
@@ -34,28 +29,8 @@ export const CharacterState = {
 } as const;
 export type CharacterState = (typeof CharacterState)[keyof typeof CharacterState];
 
-export const Direction = {
-  DOWN: 0,
-  LEFT: 1,
-  RIGHT: 2,
-  UP: 3,
-} as const;
-export type Direction = (typeof Direction)[keyof typeof Direction];
-
 /** 2D array of hex color strings: '' = transparent, '#RRGGBB' = opaque, '#RRGGBBAA' = semi-transparent. [row][col] */
 export type SpriteData = string[][];
-
-export interface Seat {
-  /** Chair furniture uid */
-  uid: string;
-  /** Tile col where agent sits */
-  seatCol: number;
-  /** Tile row where agent sits */
-  seatRow: number;
-  /** Direction character faces when sitting (toward adjacent desk) */
-  facingDir: Direction;
-  assigned: boolean;
-}
 
 export interface FurnitureInstance {
   sprite: SpriteData;
@@ -67,6 +42,8 @@ export interface FurnitureInstance {
   zY: number;
   /** Render-time horizontal flip flag (for mirrored side variants) */
   mirrored?: boolean;
+  /** The placed item it draws (absent for walls). */
+  uid?: string;
 }
 
 export interface ToolActivity {
@@ -90,6 +67,12 @@ export const EditTool = {
   AREA_PAINT: 'area_paint',
   /** Colour-only eyedropper: takes a placed item's colour, leaves its type alone. */
   COLOR_PICK: 'color_pick',
+  /** Wall eyedropper: takes a wall's set and colour, then paints walls with them. */
+  WALL_PICK: 'wall_pick',
+  /** Floor panel's Select: picks touching floor tiles of one pattern and colour, restyled together. */
+  FLOOR_SECTION: 'floor_section',
+  /** Walls panel's Select: picks touching walls of one set and colour, restyled together. */
+  WALL_SECTION: 'wall_section',
 } as const;
 export type EditTool = (typeof EditTool)[keyof typeof EditTool];
 
@@ -111,61 +94,8 @@ export interface FurnitureCatalogEntry {
   canPlaceOnWalls?: boolean;
   /** Whether this is a side-oriented asset that produces a mirrored "left" variant */
   mirrorSide?: boolean;
-}
-
-export interface PlacedFurniture {
-  uid: string;
-  type: string; // asset ID from furniture manifest
-  col: number;
-  row: number;
-  /** Optional color override for furniture */
-  color?: ColorValue;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CARPETS — visual layer between floor and furniture. Walkable, decorative.
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface CarpetTile {
-  /** Variant index into the loaded carpet sprite sets (0 .. getCarpetSetCount()-1). */
-  variant: number;
-  /** Main colorization (lowest-luminance pixels). Defaults to CARPET_DEFAULT_COLOR when omitted. */
-  color?: ColorValue;
-  /** Accent colorization (highest-luminance pixels). Defaults to CARPET_DEFAULT_ACCENT_COLOR when omitted. */
-  accentColor?: ColorValue;
-  /** Stacking order at overlapping junctions. Higher draws on top. Defaults to 0. */
-  order?: number;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AREAS — translucent named overlays for Directory ↔ seat preference.
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface AreaDefinition {
-  /** Stable label used as the FK in `areaTiles` and `OfficeState.areaMappings`. */
-  label: string;
-  /** Hex color (e.g. "#ff6b6b"). RGB only — alpha applied at render time. */
-  color: string;
-}
-
-export interface OfficeLayout {
-  version: 1;
-  cols: number;
-  rows: number;
-  tiles: TileType[];
-  furniture: PlacedFurniture[];
-  /** Per-tile color settings, parallel to tiles array. null = wall/no color */
-  tileColors?: Array<ColorValue | null>;
-  /** Bumped when the bundled default layout changes; forces a reset on existing installs */
-  layoutRevision?: number;
-  /** Pets placed in the office. Optional for backward-compat; migrateLayout coerces to []. */
-  pets?: PlacedPet[];
-  /** Per-tile carpet data, parallel to tiles array. null/undefined = no carpet on tile. */
-  carpetTiles?: Array<CarpetTile | null>;
-  /** Area definitions referenced by `areaTiles` labels. Distinct labels required. */
-  areas?: AreaDefinition[];
-  /** Per-tile Area label, parallel to tiles array. null = no area assignment. */
-  areaTiles?: Array<string | null>;
+  /** How the furniture takes part in the office (core's furniture/interactive.ts); absent = plain furniture. */
+  interactive?: FurnitureInteractive;
 }
 
 /** A blink clock (office/engine/blink.ts drives it). */
@@ -174,6 +104,54 @@ export interface Blinker {
   blinkIn: number;
   /** Seconds the eyes stay shut (0 = open). */
   blinkShut: number;
+}
+
+/** One stop of a Visit: the tile, the way to face there, and how long to stand
+ *  there before moving on (VISIT_LINGER_MS when not given). */
+export interface VisitStop {
+  col: number;
+  row: number;
+  dir: Direction;
+  lingerSec?: number;
+  /** A Message show's stop: stand beside this agent's character — `col`/`row`/`dir`
+   *  are re-aimed (visitsController) while walking, as the recipient moves — at `at`. */
+  beside?: { agentId: number; at?: { col: number; row: number } };
+  /** What the character says while it stands there (a Message's gist). */
+  say?: string;
+  /** Working there (a Buildout's builder): typing, standing, while arrived. */
+  work?: boolean;
+}
+
+/** What a character does once its visit's last stop is over: wander as usual,
+ *  hold there (until the visit is ended), or go back to its seat. */
+export type VisitEnd = 'wander' | 'stay' | 'seat';
+
+/** A Visit under way (CONTEXT.md): the stops still ahead (the first is the
+ *  current one) and what happens after the last. */
+export interface CharacterVisit {
+  stops: VisitStop[];
+  then: VisitEnd;
+  /** Standing at the current stop, facing its way. */
+  arrived: boolean;
+  /** Seconds left at the current stop once arrived. */
+  lingerLeft: number;
+}
+
+/**
+ * Something a character is off doing instead of its agent's work: the
+ * server's Visit, or a local errand of this office's own (a Message show, a
+ * Buildout's work) pushed above it. A character keeps them as a stack — the
+ * top one moves it; finishing it uncovers the one below
+ * (engine/visitsController.ts implements them).
+ */
+export interface Errand {
+  /** The stops it walks. */
+  readonly visit: CharacterVisit;
+  /** One frame: null while under way, else what the character does when
+   *  nothing is left underneath (wander, or back to its seat). */
+  step(ch: Character, dt: number): Exclude<VisitEnd, 'stay'> | null;
+  /** The server's Visit ended: whether this errand ends with it. */
+  endsWithServerVisit(): boolean;
 }
 
 export interface Character extends Blinker {
@@ -196,7 +174,7 @@ export interface Character extends Blinker {
   /** Palette index (0-5) */
   palette: number;
   /** Which copy of its character this is (0 = the first, n = its nth repeat,
-   *  drawn in the nth repeat clothes colour; characters/repeatClothes.ts) */
+   *  drawn in the nth repeat clothes colour; core/src/characters/repeatClothes.ts) */
   repeat: number;
   /** Animation frame index */
   frame: number;
@@ -237,6 +215,12 @@ export interface Character extends Blinker {
   matrixEffectSeeds: number[];
   /** Directory name — the agent's origin label (only set for multi-root workspaces) */
   directoryName?: string;
+  /** The Worktree the agent runs in (its label and card show the branch);
+   *  teammates show their lead's. */
+  worktree?: AgentWorktree;
+  /** The Nickname it was launched with: shown after its Directory on its label
+   *  and card. Only a label (a Teammate's name is `agentName`). */
+  nickname?: string;
   /** Headless agent: adopted from outside the office, so there is no terminal to
    *  focus. Rendered translucent. Teammates and sub-agents are never headless —
    *  clicking them reaches their lead's / parent's terminal. */
@@ -272,6 +256,14 @@ export interface Character extends Blinker {
   /** True once the server reported the context: from then on 0 is a real
    *  reading (a cleared session, a full gauge), not "no turn yet". */
   contextReported?: boolean;
+
+  /** Its errands, the top one current (a server Visit at the bottom, a
+   *  Message show or Buildout work above): while any, the top one — not its
+   *  agent's work or the wander AI — moves it (engine/visitsController.ts). */
+  errands?: Errand[];
+  /** A Message's gist said where it stands (reduced motion, or no one to walk
+   *  to), and the seconds it still shows. */
+  saying?: { gist: string; left: number } | null;
 }
 
 export const PetState = { IDLE: 'idle', WALK: 'walk', FOLLOW: 'follow' } as const;
@@ -314,12 +306,4 @@ export interface Pet {
   bubbleType: 'heart' | null;
   /** Countdown timer for the heart bubble (mirrors character waiting bubble). */
   bubbleTimer: number;
-}
-
-/** Persisted record (lives on OfficeLayout). */
-export interface PlacedPet {
-  /** crypto.randomUUID() generated when first toggled on. */
-  id: string;
-  /** Index into the loaded pet sprite array. */
-  petType: number;
 }

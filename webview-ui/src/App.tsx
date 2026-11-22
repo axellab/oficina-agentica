@@ -1,33 +1,46 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { toMajorMinor } from './changelogData.js';
+import { castStore } from './characters/castStore.js';
 import { CharactersView } from './characters/ui/CharactersView.js';
 import { AgentCardBar } from './components/AgentCardBar.js';
+import { AgentEditUndoBar } from './components/AgentEditUndoBar.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
+import type { Card } from './components/cardBar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { ConnectionIndicator } from './components/ConnectionIndicator.js';
 import { DebugView } from './components/DebugView.js';
 import { DirectoryModal } from './components/DirectoryModal.js';
 import { EditActionBar } from './components/EditActionBar.js';
-import { IntroBubble } from './components/IntroBubble.js';
+import { IntroDialog } from './components/IntroDialog.js';
 import { LoadingScene } from './components/LoadingScene.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
+import { NewWorktreeModal } from './components/NewWorktreeModal.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { TerminalDrawer } from './components/TerminalDrawer.js';
 import { TerminalHideRibbon } from './components/TerminalHideRibbon.js';
-import { Tooltip } from './components/Tooltip.js';
-import { Modal } from './components/ui/Modal.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
+import {
+  CloseAgentQuestionDialog,
+  WorktreeDecisionDialog,
+} from './components/WorktreeDecisionDialog.js';
+import { WorktreeRejectedModal } from './components/WorktreeRejectedModal.js';
 import { MobileZoomLevel, ZoomControls } from './components/ZoomControls.js';
-import { CONVERSATION_SIDEBAR_WIDTH_PX, OFFICE_CANVAS_TEST_ID } from './constants.js';
+import {
+  CARD_BAR_TOP_PX,
+  CONVERSATION_SIDEBAR_WIDTH_PX,
+  OFFICE_CANVAS_TEST_ID,
+  TERMINAL_SIDEBAR_WIDTH_PX,
+} from './constants.js';
 import type { ConversationSearchScope } from './conversations/ConversationList.js';
 import { ConversationSearch } from './conversations/ConversationSearch.js';
 import { ConversationSidebar } from './conversations/ConversationSidebar.js';
 import { useConversationSidebar } from './conversations/useConversationSidebar.js';
+import type { WorktreesListing } from './conversations/WorktreeList.js';
 import { useDirectoryEditor } from './hooks/useDirectoryEditor.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
-import { useExtensionMessages } from './hooks/useExtensionMessages.js';
+import { type Directory, useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
 import { useIsMobile } from './hooks/useIsMobile.js';
 import { useKeyboardViewport } from './hooks/useKeyboardViewport.js';
@@ -39,6 +52,7 @@ import { MobileShell } from './mobile/MobileShell.js';
 import { useMobileMenu } from './mobile/useMobileMenu.js';
 import { useMobileShell } from './mobile/useMobileShell.js';
 import { MusicPlayer } from './music/MusicPlayer.js';
+import { FurnitureLabel } from './office/components/FurnitureLabel.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
@@ -50,11 +64,22 @@ import { migrateLayoutColors } from './office/layout/layoutSerializer.js';
 import { overlayProjection } from './office/projection.js';
 import { getPetCount } from './office/sprites/petSpriteData.js';
 import { EditTool, type OfficeLayout, TILE_SIZE } from './office/types.js';
+import { useAgentLayoutEdits } from './officeMcp/useAgentLayoutEdits.js';
+import { useOfficeMcp } from './officeMcp/useOfficeMcp.js';
+import { PcDirectorySelector } from './pcShells/PcDirectorySelector.js';
+import { PcShellCloseDialog } from './pcShells/PcShellCloseDialog.js';
+import { PcShellRejectedModal } from './pcShells/PcShellRejectedModal.js';
+import { closePcShell } from './pcShells/pcShellStore.js';
+import { usePcShellPanels } from './pcShells/usePcShellPanels.js';
 import { isBrowserRuntime, isE2E } from './runtime.js';
+import { useCliSignIn } from './signIn/useCliSignIn.js';
 import { installTestHooks } from './testHooks.js';
 import { transport } from './transport/index.js';
+import { TutorialPanel } from './tutorial/TutorialPanel.js';
+import { useTutorial } from './tutorial/useTutorial.js';
 import { UsageBars } from './usage/UsageBars.js';
 import { useUsageBridge } from './usage/useUsageBridge.js';
+import { useNewWorktree } from './worktrees/useNewWorktree.js';
 
 // Game state lives outside React — updated imperatively by message handlers
 const officeStateRef = { current: null as OfficeState | null };
@@ -67,7 +92,12 @@ if (isE2E) installTestHooks(officeStateRef);
 
 function getOfficeState(): OfficeState {
   if (!officeStateRef.current) {
-    officeStateRef.current = new OfficeState();
+    const os = new OfficeState();
+    // A Furniture label names the agent at a piece by its character's name too.
+    os.pieces.setCharacterName(
+      (palette) => castStore.getState().profiles[palette]?.name || undefined,
+    );
+    officeStateRef.current = os;
   }
   return officeStateRef.current;
 }
@@ -90,6 +120,8 @@ function App() {
     () => editor.isEditMode && editor.isDirty,
     [editor.isEditMode, editor.isDirty],
   );
+  // While the editor holds unsaved changes, agents' layout edits wait (the server's lock).
+  const agentLayoutEdits = useAgentLayoutEdits(editor.isEditMode && editor.isDirty);
 
   const {
     agents,
@@ -106,6 +138,13 @@ function App() {
     directoryRejection,
     directorySaved,
     directorySuggestions,
+    worktreeRejection,
+    dismissWorktreeRejection,
+    worktreesByDirectory,
+    worktreesCliName,
+    worktreeDecisionError,
+    agentCloseQuestion,
+    clearAgentCloseQuestion,
     agentDirectoryNames,
     externalAssetDirectories,
     lastSeenVersion,
@@ -115,10 +154,8 @@ function App() {
     alwaysShowLabels,
     ghostHeadlessAgents,
     setGhostHeadlessAgents,
-    hooksEnabled,
     hooksInstalled,
     hooksStatusSeq,
-    hooksInfoShown,
     consentRequest,
     dismissConsentRequest,
     areaMappings,
@@ -129,14 +166,23 @@ function App() {
     setBypassPermissions,
     showHostDirectories,
     setShowHostDirectories,
+    uploadDirectory,
     officeReadOnly,
     terminalAvailable,
     terminalUnavailableReason,
     terminalAgentIds,
-    cardAgents,
+    panes,
+    cards,
     saveCardOrder,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
   const usage = useUsageBridge();
+  // An account with no plan limits (an API account) has nothing for the bars
+  // to show: asked once, when the bars are on.
+  const usagePlan = useCliSignIn(usage.status?.installed ? usage.status.providerId : undefined);
+  const checkUsagePlan = usagePlan.check;
+  useEffect(() => {
+    checkUsagePlan();
+  }, [checkUsagePlan]);
 
   // Show migration notice once layout reset is detected
   const [migrationNoticeDismissed, setMigrationNoticeDismissed] = useState(false);
@@ -147,6 +193,14 @@ function App() {
   // The Layout editor's panel, kept on screen while it rolls shut.
   const editorPanel = usePresence(editor.isEditMode);
   const sidebar = useConversationSidebar(terminalAvailable, officeReadOnly);
+  const worktreesListing = useMemo<WorktreesListing>(
+    () => ({
+      byDirectory: worktreesByDirectory,
+      cliName: worktreesCliName,
+      error: worktreeDecisionError,
+    }),
+    [worktreesByDirectory, worktreesCliName, worktreeDecisionError],
+  );
   const { hasSidebar } = sidebar;
   // The phone menu (recent conversations + Settings).
   const menu = useMobileMenu();
@@ -156,8 +210,6 @@ function App() {
     setIsCharactersOpen(true);
   }, []);
   const closeCharacters = useCallback(() => setIsCharactersOpen(false), []);
-  const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
-  const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [alwaysShowOverlay, setAlwaysShowOverlay] = useState(false);
 
@@ -181,7 +233,7 @@ function App() {
   // active tab on both shells; the desktop-only bits (isOpen, width, resize)
   // are simply unread on mobile, where the sliding track plays the drawer.
   const terminalDrawer = useTerminalDrawer({
-    terminalAgentIds,
+    panes,
     getOfficeState,
     agentTools,
     agentStatuses,
@@ -189,12 +241,26 @@ function App() {
     besidePx: hasSidebar && sidebar.open ? CONVERSATION_SIDEBAR_WIDTH_PX : 0,
   });
 
-  const { launch: launchIntoDirectory, resume: resumeAndFocus } = useLaunchActions(
+  const { launch: launchAgent, resume: resumeAndFocus } = useLaunchActions(
     terminalDrawer.expectLaunch,
   );
+  // A drawer row's worktree button asks for the new Worktree's name and base
+  // first (NewWorktreeModal); every other launch goes straight out.
+  const newWorktree = useNewWorktree(launchAgent);
+  const { open: askNewWorktree } = newWorktree;
+  const launchIntoDirectory = useCallback(
+    (directory: Directory, palette?: number, worktree?: boolean, roleId?: string) => {
+      // The Role picked in the drawer rides through the modal to the launch.
+      if (worktree) askNewWorktree(directory, palette, roleId);
+      else launchAgent(directory, palette, undefined, roleId);
+    },
+    [askNewWorktree, launchAgent],
+  );
+  // Every pane's id: agents' terminals and PC shells'.
+  const paneIds = useMemo(() => panes.map((pane) => pane.id), [panes]);
   const mobileShell = useMobileShell({
     getOfficeState,
-    terminalAgentIds,
+    paneIds,
     drawer: terminalDrawer,
     focusedAgentId,
     launchAgent: launchIntoDirectory,
@@ -209,7 +275,7 @@ function App() {
   // app's main screen, so a reload that re-announces live sessions must land
   // on the office.
   const { lastLaunched } = terminalDrawer;
-  const { showTerminal: showMobileTerminal } = mobileShell;
+  const { showTerminal: showMobileTerminal, openAgent: openMobileAgent } = mobileShell;
   useEffect(() => {
     if (!lastLaunched) return;
     getOfficeState().selectAndFollow(lastLaunched.agentId);
@@ -223,6 +289,13 @@ function App() {
   const handleWhatsNewDismiss = useCallback(() => {
     transport.send({ type: 'setLastSeenVersion', version: currentMajorMinor });
   }, [currentMajorMinor]);
+
+  // A first run records the version it starts on, so only a later release is
+  // announced as an update (VersionIndicator shows nothing while none is seen).
+  useEffect(() => {
+    if (currentMajorMinor && lastSeenVersion === '' && !officeReadOnly)
+      transport.send({ type: 'setLastSeenVersion', version: currentMajorMinor });
+  }, [currentMajorMinor, lastSeenVersion, officeReadOnly]);
 
   const handleOpenChangelog = useCallback(() => {
     setIsChangelogOpen(true);
@@ -266,7 +339,7 @@ function App() {
 
   // The Intro's wire-facing state machine — which asks survive being mooted,
   // when a hooksStatus is this tour's install verdict — lives in useIntroTour
-  // (pure reducer in introTourState.ts); the App only wires it to the bubble.
+  // (pure reducer in introTourState.ts); the App only wires it to the dialog.
   const {
     intro,
     installFailed,
@@ -274,10 +347,78 @@ function App() {
     onChoice: handleConsentChoice,
     onClose: handleIntroClose,
   } = useIntroTour({ consentRequest, hooksInstalled, hooksStatusSeq, dismissConsentRequest });
+  // An office still on its Intro is new here whatever version it last opened
+  // on: nothing is announced to it as an update, and the version it meets the
+  // Intro on is recorded as seen, so the notice doesn't follow the Intro either.
+  const introUnfinished = intro !== null || consentRequest !== null;
+  useEffect(() => {
+    if (
+      introUnfinished &&
+      currentMajorMinor &&
+      lastSeenVersion !== '' &&
+      lastSeenVersion !== currentMajorMinor &&
+      !officeReadOnly
+    )
+      transport.send({ type: 'setLastSeenVersion', version: currentMajorMinor });
+  }, [introUnfinished, currentMajorMinor, lastSeenVersion, officeReadOnly]);
+  // The Intro's Pixel Office MCP step (after the hooks one, or alone for an
+  // office that finished the Intro before it existed) and its Settings rows.
+  const officeMcp = useOfficeMcp();
+  const dismissOfficeMcpAsk = officeMcp.dismiss;
+  // The tutorial: offered at the Intro's end (or alone, from Settings), its
+  // checklist while a run is under way.
+  const tutorial = useTutorial();
+  const [tutorialRequested, setTutorialRequested] = useState(false);
+  // What was on as the Intro's asks arrived (first run, Settings → Replay the
+  // Intro): the choices' boxes start there.
+  const [introReplay, setIntroReplay] = useState<{
+    usage: boolean;
+    hooks: boolean;
+    mcp: boolean;
+  } | null>(null);
+  const { expectLaunch } = terminalDrawer;
+  const { start: startTutorial } = tutorial;
+  const tutorialSteps = useMemo(
+    () => ({
+      status: tutorial.status,
+      rejected: tutorial.rejected,
+      onStart: (palette: number) => {
+        // The greeter walks to a desk and sits; then the Guide's session starts in
+        // that seat, and its terminal opens focused once it joins, like a + launch.
+        getOfficeState().handoff.begin((seatId) => {
+          expectLaunch();
+          startTutorial(palette, seatId);
+        });
+      },
+    }),
+    [tutorial.status, tutorial.rejected, expectLaunch, startTutorial],
+  );
+  // Every way the tour ends closes every ask it may hold.
+  const handleTourClose = useCallback(() => {
+    handleIntroClose();
+    dismissOfficeMcpAsk();
+    setTutorialRequested(false);
+    setIntroReplay(null);
+  }, [handleIntroClose, dismissOfficeMcpAsk]);
 
   // The Settings surface renders one provider today; its checkbox binds to
   // the Claude row of the per-provider install-state map.
   const claudeHooksInstalled = hooksInstalled['claude'] === true;
+  // Every Intro's choices start from what is on as it opens (first run: nothing;
+  // a replay's: the machine's settings), so its Continue never turns off what
+  // was on without being unticked. Set as its ask arrives, before the dialog
+  // mounts (it reads them once).
+  if (introReplay === null && (consentRequest !== null || officeMcp.ask !== null)) {
+    setIntroReplay({
+      usage: usage.status?.installed === true,
+      hooks: claudeHooksInstalled,
+      mcp: officeMcp.status?.consent === 'granted',
+    });
+  }
+  // The Intro is up: what could take the user out of it mid-way is hidden or
+  // inert (the bottom toolbar, the PCs' panels; the canvas locks its own pieces
+  // while the greeter stands).
+  const introShowing = !!(intro || (officeMcp.ask && !consentRequest) || tutorialRequested);
 
   // Mutate Directory→Area mappings locally + send to server. Updates OfficeState in
   // the same tick so a follow-up agentCreated picks up the new mapping.
@@ -373,9 +514,18 @@ function App() {
     editor.handleToggleEditMode,
   );
 
+  // A card's ×: an agent's, or a PC shell's (which asks first when a command
+  // still runs in it: PcShellCloseDialog).
   const handleCloseAgent = useCallback((id: number) => {
     transport.send({ type: 'closeAgent', id });
   }, []);
+  const handleCloseCard = useCallback(
+    (card: Card) => {
+      if (card.kind === 'pcShell') closePcShell(card.id);
+      else handleCloseAgent(card.id);
+    },
+    [handleCloseAgent],
+  );
 
   const { reveal: revealTerminal } = terminalDrawer;
   const handleClick = useCallback(
@@ -407,15 +557,23 @@ function App() {
   // show — and select its character so the office follows the click.
   const { select: selectTerminal } = terminalDrawer;
   const handleCardSelect = useCallback(
-    (agentId: number) => {
-      if (terminalAgentIds.includes(agentId)) {
+    (card: Card) => {
+      if (card.kind === 'pcShell') {
+        // Its pane (standalone); else VS Code shows its integrated terminal,
+        // and a browser office without one (read-only) has nothing to raise.
+        if (paneIds.includes(card.id)) revealTerminal(card.id);
+        else if (!isBrowserRuntime) transport.send({ type: 'focusAgent', id: card.id });
+        return;
+      }
+      const agentId = card.id;
+      if (paneIds.includes(agentId)) {
         selectTerminal(agentId);
         return;
       }
       transport.send({ type: 'focusAgent', id: agentId });
       getOfficeState().selectAndFollow(agentId);
     },
-    [terminalAgentIds, selectTerminal],
+    [paneIds, selectTerminal, revealTerminal],
   );
 
   // A running conversation pressed in the desktop sidebar: its agent, as its
@@ -429,10 +587,23 @@ function App() {
   const openAgentFromSidebar = useCallback(
     (agentId: number) => {
       getOfficeState().selectAndFollow(agentId);
-      handleCardSelect(agentId);
+      handleCardSelect({ kind: 'agent', id: agentId });
     },
     [handleCardSelect],
   );
+
+  // Interactive furniture: what a click on a piece opens, and this office's
+  // own PC shell shown once it opens (pcShells/usePcShellPanels.ts).
+  const { show: showPaneOnDesktop } = terminalDrawer;
+  const { openPane: openMobilePane } = mobileShell;
+  const pcShellPanels = usePcShellPanels({
+    terminalAvailable,
+    isBrowser: isBrowserRuntime,
+    officeReadOnly,
+    openAgent: isMobile ? openMobileAgent : openAgentFromSidebar,
+    showPane: isMobile ? openMobilePane : showPaneOnDesktop,
+  });
+  const { canOpenPanels, directoryChoice } = pcShellPanels;
 
   const officeState = getOfficeState();
 
@@ -559,6 +730,8 @@ function App() {
         showAreas={effectiveShowAreas}
         activeAreaLabel={activeAreaLabel}
         tapSelectsFirst={isMobile}
+        readOnly={!canOpenPanels}
+        onPieceClick={pcShellPanels.onPieceClick}
       />
 
       {!isDebugMode ? (
@@ -576,11 +749,23 @@ function App() {
           )}
 
           {/* The provider's plan usage, top-left (Settings → Usage Bars). */}
-          {usage.status?.installed && (
+          {usage.status?.installed && usagePlan.status?.planLimits !== false && (
             <UsageBars
               limits={usage.limits}
               providerName={usage.status.providerName}
               mobile={isMobile}
+            />
+          )}
+
+          {/* The tutorial's quest log, top-right (clear of the desktop card
+              bar, which overlaps the office's right edge), while a run is under way. */}
+          {tutorial.status?.run && !officeReadOnly && (
+            <TutorialPanel
+              run={tutorial.status.run}
+              onSkip={tutorial.skip}
+              onQuit={tutorial.quit}
+              rightInset={isMobile || isDebugMode ? 0 : TERMINAL_SIDEBAR_WIDTH_PX}
+              top={CARD_BAR_TOP_PX}
             />
           )}
 
@@ -593,6 +778,7 @@ function App() {
           {editor.isEditMode && editor.isDirty && (
             <EditActionBar editor={editor} editorState={editorState} />
           )}
+          {editor.isEditMode && !editor.isDirty && <AgentEditUndoBar edits={agentLayoutEdits} />}
 
           {showRotateHint && (
             <div
@@ -620,6 +806,7 @@ function App() {
                   floorColor={editorState.floorColor}
                   wallColor={editorState.wallColor}
                   selectedWallSet={editorState.selectedWallSet}
+                  pickedSectionTiles={editorState.section?.tiles.length ?? 0}
                   onToolChange={editor.handleToolChange}
                   onTileTypeChange={editor.handleTileTypeChange}
                   onFloorColorChange={editor.handleFloorColorChange}
@@ -672,6 +859,28 @@ function App() {
               onCloseAgent={handleCloseAgent}
               alwaysShowOverlay={alwaysShowOverlay}
             />
+            <FurnitureLabel
+              officeState={officeState}
+              containerRef={containerRef}
+              zoom={editor.zoom}
+              panRef={editor.panRef}
+              readOnly={!canOpenPanels || introShowing}
+              // The Directory selector stands where the label would.
+              hidden={directoryChoice !== null}
+              alwaysShow={alwaysShowOverlay && !editor.isEditMode}
+              onCloseShell={canOpenPanels ? closePcShell : undefined}
+            />
+            {directoryChoice && canOpenPanels && !editor.isEditMode && (
+              <PcDirectorySelector
+                choice={directoryChoice}
+                officeState={officeState}
+                containerRef={containerRef}
+                zoom={editor.zoom}
+                panRef={editor.panRef}
+                onChoose={pcShellPanels.chooseDirectory}
+                onClose={pcShellPanels.closeDirectoryChoice}
+              />
+            )}
           </div>
         </>
       ) : (
@@ -686,35 +895,6 @@ function App() {
         />
       )}
 
-      {/* Hooks first-run tooltip. Gated on hooksInstalled (the hooksStatus
-          message), NOT the hooksEnabled preference: hooksEnabled defaults true
-          while first-run consent is still pending, and announcing "Instant
-          Detection Active" before anything is installed would be a lie. */}
-      {hooksEnabled && claudeHooksInstalled && !hooksInfoShown && !hooksTooltipDismissed && (
-        <Tooltip
-          title="Instant Detection Active"
-          position="top-right"
-          onDismiss={() => {
-            setHooksTooltipDismissed(true);
-            transport.send({ type: 'setHooksInfoShown' });
-          }}
-        >
-          <span className="text-sm text-text leading-none">
-            Your agents now respond in real-time.{' '}
-            <span
-              className="text-accent cursor-pointer underline"
-              onClick={() => {
-                setIsHooksInfoOpen(true);
-                setHooksTooltipDismissed(true);
-                transport.send({ type: 'setHooksInfoShown' });
-              }}
-            >
-              View more
-            </span>
-          </span>
-        </Tooltip>
-      )}
-
       {officeReadOnly && (
         <div className="absolute mobile-safe-top left-1/2 -translate-x-1/2 z-10 text-sm text-text-muted pointer-events-none select-none whitespace-nowrap">
           View only
@@ -723,7 +903,7 @@ function App() {
 
       {/* A read-only office gets no toolbar: launching, layout editing and every
           setting would be refused by the server anyway. */}
-      {!isMobile && !officeReadOnly && (
+      {!isMobile && !officeReadOnly && !introShowing && (
         <BottomToolbar
           isEditMode={editor.isEditMode}
           onToggleEditMode={editor.handleToggleEditMode}
@@ -757,28 +937,33 @@ function App() {
       <VersionIndicator
         currentVersion={extensionVersion}
         lastSeenVersion={lastSeenVersion}
-        hideUpdateNotice={officeReadOnly}
+        hideUpdateNotice={officeReadOnly || introUnfinished}
         onDismiss={handleWhatsNewDismiss}
         onOpenChangelog={handleOpenChangelog}
       />
 
-      {intro && (
-        <IntroBubble
+      {/* A hooks ask still on its way into `intro` (useIntroTour takes it a
+          render later) holds the MCP step back, so the tour opens on its
+          first step rather than on the MCP step alone. */}
+      {introShowing && (
+        <IntroDialog
           officeState={officeState}
-          headline={intro.headline}
-          disclosure={intro.disclosure}
+          hooksAsk={intro}
+          mcpAsk={officeMcp.ask}
+          onMcpChoice={officeMcp.answer}
           containerRef={containerRef}
           zoom={editor.zoom}
           panRef={editor.panRef}
           installFailed={installFailed}
           installPending={installPending}
           onChoice={handleConsentChoice}
-          onClose={handleIntroClose}
+          onClose={handleTourClose}
+          tutorial={tutorialSteps}
+          replay={introReplay ?? undefined}
           escapeSuppressed={
             isSettingsOpen ||
             isCharactersOpen ||
             isChangelogOpen ||
-            isHooksInfoOpen ||
             showMigrationNotice ||
             editor.isEditMode
           }
@@ -804,15 +989,15 @@ function App() {
           office={officeRegion}
           shell={mobileShell}
           drawer={terminalDrawer}
-          agentIds={cardAgents}
-          terminalAgentIds={terminalAgentIds}
+          cards={cards}
+          paneIds={paneIds}
           focusedAgentId={focusedAgentId}
           terminalAvailable={terminalAvailable}
           terminalUnavailableReason={terminalUnavailableReason}
           directories={directories}
           onAddDirectory={directoryEditor.add}
           onEditDirectory={directoryEditor.edit}
-          onCloseAgent={handleCloseAgent}
+          onCloseCard={handleCloseCard}
           onReorder={officeReadOnly ? undefined : saveCardOrder}
           onOpenCharacters={officeReadOnly ? undefined : openCharacters}
           keyboardOpen={keyboard.keyboardOpen}
@@ -828,7 +1013,9 @@ function App() {
               statusFor={terminalDrawer.statusFor}
               isSettingsOpen={isSettingsOpen}
               onToggleSettings={() => setIsSettingsOpen((v) => !v)}
+              worktrees={officeReadOnly ? undefined : worktreesListing}
               onSearch={setConversationSearch}
+              onAddDirectory={officeReadOnly ? undefined : directoryEditor.add}
             />
           )}
 
@@ -841,16 +1028,16 @@ function App() {
               character. */}
           {!(isDebugMode && !terminalAvailable) && (
             <AgentCardBar
-              agentIds={cardAgents}
+              cards={cards}
               activeAgentId={terminalAvailable ? terminalDrawer.shownAgentId : null}
               focusedAgentId={focusedAgentId}
               getAppearance={terminalDrawer.getAppearance}
               statusFor={terminalDrawer.statusFor}
               onSelect={handleCardSelect}
-              onClose={handleCloseAgent}
+              onClose={handleCloseCard}
               onReorder={officeReadOnly ? undefined : saveCardOrder}
               trailing={
-                terminalAvailable && terminalAgentIds.length > 0 ? (
+                terminalAvailable && paneIds.length > 0 ? (
                   <TerminalHideRibbon shown={terminalDrawer.isOpen} onHide={terminalDrawer.close} />
                 ) : undefined
               }
@@ -863,7 +1050,7 @@ function App() {
               region reflows beside it instead of being overlaid. */}
           {terminalAvailable && (
             <TerminalDrawer
-              agentIds={terminalAgentIds}
+              agentIds={paneIds}
               shownAgentId={terminalDrawer.shownAgentId}
               isOpen={terminalDrawer.isOpen}
               widthPx={terminalDrawer.widthPx}
@@ -874,40 +1061,6 @@ function App() {
         </>
       )}
 
-      {/* Hooks info modal. Top level, beside the other modals: inside the
-          office region it would sit in the mobile shell's transformed track,
-          and a transformed ancestor is the containing block of position:
-          fixed — the modal would size to the 200%-wide track. */}
-      <Modal
-        isOpen={isHooksInfoOpen}
-        onClose={() => setIsHooksInfoOpen(false)}
-        title="Instant Detection is ON"
-        zIndex={52}
-      >
-        <div className="text-base text-text px-10" style={{ lineHeight: 1.4 }}>
-          <p className="mb-8">Your Pixel Agents office now reacts in real-time:</p>
-          <ul className="mb-8 pl-18 list-disc m-0">
-            <li className="text-sm mb-2">Permission prompts appear instantly</li>
-            <li className="text-sm mb-2">Turn completions detected the moment they happen</li>
-            <li className="text-sm mb-2">Sound notifications play immediately</li>
-          </ul>
-          <p className="mb-12 text-text-muted">
-            This works through Claude Code Hooks, small event listeners that notify Pixel Agents
-            whenever something happens in your Claude sessions.
-          </p>
-          <div className="text-center">
-            <button
-              onClick={() => setIsHooksInfoOpen(false)}
-              className="py-4 px-20 text-lg bg-accent text-white border-2 border-accent rounded-none cursor-pointer shadow-pixel"
-            >
-              Got it
-            </button>
-          </div>
-          <p className="mt-8 text-xs text-text-muted text-center">
-            To disable, go to Settings {'>'} Instant Detection
-          </p>
-        </div>
-      </Modal>
       {/* Rendered at the composition root, not inside a launch surface: the
           drawer that opens it lives in BottomToolbar on desktop and
           MobileAgentBar on mobile, and both close as soon as it appears. */}
@@ -922,6 +1075,33 @@ function App() {
         onDelete={directoryEditor.remove}
         onClose={directoryEditor.close}
       />
+      <NewWorktreeModal
+        directory={newWorktree.asking?.directory ?? null}
+        options={newWorktree.asking?.options ?? null}
+        onSubmit={newWorktree.submit}
+        onClose={newWorktree.close}
+      />
+      <WorktreeRejectedModal rejection={worktreeRejection} onClose={dismissWorktreeRejection} />
+      {/* A Worktree its agent left with uncommitted changes: asked in every
+          privileged office, both shells (read-only offices are never sent
+          any, and the server refuses their answers). */}
+      {!officeReadOnly && (
+        <WorktreeDecisionDialog
+          worktreesByDirectory={worktreesByDirectory}
+          directories={directories}
+          error={worktreeDecisionError}
+        />
+      )}
+      {/* This office's × on an agent with uncommitted Worktree files: asked
+          before the agent is stopped. */}
+      <CloseAgentQuestionDialog
+        question={agentCloseQuestion}
+        directories={directories}
+        onDone={clearAgentCloseQuestion}
+      />
+      {/* This office's × on a PC shell with a command still running in it. */}
+      <PcShellCloseDialog />
+      <PcShellRejectedModal />
 
       <ChangelogModal
         isOpen={isChangelogOpen}
@@ -940,7 +1120,9 @@ function App() {
           onResume={resumeAndFocus}
           onOpenAgent={mobileShell.openAgent}
           statusFor={terminalDrawer.statusFor}
+          worktrees={worktreesListing}
           onSearch={setConversationSearch}
+          onAddDirectory={directoryEditor.add}
         />
       )}
 
@@ -1016,8 +1198,17 @@ function App() {
           setShowHostDirectories(newVal);
           transport.send({ type: 'setShowHostDirectories', enabled: newVal });
         }}
+        uploadDirectory={terminalAvailable ? uploadDirectory : null}
         onExportLayout={handleExportLayout}
         onImportLayout={handleImportLayout}
+        onPlayTutorial={
+          tutorial.status && !tutorial.status.run ? () => setTutorialRequested(true) : undefined
+        }
+        onReplayIntro={
+          !officeReadOnly && !introUnfinished
+            ? () => transport.send({ type: 'replayIntro' })
+            : undefined
+        }
       />
 
       {showMigrationNotice && (

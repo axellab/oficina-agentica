@@ -1,4 +1,4 @@
-import type { AgentRole } from '../../../core/src/messages.js';
+import type { AgentRole, AgentWorktree } from '../../../core/src/messages.js';
 import {
   CARD_CONTEXT_BAR_HEIGHT_PX,
   CARD_MUGSHOT_CROP_TOP_ROW,
@@ -8,6 +8,7 @@ import {
 import { ContextBar } from '../office/ContextBar.js';
 import { contextLeft, useAgentContextUsed } from '../office/contextGauge.js';
 import type { CardVariant, CloseMode } from './cardBar.js';
+import { CARD_VARIANT, CLOSE_MODE } from './cardStyles.js';
 import { CharacterMugShot } from './CharacterMugShot.js';
 import { STATUS_DOT } from './statusDot.js';
 import { Button } from './ui/Button.js';
@@ -20,6 +21,10 @@ export interface AgentAppearance {
   /** The Role the agent was launched as, if any: a strip of its colour along
    *  the card's top, and its name in the card's tooltip. */
   role?: AgentRole;
+  /** The Worktree the agent runs in: the card wears its icon, the title its branch. */
+  worktree?: AgentWorktree;
+  /** The Nickname it was launched with: in the title, after the agent's number. */
+  nickname?: string;
 }
 
 /** Agent activity reflected by the tab's status dot. */
@@ -27,20 +32,6 @@ export type AgentActivity = 'idle' | 'working' | 'attention';
 
 /** Activity plus the drawer-owned "connection broken" state. */
 export type TabStatus = AgentActivity | 'disconnected';
-
-const CARD_VARIANT: Record<CardVariant, string> = {
-  default: 'bg-btn-bg border-transparent hover:bg-btn-hover',
-  focused: 'bg-active-bg border-transparent',
-  active: 'bg-active-bg border-accent',
-};
-
-// `hover` fades with opacity rather than visibility, so the × stays a
-// hit target (a pointer over it hovers the card anyway).
-const CLOSE_MODE: Record<CloseMode, string> = {
-  shown: '',
-  hover: 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity',
-  hidden: 'invisible',
-};
 
 interface AgentCardProps {
   agentId: number;
@@ -74,7 +65,12 @@ export function AgentCard({
     <div
       className={`group relative pointer-events-auto flex items-stretch gap-1 p-1 cursor-pointer border-2 shrink-0 ${CARD_VARIANT[variant]}`}
       onClick={() => onSelect(agentId)}
-      title={appearance.role ? `Agent ${agentId} · ${appearance.role.name}` : `Agent ${agentId}`}
+      title={[
+        `Agent ${agentId}`,
+        ...(appearance.role ? [appearance.role.name] : []),
+        ...(appearance.nickname ? [appearance.nickname] : []),
+        ...(appearance.worktree ? [`worktree ${appearance.worktree.branch}`] : []),
+      ].join(' · ')}
       data-role-id={appearance.role?.id}
     >
       {appearance.role && (
@@ -87,11 +83,25 @@ export function AgentCard({
           }}
         />
       )}
-      <CharacterMugShot
-        palette={appearance.palette}
-        repeat={appearance.repeat}
-        cropTop={CARD_MUGSHOT_CROP_TOP_ROW}
-      />
+      <span className="relative flex shrink-0">
+        <CharacterMugShot
+          palette={appearance.palette}
+          repeat={appearance.repeat}
+          cropTop={CARD_MUGSHOT_CROP_TOP_ROW}
+        />
+        {/* A Worktree agent's mark, over the mug shot's top-left corner (the
+            context bar runs along the foot); under the Role's strip when the
+            agent has a Role, so neither covers the other. */}
+        {appearance.worktree && (
+          <span
+            data-testid="card-worktree"
+            className="absolute top-0 left-0 flex bg-bg text-text p-1 pointer-events-none"
+            style={appearance.role ? { top: CARD_ROLE_STRIP_HEIGHT_PX } : undefined}
+          >
+            <PixelIcon name="worktree" scale={1} />
+          </span>
+        )}
+      </span>
       {/* Close on top, status dot at the bottom, both centred over the
           same column beside the mug shot. */}
       <div className="flex flex-col items-center justify-between shrink-0">

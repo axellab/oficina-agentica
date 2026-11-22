@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 
 import { expect, test } from '../../fixtures/standalone';
+import { initGitRepo } from '../../helpers/git';
 import { preToolUseBash } from '../../helpers/hooks';
 import {
   arrangeNextClaudeInvocation,
@@ -11,7 +12,12 @@ import {
   waitForClaudeHookSetup,
 } from '../../helpers/mock-claude';
 import { expectOverlayCount, expectOverlayVisibleWithTexts } from '../../helpers/office';
-import { openLaunchDrawer, setSettings } from '../../helpers/webview';
+import {
+  addDirectory,
+  confirmNewWorktree,
+  openLaunchDrawer,
+  setSettings,
+} from '../../helpers/webview';
 
 /**
  * Roles: the launch drawer offers the parts of a delivery team, and an agent
@@ -195,5 +201,57 @@ test.describe('Standalone / roles', () => {
     expect(instructions).toContain('Every change ships with its docs.');
     expect(instructions).toContain('- Rust Developer: ');
     expect(instructions).toContain('- Technical Writer (you): Keeps the docs true.');
+  });
+
+  test('a launch into a new worktree is as the picked Role too @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    await setSettings(page, { alwaysShowLabels: true });
+    await waitForClaudeHookSetup(standalone.tmpHome);
+
+    const repo = path.join(standalone.workspaceDir, 'repo');
+    initGitRepo(repo);
+    await addDirectory(page, { name: 'Repo', path: repo });
+
+    await arrangeNextClaudeInvocation(
+      standalone.tmpHome,
+      claudeScenario('role worktree launch')
+        .at(1_000)
+        .emitHook(preToolUseBash('{{sessionId}}', 'npm test') as Record<string, unknown>)
+        .holdOpenFor(60_000)
+        .build(),
+    );
+
+    // The Role first, then the row's worktree button: the pick waits through
+    // the modal that asks for the Worktree's name.
+    const drawer = await openLaunchDrawer(page);
+    await pickRole(drawer, 'Developer');
+    await drawer.getByRole('button', { name: 'Repo', exact: true }).hover();
+    await page.getByRole('button', { name: 'New worktree in Repo' }).click();
+    const worktree = await confirmNewWorktree(page);
+
+    // One agent, wearing both: the Role above its activity, the Worktree's
+    // mark beside its Directory.
+    await expectOverlayCount(page, 1);
+    await expectOverlayVisibleWithTexts(page, ['Developer', 'Running: npm test', 'Repo']);
+    await expect(page.getByTestId('agent-role')).toHaveAttribute('data-role-id', 'developer');
+    await expect(page.locator('[data-testid="agent-overlay-worktree"]')).toBeVisible();
+
+    // Its card too: the Role's name and the branch in its title, and the mark.
+    await expect(page.locator(`[title$=" · Developer · worktree ${worktree}"]`)).toBeVisible();
+    await expect(page.locator('[data-testid="card-worktree"]')).toBeVisible();
+
+    // The coding agent runs in the Worktree, started with the Role's instructions.
+    const promptFile = path.join(
+      standalone.tmpHome,
+      '.pixel-agents',
+      'role-prompts',
+      'developer.md',
+    );
+    await expect
+      .poll(() => invocations(standalone.mockLogFile))
+      .toContain(`--append-system-prompt-file ${promptFile}`);
+    expect(fs.existsSync(path.join(repo, '.claude', 'worktrees', worktree))).toBe(true);
   });
 });

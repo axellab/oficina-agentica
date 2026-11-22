@@ -18,6 +18,7 @@ import {
   launchStandaloneAgent,
   reattachTerminalAgents,
 } from '../src/terminal/standaloneAgentLauncher.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 /**
  * The PTY host (development only, `--pty-host`) over a real Unix socket: a host
@@ -112,7 +113,7 @@ describe('PTY host', () => {
   afterEach(async () => {
     for (const client of clients.splice(0)) await client.shutdown();
     await host?.close();
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeTempDir(dir);
   });
 
   it('spawns with exactly the env the server sends, and reports the pid', async () => {
@@ -295,7 +296,7 @@ describe('PTY host', () => {
       const first = await connect();
       const id = launchStandaloneAgent(
         { store: before.store, runtime: before.runtime, ptyManager: first, provider: provider() },
-        { directoryPath: dir, palette: 2 },
+        { cwd: dir, palette: 2 },
       );
       expect(id).toBe(1);
       const launched = before.store.get(1);
@@ -336,7 +337,7 @@ describe('PTY host', () => {
       const first = await connect();
       launchStandaloneAgent(
         { store: before.store, runtime: before.runtime, ptyManager: first, provider: provider() },
-        { directoryPath: dir },
+        { cwd: dir },
       );
       const launched = before.store.get(1)!;
       await until(() => spawned.length === 1);
@@ -373,7 +374,7 @@ describe('PTY host', () => {
       const first = await connect();
       launchStandaloneAgent(
         { store: before.store, runtime: before.runtime, ptyManager: first, provider: provider() },
-        { directoryPath: dir },
+        { cwd: dir },
       );
       const launched = before.store.get(1)!;
       await until(() => spawned.length === 1);
@@ -438,7 +439,7 @@ describe('PTY host', () => {
       const first = await connect();
       launchStandaloneAgent(
         { store: before.store, runtime: before.runtime, ptyManager: first, provider: provider() },
-        { directoryPath: dir },
+        { cwd: dir },
       );
       await until(() => spawned.length === 1);
       await first.shutdown();

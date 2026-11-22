@@ -15,8 +15,10 @@ import { FileStateAdapter } from '../src/fileStateAdapter.js';
 import {
   CONSENT_DISCLOSURE,
   CONSENT_INSTALL_HEADLINE,
+  CONSENT_SUMMARY,
 } from '../src/providers/hook/claude/consentCopy.js';
 import { CLAUDE_HOOK_EVENTS } from '../src/providers/hook/claude/constants.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 /** Let a dispatch's async chain (side effect → areHooksInstalled → persist →
  *  send) run to completion. */
@@ -91,7 +93,7 @@ describe('clientMessageHandler: hooks consent flow', () => {
       process.env.HOME = originalHome;
     }
     store.dispose();
-    fs.rmSync(tempHome, { recursive: true, force: true });
+    removeTempDir(tempHome);
   });
 
   // ── hooksConsentRequest: who is asked, and on what terms ─────
@@ -107,7 +109,9 @@ describe('clientMessageHandler: hooks consent flow', () => {
         type: 'hooksConsentRequest',
         providerId: 'claude',
         headline: CONSENT_INSTALL_HEADLINE,
+        summary: CONSENT_SUMMARY,
         disclosure: CONSENT_DISCLOSURE,
+        cliInstalled: expect.any(Boolean),
       });
       // After the truthful install state, never before: the webview treats
       // hooksStatus installed=true as "the ask is moot", so a request sent
@@ -161,6 +165,42 @@ describe('clientMessageHandler: hooks consent flow', () => {
 
       await connect();
       expect(sent.find((m) => m.type === 'hooksConsentRequest')).toBeDefined();
+    });
+  });
+
+  // ── replayIntro: Settings → Replay the Intro ─────────────────
+
+  describe('replayIntro', () => {
+    // The asks the handshake leaves out once answered come back on request,
+    // to the asker alone, and asking writes nothing.
+    it('asks again whatever was answered and is installed, writing nothing', async () => {
+      grantHooksConsent('claude');
+      seedInstalledHooks();
+      const settingsBefore = fs.readFileSync(
+        path.join(tempHome, '.claude', 'settings.json'),
+        'utf8',
+      );
+      handleClientMessage({ type: 'replayIntro' }, (m) => sent.push(m), ctx);
+
+      expect(sent.find((m) => m.type === 'hooksConsentRequest')).toEqual({
+        type: 'hooksConsentRequest',
+        providerId: 'claude',
+        headline: CONSENT_INSTALL_HEADLINE,
+        summary: CONSENT_SUMMARY,
+        disclosure: CONSENT_DISCLOSURE,
+        cliInstalled: expect.any(Boolean),
+      });
+      expect(getHooksConsent('claude')).toBe('granted');
+      expect(fs.readFileSync(path.join(tempHome, '.claude', 'settings.json'), 'utf8')).toBe(
+        settingsBefore,
+      );
+    });
+
+    it('is refused for an unprivileged connection', () => {
+      ctx.privileged = false;
+      handleClientMessage({ type: 'replayIntro' }, (m) => sent.push(m), ctx);
+
+      expect(sent.find((m) => m.type === 'hooksConsentRequest')).toBeUndefined();
     });
   });
 

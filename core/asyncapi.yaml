@@ -98,10 +98,18 @@ components:
         - $ref: '#/components/schemas/SubagentToolPermission'
         # Agent Teams
         - $ref: '#/components/schemas/AgentTeamInfo'
+        # Worktree an agent moved into or out of
+        - $ref: '#/components/schemas/AgentWorktreeChanged'
         # Context window
         - $ref: '#/components/schemas/AgentContextUsage'
+        # Visits (a character sent somewhere through the Pixel Office MCP)
+        - $ref: '#/components/schemas/AgentVisit'
+        # Message show (an agent messaged others through the Pixel Office MCP)
+        - $ref: '#/components/schemas/AgentMessageShow'
         # Layout
         - $ref: '#/components/schemas/LayoutLoaded'
+        - $ref: '#/components/schemas/AgentLayoutEditStatus'
+        - $ref: '#/components/schemas/AgentCharacterEditStatus'
         # Assets
         - $ref: '#/components/schemas/FurnitureAssetsLoaded'
         - $ref: '#/components/schemas/CharacterProfilesLoaded'
@@ -117,6 +125,14 @@ components:
         - $ref: '#/components/schemas/BypassPermissionsUpdated'
         - $ref: '#/components/schemas/HooksStatus'
         - $ref: '#/components/schemas/HooksConsentRequest'
+        # Pixel Office MCP (consent + settings)
+        - $ref: '#/components/schemas/OfficeMcpConsentRequest'
+        - $ref: '#/components/schemas/OfficeMcpStatus'
+        # The tutorial (the Guide's hands-on tour, on top of the Pixel Office MCP)
+        - $ref: '#/components/schemas/TutorialStatus'
+        - $ref: '#/components/schemas/TutorialRejected'
+        # Sign-in to the provider's CLI (the Intro's sign-in step)
+        - $ref: '#/components/schemas/CliSignInStatus'
         # Usage bars (the account's plan limits)
         - $ref: '#/components/schemas/UsageBridgeStatus'
         - $ref: '#/components/schemas/UsageLimits'
@@ -131,10 +147,22 @@ components:
         - $ref: '#/components/schemas/RolesLoaded'
         - $ref: '#/components/schemas/ConversationsLoaded'
         - $ref: '#/components/schemas/ConversationSearchResults'
+        # Worktrees
+        - $ref: '#/components/schemas/WorktreeRejected'
+        - $ref: '#/components/schemas/WorktreeOptions'
+        - $ref: '#/components/schemas/WorktreeDecisionRejected'
+        - $ref: '#/components/schemas/AgentCloseQuestion'
+        - $ref: '#/components/schemas/WorktreesLoaded'
         # Terminal (standalone embedded terminal control plane)
         - $ref: '#/components/schemas/TerminalAvailability'
         - $ref: '#/components/schemas/TerminalSessionOpened'
         - $ref: '#/components/schemas/TerminalSessionClosed'
+        # PC shells (a PC's plain login shell on the host: not an agent)
+        - $ref: '#/components/schemas/PcShellsLoaded'
+        - $ref: '#/components/schemas/PanelsInUse'
+        - $ref: '#/components/schemas/PcShellReady'
+        - $ref: '#/components/schemas/PcShellCloseQuestion'
+        - $ref: '#/components/schemas/PcShellRejected'
         # Diagnostics
         - $ref: '#/components/schemas/AgentDiagnostics'
       discriminator: type
@@ -147,7 +175,11 @@ components:
         - $ref: '#/components/schemas/CloseAgent'
         - $ref: '#/components/schemas/SaveAgentSeats'
         - $ref: '#/components/schemas/SaveLayout'
+        - $ref: '#/components/schemas/LayoutEditing'
+        - $ref: '#/components/schemas/UndoAgentLayoutEdit'
         - $ref: '#/components/schemas/SaveCharacterProfiles'
+        - $ref: '#/components/schemas/CharactersEditing'
+        - $ref: '#/components/schemas/UndoAgentCharacterEdit'
         - $ref: '#/components/schemas/SetSoundEnabled'
         - $ref: '#/components/schemas/SetLastSeenVersion'
         - $ref: '#/components/schemas/SetAlwaysShowLabels'
@@ -155,7 +187,15 @@ components:
         - $ref: '#/components/schemas/SetHooksEnabled'
         - $ref: '#/components/schemas/HooksConsentResponse'
         - $ref: '#/components/schemas/SetUsageBridgeEnabled'
-        - $ref: '#/components/schemas/SetHooksInfoShown'
+        - $ref: '#/components/schemas/RequestCliSignInStatus'
+        - $ref: '#/components/schemas/StartCliSignIn'
+        - $ref: '#/components/schemas/SubmitCliSignInCode'
+        - $ref: '#/components/schemas/OfficeMcpConsentResponse'
+        - $ref: '#/components/schemas/SetOfficeMcpEnabled'
+        - $ref: '#/components/schemas/SetOfficeMcpReadOnly'
+        - $ref: '#/components/schemas/StartTutorial'
+        - $ref: '#/components/schemas/SkipTutorialQuest'
+        - $ref: '#/components/schemas/QuitTutorial'
         - $ref: '#/components/schemas/SetWatchAllSessions'
         - $ref: '#/components/schemas/ExportLayout'
         - $ref: '#/components/schemas/ImportLayout'
@@ -168,12 +208,19 @@ components:
         - $ref: '#/components/schemas/SetShowAreas'
         - $ref: '#/components/schemas/SetBypassPermissions'
         - $ref: '#/components/schemas/SetShowHostDirectories'
+        - $ref: '#/components/schemas/SetUploadDirectory'
+        - $ref: '#/components/schemas/ReplayIntro'
         - $ref: '#/components/schemas/SaveDirectory'
         - $ref: '#/components/schemas/RemoveDirectory'
         - $ref: '#/components/schemas/RequestDirectorySuggestions'
         - $ref: '#/components/schemas/RequestConversations'
         - $ref: '#/components/schemas/SearchConversations'
         - $ref: '#/components/schemas/ResumeConversation'
+        - $ref: '#/components/schemas/RequestWorktrees'
+        - $ref: '#/components/schemas/RequestWorktreeOptions'
+        - $ref: '#/components/schemas/DecideWorktree'
+        - $ref: '#/components/schemas/OpenPcShell'
+        - $ref: '#/components/schemas/ClosePcShell'
         - $ref: '#/components/schemas/RequestDiagnostics'
       discriminator: type
 
@@ -229,6 +276,14 @@ components:
             picks one.
         role:
           $ref: '#/components/schemas/AgentRole'
+        worktree:
+          $ref: '#/components/schemas/AgentWorktree'
+        nickname:
+          type: string
+          description: >-
+            The Nickname the agent was launched with (Pixel Office MCP
+            launch_agent): shown after its Directory on its card and label.
+            Only a label: it never makes the agent a Teammate.
 
     AgentClosed:
       description: An agent has been removed from the office.
@@ -289,6 +344,21 @@ components:
             label and card.
           additionalProperties:
             $ref: '#/components/schemas/AgentRole'
+        worktrees:
+          type: object
+          description: >-
+            Map of agent ID (string) to the Worktree it runs in, for the
+            agents that run in one (a Teammate wears its Lead's). Absent or
+            missing an id = that agent runs in its Directory's own checkout.
+          additionalProperties:
+            $ref: '#/components/schemas/AgentWorktree'
+        nicknames:
+          type: object
+          description: >-
+            Map of agent ID (string) to the Nickname it was launched with, for
+            the agents launched with one.
+          additionalProperties:
+            type: string
 
     AgentStatus:
       description: Active vs waiting state for an agent (drives character animation).
@@ -467,6 +537,26 @@ components:
         teamUsesTmux:
           type: boolean
 
+    AgentWorktreeChanged:
+      description: |
+        A running agent moved into or out of a Worktree mid-session (a move
+        the CLI makes, Claude Code's EnterWorktree / ExitWorktree, or a
+        background session's own): the same agent, now in `worktree`, or in its
+        Directory's own checkout (or somewhere else) when absent. Only a
+        folder under the Directory's worktrees folder (Claude Code:
+        `.claude/worktrees/`) is a Worktree; the agent keeps its
+        Directory, name and look. Its sub-agents wear the same marker.
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type:
+          const: agentWorktreeChanged
+        id:
+          type: integer
+        worktree:
+          $ref: '#/components/schemas/AgentWorktree'
+
     AgentContextUsage:
       description: |
         How much of the agent's context window is in use, as of its most recent
@@ -489,11 +579,83 @@ components:
         maxContextTokens:
           type: integer
 
+    AgentVisit:
+      description: |
+        An agent's character is on a Visit (CONTEXT.md): it walks to `to`,
+        faces `facing`, and lingers a while before wandering as usual — or,
+        with `stay`, holds there until its agent's next turn. `cleared: true`
+        (and nothing else) ends the visit: the agent's next turn started, so
+        its character goes back to its seat. The server resolved and checked
+        the tile, and re-sends every agent's current visit (or `cleared`) in
+        the connect snapshot, so every office shows the same visits.
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type:
+          const: agentVisit
+        id:
+          type: integer
+        to:
+          $ref: '#/components/schemas/TilePosition'
+        facing:
+          $ref: '#/components/schemas/Facing'
+        stay:
+          type: boolean
+        cleared:
+          type: boolean
+
+    AgentMessageShow:
+      description: |
+        Agent `fromId` messaged the agents `toIds` (delivered, in order)
+        through the Pixel Office MCP, saying `gist` (one line, at most 80
+        characters). Each office shows it: the sender's character walks to
+        a tile beside each recipient's character in turn, faces it with the
+        gist in its speech bubble, then goes back to its desk. Only offices
+        open at the time show it — it is not part of the connect snapshot —
+        and delivery never waits for it.
+      type: object
+      additionalProperties: false
+      required: [type, fromId, toIds, gist]
+      properties:
+        type:
+          const: agentMessageShow
+        fromId:
+          type: integer
+        toIds:
+          type: array
+          items:
+            type: integer
+        gist:
+          type: string
+
+    TilePosition:
+      description: A tile of the office grid (column and row, from the top left).
+      type: object
+      additionalProperties: false
+      required: [col, row]
+      properties:
+        col:
+          type: integer
+        row:
+          type: integer
+
+    Facing:
+      description: The way a character faces.
+      type: string
+      enum: [up, down, left, right]
+
     LayoutLoaded:
       description: |
         Office layout (tiles, furniture, colors). `null` when no layout file or
         bundled default exists. `wasReset` is true when the bundled default
-        replaced an outdated user layout.
+        replaced an outdated user layout. `buildout` is set only on the
+        broadcast of a Pixel Office MCP agent's layout edit (never an undo, a
+        person's save, or the connect snapshot): offices open at the time play
+        the Buildout (CONTEXT.md) from it. `shift` is how far the change
+        moved the grid's existing tiles (a resize growing or cutting the
+        left/top edge: an agent's edit, or the undo of one), so characters
+        and pets move with them; absent = not at all.
       type: object
       additionalProperties: false
       required: [type, layout]
@@ -510,6 +672,84 @@ components:
             - type: 'null'
         wasReset:
           type: boolean
+        buildout:
+          $ref: '#/components/schemas/LayoutBuildout'
+        shift:
+          $ref: '#/components/schemas/GridShift'
+
+    LayoutBuildout:
+      description: |
+        An agent's layout edit, to be built into the office: agent `agentId`
+        made it, and it grows outward from `origin` (the first tile the edit
+        names, in the new grid; the old layout lines up with it by the
+        message's `shift`). An edit that names no tile (a resize alone, a pet, a new Area) carries
+        no buildout and simply appears.
+      type: object
+      additionalProperties: false
+      required: [agentId, origin]
+      properties:
+        agentId:
+          type: integer
+        origin:
+          $ref: '#/components/schemas/TilePosition'
+
+    GridShift:
+      description: How far a resize moved the grid's existing tiles (columns right, rows down; negative = left/up).
+      type: object
+      additionalProperties: false
+      required: [col, row]
+      properties:
+        col:
+          type: integer
+        row:
+          type: integer
+
+    AgentLayoutEditStatus:
+      description: |
+        What the layout editor's "Undo <agent>'s edit" would revert: the newest
+        Pixel Office MCP layout edit, while the office still holds exactly what
+        it wrote (`agentId` + `agentName`); neither = nothing to undo. Broadcast
+        whenever that changes and sent on connect. Sent to one office alone with
+        `refused` when its `undoAgentLayoutEdit` was refused (the reason).
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: agentLayoutEditStatus
+        agentId:
+          type: integer
+        agentName:
+          type: string
+        refused:
+          type: string
+
+    AgentCharacterEditStatus:
+      description: |
+        What the Characters view's "Undo <agent>'s edit" would revert: the newest
+        Pixel Office MCP Character edit, while the roster and the Directories it
+        touched still hold exactly what it wrote (`agentId` + `agentName`, and
+        `summary`: what it did, in a few words — "created Naruto"); none of them =
+        nothing to undo. Broadcast whenever that changes and sent on connect;
+        `landed` on the broadcast sent as the edit lands (the view's status line
+        names the agent then). Sent to one office alone with `refused` when its
+        `undoAgentCharacterEdit` was refused (the reason).
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: agentCharacterEditStatus
+        agentId:
+          type: integer
+        agentName:
+          type: string
+        summary:
+          type: string
+        landed:
+          type: boolean
+        refused:
+          type: string
 
     FurnitureAssetsLoaded:
       description: Furniture catalog and sprite data, sent once after webviewReady.
@@ -736,7 +976,6 @@ components:
         - alwaysShowLabels
         - ghostHeadlessAgents
         - hooksEnabled
-        - hooksInfoShown
         - externalAssetDirectories
         - showAreas
         - bypassPermissions
@@ -758,8 +997,6 @@ components:
           type: boolean
         hooksEnabled:
           type: boolean
-        hooksInfoShown:
-          type: boolean
         externalAssetDirectories:
           type: array
           items:
@@ -777,6 +1014,12 @@ components:
             Persistent per-host choice whether the host's own Directories (VS
             Code's workspace folders, standalone's start directory) are listed
             in `directoriesLoaded`. Off by default.
+        uploadDirectory:
+          type: string
+          description: >-
+            Where files sent to a terminal are saved on the host, as an absolute
+            path: the user's choice, else the server's own uploads folder.
+            Sent by hosts with a terminal (standalone).
 
     BypassPermissionsUpdated:
       description: |
@@ -817,6 +1060,51 @@ components:
         installed:
           type: boolean
 
+    CliSignInStatus:
+      description: |
+        Whether the provider's CLI is signed in to its account on this machine,
+        and the sign-in under way if there is one. The answer to
+        `requestCliSignInStatus`, `startCliSignIn` and `submitCliSignInCode`, to
+        the client that asked only; a sign-in that ends (signed in, refused,
+        timed out) is told to the client that started it. A provider with no
+        sign-in of its own is reported signed in. Privileged connections only.
+      type: object
+      additionalProperties: false
+      required: [type, providerId, signedIn]
+      properties:
+        type:
+          const: cliSignInStatus
+        providerId:
+          type: string
+          description: The provider this is about (HookProvider.id).
+        signedIn:
+          type: boolean
+        planLimits:
+          type: boolean
+          description: >-
+            False when the account signed in has no plan limits to report (a
+            pay-per-use API account): the usage bars are neither offered nor
+            shown. Absent = it has, or the CLI does not say.
+        cliMissing:
+          type: boolean
+          description: >-
+            The CLI is not installed on this machine, so there is nothing to
+            sign in yet (`signedIn` is false). The Intro's install step covers
+            it; the sign-in step waits for a CLI that can be asked.
+        signInUrl:
+          type: string
+          description: >-
+            Present while a sign-in is under way: the provider's page to sign in
+            on. It ends on a code, which `submitCliSignInCode` hands back.
+        openedOnHost:
+          type: boolean
+          description: >-
+            With `signInUrl`: the CLI was left to open a browser on the host
+            itself, where signing in finishes without a code.
+        error:
+          type: string
+          description: Why the last sign-in did not finish, in words for the user.
+
     UsageBridgeStatus:
       description: |
         Whether the provider's usage bridge is installed — the script that
@@ -826,7 +1114,7 @@ components:
         outcome. Privileged connections only, like `usageLimits`.
       type: object
       additionalProperties: false
-      required: [type, providerId, providerName, installed, disclosure]
+      required: [type, providerId, providerName, installed, summary, disclosure]
       properties:
         type:
           const: usageBridgeStatus
@@ -838,6 +1126,9 @@ components:
           description: Its name for people (HookProvider.displayName), whose plan the bars show.
         installed:
           type: boolean
+        summary:
+          type: string
+          description: One line beside the Intro's checkbox.
         disclosure:
           type: string
           description: >-
@@ -872,6 +1163,58 @@ components:
           type: number
           description: When the last report arrived (epoch milliseconds).
 
+    OfficeMcpConsentState:
+      description: The Pixel Office MCP consent as recorded (absent in config.json = unanswered).
+      type: string
+      enum: [unanswered, granted, declined]
+
+    OfficeMcpConsentRequest:
+      description: |
+        Ask this client the Intro's Pixel Office MCP step: may the agents this
+        office launches use the Pixel Agents Office MCP? Sent during the
+        `webviewReady` handshake, after the hooks asks, while the answer is
+        unrecorded — on privileged connections of a server that offers the
+        MCP only. Carries the server's own copy, rendered verbatim. Answered
+        with `officeMcpConsentResponse`; dismissing sends nothing and the ask
+        returns on the next connect.
+      type: object
+      additionalProperties: false
+      required: [type, headline, summary, disclosure]
+      properties:
+        type:
+          const: officeMcpConsentRequest
+        headline:
+          type: string
+        summary:
+          type: string
+          description: One line beside the Intro's checkbox; the full terms are `disclosure`, behind its "Read more".
+        disclosure:
+          type: string
+          description: What agents could do through it (paragraphs split on blank lines).
+
+    OfficeMcpStatus:
+      description: |
+        The Pixel Office MCP's settings as recorded: the consent answer
+        (`unanswered` until one is given; `granted` = launches and resumes get
+        the MCP, `declined` = they don't) and whether it is read-only (agents
+        may list and read, nothing else). Sent on connect and broadcast after
+        every change, privileged connections of a server that offers the MCP
+        only. Carries the disclosure the Settings switch confirms with.
+      type: object
+      additionalProperties: false
+      required: [type, consent, readOnly, headline, disclosure]
+      properties:
+        type:
+          const: officeMcpStatus
+        consent:
+          $ref: '#/components/schemas/OfficeMcpConsentState'
+        readOnly:
+          type: boolean
+        headline:
+          type: string
+        disclosure:
+          type: string
+
     HooksConsentRequest:
       description: |
         Ask this client to run the first-run hooks consent dialog. Sent during the
@@ -888,7 +1231,7 @@ components:
         next connect. One request per provider that needs an answer.
       type: object
       additionalProperties: false
-      required: [type, providerId, headline, disclosure]
+      required: [type, providerId, headline, summary, disclosure, cliInstalled]
       properties:
         type:
           const: hooksConsentRequest
@@ -901,6 +1244,12 @@ components:
         headline:
           type: string
           description: One-sentence summary of what is being approved.
+        summary:
+          type: string
+          description: One line beside the Intro's checkbox; the full terms are `disclosure`, behind its "Read more".
+        cliInstalled:
+          type: boolean
+          description: Whether the provider's CLI was found on this machine; the Intro's "get Claude Code" step shows only when it wasn't.
         disclosure:
           type: string
           description: |
@@ -1032,6 +1381,281 @@ components:
           type: string
           description: Human-readable cause, shown inline in the Directory modal.
 
+    WorktreeRejected:
+      description: |
+        A `launchAgent` with `worktree: true` could not create its Worktree (the
+        Directory is not a git repo, no free name, git failed): nothing was
+        launched and nothing was left on disk. Also the answer to a
+        `resumeConversation` of a Worktree's conversation that could not be
+        resumed (its branch was deleted, something else sits at its path).
+        Sent point-to-point to the client that asked (never broadcast); the
+        office shows `reason`.
+      type: object
+      additionalProperties: false
+      required: [type, directoryPath, reason]
+      properties:
+        type:
+          const: worktreeRejected
+        directoryPath:
+          type: string
+          description: The Directory the launch (or the resume) named.
+        reason:
+          type: string
+
+    WorktreeOptions:
+      description: |
+        The answer to `requestWorktreeOptions`, to that client only: what the
+        new-worktree modal offers. `name` is a fresh generated name (free as a
+        folder and, with `prefix`, as a branch); `branches` are the repo's
+        local branches and origin's (as last fetched), newest commit first;
+        `defaultBase` is the branch the Directory's own base setting points at
+        (its current branch, or origin's default branch), absent when its
+        checkout is detached and the setting is the current commit. A
+        Directory that is no git repo is answered `worktreeRejected` instead.
+      type: object
+      additionalProperties: false
+      required: [type, directoryPath, name, prefix, branches]
+      properties:
+        type:
+          const: worktreeOptions
+        directoryPath:
+          type: string
+        name:
+          type: string
+          description: A generated Worktree name the user may keep or change.
+        prefix:
+          type: string
+          description: The Directory's branch prefix (the branch is prefix + name).
+        branches:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorktreeBranch'
+        defaultBase:
+          $ref: '#/components/schemas/WorktreeBranch'
+
+    WorktreeBranch:
+      description: >-
+        A branch a new Worktree can start from: a local one (`refs/heads/`) or
+        origin's (`refs/remotes/origin/`), `name` without that prefix.
+        `current`: the main checkout's own branch.
+      type: object
+      additionalProperties: false
+      required: [name, location]
+      properties:
+        name:
+          type: string
+        location:
+          $ref: '#/components/schemas/WorktreeBranchLocation'
+        current:
+          type: boolean
+
+    WorktreeBranchLocation:
+      description: Where a branch lives — `local` (refs/heads) or `origin` (refs/remotes/origin).
+      type: string
+      enum: [local, origin]
+
+    WorktreeDecisionRejected:
+      description: |
+        The answer to a `decideWorktree` that could not be carried out (git
+        refused the save, more files changed than the user agreed to discard,
+        an agent or CLI session still runs in it, it is the CLI's own and
+        the choice is not `remove`): the Worktree is left
+        as it was. Sent point-to-point to the client that asked; the decision
+        dialog (or the Worktrees list) shows `reason`.
+      type: object
+      additionalProperties: false
+      required: [type, directoryPath, name, reason]
+      properties:
+        type:
+          const: worktreeDecisionRejected
+        directoryPath:
+          type: string
+          description: The Directory the decision named.
+        name:
+          type: string
+          description: The Worktree the decision named.
+        reason:
+          type: string
+
+    AgentCloseQuestion:
+      description: |
+        The answer to a `closeAgent` (no `worktreeChoice`) for an agent that
+        would leave a Worktree of Pixel Agents' with uncommitted files: the
+        agent is NOT closed and keeps running, and the client asks the user
+        (Commit to branch, Leave as is, Delete changes). The answer comes back as a
+        `closeAgent` carrying `worktreeChoice`; dismissing the question
+        leaves the agent running. Sent point-to-point to the client that
+        pressed close.
+      type: object
+      additionalProperties: false
+      required: [type, id, directoryPath, name, branch, uncommittedFiles]
+      properties:
+        type:
+          const: agentCloseQuestion
+        id:
+          type: integer
+          description: The agent that was asked to close.
+        directoryPath:
+          type: string
+          description: The Directory the Worktree belongs to, as the office lists it.
+        name:
+          type: string
+          description: >-
+            The Worktree's name (its folder in the worktrees folder,
+            `.claude/worktrees/` for Claude Code).
+        branch:
+          type: string
+        uncommittedFiles:
+          type: integer
+          minimum: 0
+          description: How many files are uncommitted now.
+
+    WorktreesLoaded:
+      description: |
+        One Directory's Worktrees (the ones Pixel Agents made, then the ones
+        the CLI made itself in the worktrees folder, Claude Code's
+        `.claude/worktrees/`, `owner: cli`), each with what it holds now.
+        Sent to the client that asked (`requestWorktrees`), to
+        every privileged client on connect for each Directory that has any,
+        and broadcast to every privileged client after every change (an agent
+        leaving, a decision). Never sent to read-only clients. A Worktree in
+        state `needsDecision` opens the office's decision dialog; the list
+        replaces whatever the client held for `directoryPath`.
+      type: object
+      additionalProperties: false
+      required: [type, directoryPath, worktrees]
+      properties:
+        type:
+          const: worktreesLoaded
+        directoryPath:
+          type: string
+          description: The Directory (its repo root) the Worktrees belong to.
+        worktrees:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorktreeSummary'
+        cliName:
+          type: string
+          description: >-
+            The name of the CLI whose own worktrees are listed (`owner: cli`),
+            as its provider gives it (e.g. "Claude Code"). Absent when no
+            provider declares a worktrees folder: the CLI has none of its own.
+
+    WorktreeSummary:
+      description: |
+        A Worktree as the office lists it. `uncommittedFiles`: changed and
+        untracked files (not gitignored ones). `uniqueCommits`: commits on its
+        branch whose changes are not in its base (patch-equivalence, so
+        squash- or rebase-merged work counts as none). `agentId`: the agent
+        running in it, when one is. `palette` + `repeat`: the look of the agent
+        it belongs to (the first seen running in it, until that one has gone
+        and another runs there), else its newest conversation's; absent when
+        neither is known.
+      type: object
+      additionalProperties: false
+      required: [name, branch, state, sizeBytes, uncommittedFiles, uniqueCommits, owner]
+      properties:
+        name:
+          type: string
+        branch:
+          type: string
+        owner:
+          $ref: '#/components/schemas/WorktreeOwner'
+        latestSessionId:
+          type: string
+          description: >-
+            Its newest conversation (a session id `resumeConversation` takes),
+            when it has one: the list's Resume action.
+        state:
+          $ref: '#/components/schemas/WorktreeState'
+        sizeBytes:
+          type: integer
+          minimum: 0
+        uncommittedFiles:
+          type: integer
+          minimum: 0
+        uniqueCommits:
+          type: integer
+          minimum: 0
+        agentId:
+          type: integer
+        palette:
+          type: integer
+          minimum: 0
+        repeat:
+          type: integer
+          minimum: 0
+
+    WorktreeOwner:
+      description: |
+        Who made a Worktree. `pixelAgents`: Pixel Agents (listed in its
+        registry), so the office manages it. `cli`: the CLI made it itself
+        under the Directory's worktrees folder (Claude Code: `claude -w`,
+        EnterWorktree, under `.claude/worktrees/`):
+        shown, and only ever removed — `remove` deletes its folder and branch
+        once no agent or CLI session is in it (confirmed files and commits
+        only), every other `decideWorktree` on it is refused — and its state
+        is only `active` (an agent runs in it) or `kept`.
+      type: string
+      enum: [pixelAgents, cli]
+
+    WorktreeState:
+      description: |
+        `active`: an agent runs in it. `kept`: its folder stays by the user's
+        choice. `parked`: its folder was removed, its branch kept.
+        `needsDecision`: its agent left uncommitted changes; the user decides.
+      type: string
+      enum: [active, kept, parked, needsDecision]
+
+    WorktreeChoice:
+      description: |
+        The answer for a Worktree that needs a decision. `save`: commit every
+        change (untracked files included) to its branch, then remove the
+        folder. `keep`: leave the folder as it is. `discard`: delete the
+        changes and the folder, and the branch too when it has no commits of
+        its own. From the Worktrees list: `remove` applies the leave rules a
+        departing agent's Worktree gets (so it may come back needing a
+        decision), and `deleteBranch` deletes a parked Worktree's branch
+        (needs `confirmedCommits` when its commits are merged nowhere). On one
+        of the CLI's own, `remove` deletes the folder and its branch (needs
+        `confirmedFiles` / `confirmedCommits` for what that loses).
+      type: string
+      enum: [save, keep, discard, remove, deleteBranch]
+
+    WorktreeLeaveChoice:
+      description: |
+        The answer, given before an agent is closed, for the Worktree it
+        leaves with uncommitted files: `save` (commit them to its branch,
+        then remove the folder), `keep` (leave the folder) or `discard`
+        (delete the changes with the folder). The same answers as
+        `WorktreeChoice`'s first three.
+      type: string
+      enum: [save, keep, discard]
+
+    AgentWorktree:
+      description: |
+        The Worktree an agent runs in: a separate checkout of its Directory's
+        repo on a branch of its own. `name` is its folder under the repo's
+        worktrees folder (Claude Code: `.claude/worktrees/`), `branch` its
+        branch (the Directory's prefix + the name).
+      type: object
+      additionalProperties: false
+      required: [name, branch]
+      properties:
+        name:
+          type: string
+        branch:
+          type: string
+
+    WorktreeBase:
+      description: |
+        What a Directory's new Worktrees start from. `head`: the main
+        checkout's current commit (unpushed local work included). `fresh`: the
+        latest default branch on origin, fetched at launch (the current commit
+        when the fetch fails). Absent = `head`.
+      type: string
+      enum: [head, fresh]
+
     DirectorySuggestions:
       description: |
         Candidate paths for the Directory modal, recovered from the working
@@ -1148,6 +1772,10 @@ components:
           $ref: '#/components/schemas/Conversation'
 
     Conversation:
+      description: >-
+        One conversation. `worktree`: the Directory's Worktree it ran in
+        (Pixel Agents' or the CLI's own); resuming one whose folder was
+        removed rebuilds the folder from its branch first.
       type: object
       additionalProperties: false
       required: [sessionId, title, updatedAt]
@@ -1168,6 +1796,8 @@ components:
         agentId:
           type: integer
           description: The agent in the office running it right now; absent for a past conversation.
+        worktree:
+          $ref: '#/components/schemas/AgentWorktree'
 
     AgentDiagnostics:
       description: Connection diagnostics for all agents (response to requestDiagnostics).
@@ -1251,6 +1881,109 @@ components:
         exitCode:
           type: integer
 
+    PcShell:
+      description: >-
+        One live PC shell: the plain login shell on the host a PC opened for
+        the user. Not an agent: no provider, session, transcript, hooks, look
+        or seat. Its id is its own (from PC_SHELL_ID_BASE up, apart from every
+        agent id), the id its terminal socket (GET /terminal/:id) and its card
+        go by.
+      type: object
+      additionalProperties: false
+      required: [id, uid, furnitureType]
+      properties:
+        id:
+          type: integer
+        uid:
+          type: string
+          description: The piece (placed furniture uid) that opened it; the piece may have left the layout since.
+        furnitureType:
+          type: string
+          description: The piece's furniture type when it opened (the card draws its sprite).
+        directoryName:
+          type: string
+          description: The Directory it started in, by name as it was then. Absent = the home folder.
+
+    PcShellsLoaded:
+      description: >-
+        Every live PC shell, the whole list: broadcast to privileged offices only
+        (a view-only office sees the agents, never the operator's shells: it is told only which pieces are in use, `panelsInUse`)
+        whenever one opens or ends, and sent in their connect snapshot, so a
+        reconnect is a resync.
+      type: object
+      additionalProperties: false
+      required: [type, shells]
+      properties:
+        type:
+          const: pcShellsLoaded
+        shells:
+          type: array
+          items:
+            $ref: '#/components/schemas/PcShell'
+
+    PanelsInUse:
+      description: >-
+        The pieces whose panel is in use (a PC with a live PC shell), by uid and
+        nothing else: broadcast to every office beside `pcShellsLoaded` and sent
+        in every connect snapshot. A view-only office, which is never sent the
+        shells, shows those pieces in their "panel in use" state and labels them
+        "Busy", without learning what the panel holds.
+      type: object
+      additionalProperties: false
+      required: [type, uids]
+      properties:
+        type:
+          const: panelsInUse
+        uids:
+          type: array
+          items:
+            type: string
+
+    PcShellReady:
+      description: >-
+        The answer to an `openPcShell`, to its sender alone: the shell that
+        answers it (a new one, or the piece's live one). The office opens its
+        terminal.
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type:
+          const: pcShellReady
+        id:
+          type: integer
+
+    PcShellCloseQuestion:
+      description: >-
+        The answer to a `closePcShell` (not `confirmed`) for a shell with a
+        command still running in it (its foreground process is not the shell
+        itself): the shell is NOT closed, and the office asks the user once. A
+        `closePcShell` with `confirmed` closes it. To the sender alone.
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type:
+          const: pcShellCloseQuestion
+        id:
+          type: integer
+        command:
+          type: string
+          description: The running command's name, when the host could tell.
+
+    PcShellRejected:
+      description: An `openPcShell` that could not be done, to its sender alone.
+      type: object
+      additionalProperties: false
+      required: [type, uid, reason]
+      properties:
+        type:
+          const: pcShellRejected
+        uid:
+          type: string
+        reason:
+          type: string
+
     # ── Client message variants ────────────────────────────────────
 
     WebviewReady:
@@ -1285,6 +2018,25 @@ components:
           description: >-
             The Role to launch the agent as (a `rolesLoaded` id). Absent, or an
             id the host does not know, launches an agent with no Role.
+        worktree:
+          type: boolean
+          description: >-
+            Launch into a new Worktree of the Directory's repo instead of the
+            Directory itself. The agent is still an agent of its Directory
+            (name, default characters, Areas). A failed create launches
+            nothing and is answered with `worktreeRejected`.
+        worktreeName:
+          type: string
+          description: >-
+            With `worktree: true`: the Worktree's name (its folder, and its
+            branch after the Directory's prefix). Absent = a generated one. A
+            taken or invalid name is refused with `worktreeRejected`.
+        worktreeFrom:
+          $ref: '#/components/schemas/WorktreeBranch'
+          description: >-
+            With `worktree: true`: the branch to start from (an origin branch
+            is fetched first, falling back to what was last fetched). Absent =
+            the Directory's base setting.
 
     FocusAgent:
       description: Focus an agent's terminal.
@@ -1298,7 +2050,12 @@ components:
           type: integer
 
     CloseAgent:
-      description: Close (dismiss) an agent.
+      description: >-
+        Close (dismiss) an agent. One that would leave a Worktree of Pixel
+        Agents' with uncommitted files is not closed: the server answers
+        `agentCloseQuestion`, and the user's answer comes back as a
+        `closeAgent` with `worktreeChoice`, which closes it and is applied to
+        the Worktree once the agent has exited.
       type: object
       additionalProperties: false
       required: [type, id]
@@ -1307,6 +2064,15 @@ components:
           const: closeAgent
         id:
           type: integer
+        worktreeChoice:
+          $ref: '#/components/schemas/WorktreeLeaveChoice'
+        confirmedFiles:
+          type: integer
+          minimum: 0
+          description: >-
+            `worktreeChoice: discard` only: how many files the user confirmed
+            losing. Asked again (`agentCloseQuestion`) when more are
+            uncommitted by the time it arrives.
 
     SaveAgentSeats:
       description: Persist seat assignments for current agents.
@@ -1333,6 +2099,62 @@ components:
         layout:
           type: object
           description: Opaque layout object; format owned by the rendering layer.
+
+    LayoutEditing:
+      description: |
+        Whether this office's layout editor holds unsaved changes. While any
+        office reports `dirty`, agents' layout edits and their undo are refused;
+        `false` on save, reset or close, and dropped when the socket closes.
+      type: object
+      additionalProperties: false
+      required: [type, dirty]
+      properties:
+        type:
+          const: layoutEditing
+        dirty:
+          type: boolean
+
+    UndoAgentLayoutEdit:
+      description: |
+        The layout editor's "Undo <agent>'s edit": restore the layout from before
+        the newest Pixel Office MCP layout edit (undo_layout_edit's operation).
+        Refused (answered with `agentLayoutEditStatus.refused`) when the layout
+        changed since or an office holds unsaved editor changes.
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: undoAgentLayoutEdit
+
+    CharactersEditing:
+      description: |
+        Whether this office's Characters view holds an unsaved draft. While any
+        office reports `dirty`, agents' Character edits (edit_characters) are
+        refused; `false` on save, discard or close, and dropped when the socket
+        closes.
+      type: object
+      additionalProperties: false
+      required: [type, dirty]
+      properties:
+        type:
+          const: charactersEditing
+        dirty:
+          type: boolean
+
+    UndoAgentCharacterEdit:
+      description: |
+        The Characters view's "Undo <agent>'s edit": restore the roster and the
+        Directories' default characters from before the newest Pixel Office MCP
+        Character edit (undo_character_edit's operation). Refused (answered with
+        `agentCharacterEditStatus.refused`) when they changed since or an office
+        holds an unsaved Characters draft.
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: undoAgentCharacterEdit
 
     SaveCharacterProfiles:
       description: |
@@ -1436,6 +2258,175 @@ components:
         enabled:
           type: boolean
 
+    OfficeMcpConsentResponse:
+      description: |
+        The Intro's answer to `officeMcpConsentRequest` — an ABSOLUTE statement
+        of the state the user wants, revisable with Back: `allow` records the
+        grant, `decline` records a decline (and revokes every agent's access at
+        once). Any other value writes nothing. One config write per answer.
+      type: object
+      additionalProperties: false
+      required: [type, choice]
+      properties:
+        type:
+          const: officeMcpConsentResponse
+        choice:
+          $ref: '#/components/schemas/OfficeMcpChoice'
+
+    TutorialQuestState:
+      description: Where one tutorial quest stands.
+      type: string
+      enum: [open, done, skipped]
+
+    TutorialQuestProgress:
+      description: One quest of the tutorial and where it stands (its title and goal are core's TUTORIAL_QUESTS).
+      type: object
+      additionalProperties: false
+      required: [id, state]
+      properties:
+        id:
+          type: string
+        state:
+          $ref: '#/components/schemas/TutorialQuestState'
+
+    TutorialRun:
+      description: A tutorial under way — the agent running it and every quest's state.
+      type: object
+      additionalProperties: false
+      required: [agentId, quests, finished]
+      properties:
+        agentId:
+          type: integer
+        quests:
+          type: array
+          items:
+            $ref: '#/components/schemas/TutorialQuestProgress'
+        finished:
+          type: boolean
+
+    TutorialStatus:
+      description: |
+        The tutorial as the server holds it: whether the Intro may offer it
+        (`available`, else `unavailableReason` in plain words), the copy its
+        permission step shows verbatim (`headline`, `disclosure`: it starts a
+        Claude Code session), and the run under way, if any — the agent
+        running it (the Guide) and every quest's state. `finished` once every quest
+        is done or skipped (the run stays until its agent leaves or the user
+        quits). Sent on connect and broadcast after every change, privileged
+        connections of a server that offers the Pixel Office MCP only.
+      type: object
+      additionalProperties: false
+      required: [type, available, headline, disclosure]
+      properties:
+        type:
+          const: tutorialStatus
+        available:
+          type: boolean
+        unavailableReason:
+          type: string
+        headline:
+          type: string
+        disclosure:
+          type: string
+          description: What starting it does (paragraphs split on blank lines).
+        run:
+          $ref: '#/components/schemas/TutorialRun'
+
+    TutorialRejected:
+      description: |
+        A `startTutorial` that started nothing, to its sender alone: why (no
+        Pixel Office MCP consent, no terminal, a run already under way, the
+        launch failed).
+      type: object
+      additionalProperties: false
+      required: [type, reason]
+      properties:
+        type:
+          const: tutorialRejected
+        reason:
+          type: string
+
+    StartTutorial:
+      description: |
+        The user said yes to the tutorial's permission step and the greeter
+        sat down: launch the Guide as a real Claude Code agent (wearing
+        `palette`, the greeter's character, and named after it, in `seatId`,
+        the seat it walked to, when free), given the Pixel Office MCP and the
+        onboarding skill, its first message that skill's command. Answered with a `tutorialStatus`
+        broadcast carrying the run, or `tutorialRejected` to the sender.
+        Nothing launches without it.
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: startTutorial
+        palette:
+          type: integer
+          minimum: 0
+        seatId:
+          type: string
+
+    SkipTutorialQuest:
+      description: The user skipped a quest from the tutorial panel.
+      type: object
+      additionalProperties: false
+      required: [type, questId]
+      properties:
+        type:
+          const: skipTutorialQuest
+        questId:
+          type: string
+
+    QuitTutorial:
+      description: |
+        The user quit the tutorial: the run ends and its Guide is
+        closed, as its card's × would.
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: quitTutorial
+
+    OfficeMcpChoice:
+      description: |
+        An answer to the Intro's Pixel Office MCP ask, an absolute state:
+        `allow` grants, `decline` declines for good, `notNow` leaves it
+        unanswered (asked again on the next open; a revision from `allow`
+        revokes every agent's access, as a decline does).
+      type: string
+      enum: [allow, notNow, decline]
+
+    SetOfficeMcpEnabled:
+      description: |
+        Settings → Pixel Office MCP: on (the user confirmed its disclosure —
+        this is the grant) or off (a decline: every running agent's access is
+        revoked at once). Answered with an `officeMcpStatus` broadcast.
+      type: object
+      additionalProperties: false
+      required: [type, enabled]
+      properties:
+        type:
+          const: setOfficeMcpEnabled
+        enabled:
+          type: boolean
+
+    SetOfficeMcpReadOnly:
+      description: |
+        Settings → Pixel Office MCP read-only: while on, agents may list and
+        read through it, and every tool that would change something refuses.
+        Takes effect at once for running agents. Answered with an
+        `officeMcpStatus` broadcast.
+      type: object
+      additionalProperties: false
+      required: [type, readOnly]
+      properties:
+        type:
+          const: setOfficeMcpReadOnly
+        readOnly:
+          type: boolean
+
     HooksConsentResponse:
       description: |
         The user's answer to `hooksConsentRequest` — an ABSOLUTE statement of
@@ -1475,14 +2466,6 @@ components:
         undoes what that answer left behind.)
       type: string
       enum: [install, notNow, never]
-
-    SetHooksInfoShown:
-      type: object
-      additionalProperties: false
-      required: [type]
-      properties:
-        type:
-          const: setHooksInfoShown
 
     SetWatchAllSessions:
       type: object
@@ -1579,7 +2562,7 @@ components:
               type: string
 
     SaveCardOrder:
-      description: Persist a reordered agent-card list (agent ids, first card first).
+      description: Persist a reordered card list (agent and PC shell ids, first card first).
       type: object
       additionalProperties: false
       required: [type, order]
@@ -1590,6 +2573,45 @@ components:
           type: array
           items:
             type: integer
+
+    OpenPcShell:
+      description: >-
+        Open the PC shell of a piece (a placed furniture uid whose furniture
+        declares the `terminal` panel): its live shell when it has one, else a
+        new login shell in the named `directory` (one of the Directories mapped
+        to the piece's Area: the office's Directory selector), else the single
+        Directory mapped to the piece's Area, else the home folder. A
+        `directory` that is not one of the Area's is refused. Answered with
+        `pcShellReady` (or `pcShellRejected`). Privileged, and refused where the
+        office offers no terminal.
+      type: object
+      additionalProperties: false
+      required: [type, uid]
+      properties:
+        type:
+          const: openPcShell
+        uid:
+          type: string
+        directory:
+          type: string
+          description: The chosen Directory's name.
+
+    ClosePcShell:
+      description: >-
+        End a PC shell (its card's ×). An idle shell ends at once; one running a
+        command is answered with `pcShellCloseQuestion` unless `confirmed`.
+        Privileged.
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type:
+          const: closePcShell
+        id:
+          type: integer
+        confirmed:
+          type: boolean
+          description: The user confirmed closing it with a command running.
 
     SetBypassPermissions:
       description: >-
@@ -1618,6 +2640,38 @@ components:
           const: setShowHostDirectories
         enabled:
           type: boolean
+
+    SetUploadDirectory:
+      description: >-
+        Persist where files sent to a terminal are saved on the host. `path` is
+        absolute or starts with `~/`; empty goes back to the default (the
+        server's own uploads folder, which it sweeps). The folder is created when a file first
+        lands in it. Answered to the sender with `settingsLoaded` carrying the
+        directory as it now stands (unchanged when the path was refused).
+      type: object
+      additionalProperties: false
+      required: [type, path]
+      properties:
+        type:
+          const: setUploadDirectory
+        path:
+          type: string
+
+    ReplayIntro:
+      description: >-
+        Settings → Replay the Intro: ask this office the Intro's questions
+        again, whatever was answered before. Privileged. Answered to the
+        sender alone with a `hooksConsentRequest` per hook provider and,
+        where the server offers the Pixel Office MCP, an
+        `officeMcpConsentRequest` after them; nothing is changed until the
+        choices step is answered (each answer the usual absolute state), and
+        closing the replayed Intro changes nothing.
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: replayIntro
 
     SaveDirectory:
       description: |
@@ -1650,6 +2704,11 @@ components:
             minimum: 0
         characterOrder:
           $ref: '#/components/schemas/DirectoryCharacterOrder'
+        worktreeBase:
+          $ref: '#/components/schemas/WorktreeBase'
+        worktreeBranchPrefix:
+          type: string
+          description: The branch prefix for new Worktrees. Empty or absent = none.
 
     RemoveDirectory:
       description: >-
@@ -1726,7 +2785,11 @@ components:
       description: >-
         Resume a past conversation in a new terminal: the agent comes back
         wearing the character it wore, in the seat it sat in when that seat is
-        free. Ignored when an agent in the office is already running it.
+        free. Ignored when an agent in the office is already running it. A
+        conversation of a Worktree resumes in the Worktree's folder, rebuilt
+        from its branch when it was removed (saved changes come back
+        uncommitted); refused with `worktreeRejected` when it can't be (its
+        branch was deleted, something else sits at its path).
       type: object
       additionalProperties: false
       required: [type, sessionId, directoryPath]
@@ -1738,6 +2801,129 @@ components:
         directoryPath:
           type: string
           description: Path of the Directory the conversation was listed under.
+
+    RequestWorktrees:
+      description: >-
+        Ask for one Directory's Worktrees; the host replies `worktreesLoaded`
+        to this client only. Privileged (refused for read-only clients).
+      type: object
+      additionalProperties: false
+      required: [type, directoryPath]
+      properties:
+        type:
+          const: requestWorktrees
+        directoryPath:
+          type: string
+
+    RequestCliSignInStatus:
+      description: >-
+        Ask whether the provider's CLI is signed in: the host replies
+        `cliSignInStatus` to this client only (with the sign-in under way, if
+        this client started one). Privileged.
+      type: object
+      additionalProperties: false
+      required: [type, providerId]
+      properties:
+        type:
+          const: requestCliSignInStatus
+        providerId:
+          type: string
+
+    StartCliSignIn:
+      description: >-
+        Start signing the provider's CLI in (Claude: `claude auth login`),
+        replacing a sign-in already under way. Answered with `cliSignInStatus`
+        carrying the page to sign in on, and again when it ends. `onHost` says
+        the office is open on the host itself, so the CLI may open the browser
+        there and finish without a code; otherwise the host opens nothing and
+        the office opens `signInUrl`. Privileged.
+      type: object
+      additionalProperties: false
+      required: [type, providerId, onHost]
+      properties:
+        type:
+          const: startCliSignIn
+        providerId:
+          type: string
+        onHost:
+          type: boolean
+        account:
+          $ref: '#/components/schemas/CliSignInAccount'
+
+    CliSignInAccount:
+      description: >-
+        Which kind of account a sign-in is for: the provider's subscription
+        (the default when absent) or its pay-per-use API account.
+      type: string
+      enum: [subscription, api]
+
+    SubmitCliSignInCode:
+      description: >-
+        The code the provider's sign-in page ended on, handed to the sign-in
+        under way; ignored when there is none. The outcome arrives as
+        `cliSignInStatus`. Privileged.
+      type: object
+      additionalProperties: false
+      required: [type, providerId, code]
+      properties:
+        type:
+          const: submitCliSignInCode
+        providerId:
+          type: string
+        code:
+          type: string
+
+    RequestWorktreeOptions:
+      description: >-
+        Ask what a new Worktree of a Directory's repo can be: the host replies
+        `worktreeOptions` to this client only. Privileged.
+      type: object
+      additionalProperties: false
+      required: [type, directoryPath]
+      properties:
+        type:
+          const: requestWorktreeOptions
+        directoryPath:
+          type: string
+
+    DecideWorktree:
+      description: >-
+        Answer for a Worktree no agent runs in (the decision dialog). Decided
+        on the Worktree's state when it arrives, and answered by a
+        `worktreesLoaded` broadcast, or `worktreeDecisionRejected` to this
+        client when it could not be done. Privileged (refused for read-only clients).
+      type: object
+      additionalProperties: false
+      required: [type, directoryPath, name, choice]
+      properties:
+        type:
+          const: decideWorktree
+        directoryPath:
+          type: string
+          description: The Directory the Worktree belongs to.
+        name:
+          type: string
+          description: >-
+            The Worktree's name (its folder in the worktrees folder,
+            `.claude/worktrees/` for Claude Code).
+        choice:
+          $ref: '#/components/schemas/WorktreeChoice'
+        confirmedFiles:
+          type: integer
+          minimum: 0
+          description: >-
+            `discard`, and `remove` of one of the CLI's own worktrees: how
+            many files the user confirmed losing. Refused when more are
+            uncommitted by the time it arrives.
+        confirmedCommits:
+          type: integer
+          minimum: 0
+          description: >-
+            `deleteBranch`, and `remove` of one of the CLI's own worktrees
+            (which deletes its branch too): how many commits the user
+            confirmed losing (the ones merged into no other branch). Refused
+            when more would be lost by the time it arrives; absent = none may
+            be.
 
     SetShowAreas:
       description: Toggle the Areas overlay (translucent rendering on top of the office).
@@ -1812,7 +2998,7 @@ components:
         read-only in the office; `user` entries are defined by the user.
       type: object
       additionalProperties: false
-      required: [name, path, source]
+      required: [name, path, source, isRepo]
       properties:
         name:
           type: string
@@ -1820,6 +3006,23 @@ components:
           type: string
         source:
           $ref: '#/components/schemas/DirectorySource'
+        isRepo:
+          type: boolean
+          description: >-
+            Whether the Directory is a git repo's root, so agents can be
+            launched into Worktrees of it.
+        hasOrigin:
+          type: boolean
+          description: >-
+            Whether that repo has an `origin` remote, so its Worktrees can
+            start from origin's default branch. Absent = no.
+        worktreeBase:
+          $ref: '#/components/schemas/WorktreeBase'
+        worktreeBranchPrefix:
+          type: string
+          description: >-
+            Put before a new Worktree's generated name to make its branch
+            (`feature/` gives `feature/brave-otter`). Absent = none.
         characters:
           type: array
           description: >-
@@ -2141,3 +3344,95 @@ components:
           type: string
         frame:
           type: integer
+        interactive:
+          $ref: '#/components/schemas/FurnitureInteractive'
+
+    FurnitureInteractive:
+      description: |
+        How a furniture takes part in the office (CONTEXT.md → Interactive furniture), as
+        its manifest's `interactive` block declares it, validated where the manifest was
+        read (core/src/furniture/interactive.ts) and carried on every asset of that
+        furniture. Every part is optional; a block that failed validation is never sent
+        (the furniture is plain furniture). A condition list holds when ANY of its
+        conditions does.
+      type: object
+      additionalProperties: false
+      properties:
+        agentUse:
+          $ref: '#/components/schemas/FurnitureAgentUse'
+        label:
+          $ref: '#/components/schemas/FurnitureLabelSpec'
+        panel:
+          $ref: '#/components/schemas/FurniturePanel'
+        states:
+          type: array
+          description: |
+            Which declared state a piece shows under which condition, the first rule
+            whose condition holds winning; no rule holding = its usual sprite.
+          items:
+            $ref: '#/components/schemas/FurnitureStateRule'
+
+    FurnitureAgentUse:
+      description: |
+        How agents use a furniture: `workstation` = agents work here (a seat facing it
+        pairs with it; its agent at work is the `agentWorking` condition, the agent
+        seated at it, working or not, `agentSeated`).
+      type: string
+      enum: [workstation]
+
+    FurniturePanel:
+      description: The panel the office provides that a piece opens (CONTEXT.md → Panel).
+      type: string
+      enum: [terminal]
+
+    FurnitureCondition:
+      description: |
+        A fact the office holds about a piece: `agentWorking` = an agent is working at
+        it; `agentSeated` = an agent's seat is its workstation seat, working or idle;
+        `panelInUse` = its panel is in use (a PC: a live PC shell); `free` = no agent
+        seated at it and its panel not in use.
+      type: string
+      enum: [agentWorking, agentSeated, panelInUse, free]
+
+    FurnitureLabelSpec:
+      description: |
+        A Furniture label: its name, then the first of its lines whose condition
+        holds (a label says one thing: list the lines in the order a click resolves).
+        A line's text may name `{agent}` (the agent working at it, else the one seated
+        at it; only in a line shown on `agentWorking` and/or `agentSeated` alone) or `{panel}` (what its panel holds, a PC shell's
+        Directory; only in a line shown on `panelInUse` alone).
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/FurnitureLabelLine'
+
+    FurnitureLabelLine:
+      type: object
+      additionalProperties: false
+      required: [when, text]
+      properties:
+        when:
+          type: array
+          items:
+            $ref: '#/components/schemas/FurnitureCondition'
+        text:
+          type: string
+
+    FurnitureStateRule:
+      type: object
+      additionalProperties: false
+      required: [state, when]
+      properties:
+        state:
+          type: string
+          description: One of the furniture's declared states (its manifest's `state` values).
+        when:
+          type: array
+          items:
+            $ref: '#/components/schemas/FurnitureCondition'

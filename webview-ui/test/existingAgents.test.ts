@@ -163,7 +163,7 @@ test('layout ready: an agent the office already shows takes the server look and 
 test('layout ready: an absent snapshot Role clears stale Role metadata', () => {
   const os = fakeOffice([5]);
 
-  reconcileExistingAgents(os, [5], {}, {}, true, [], {}, { 5: undefined });
+  reconcileExistingAgents(os, [5], {}, {}, true, [], {}, {}, {}, { 5: undefined });
 
   assert.deepEqual(os.roles, [[5, undefined]]);
 });
@@ -216,7 +216,7 @@ test('layout ready: a restored agent receives its Role, including absence', () =
   const os = fakeOffice();
   const pending: PendingAgent[] = [];
 
-  reconcileExistingAgents(os, [5, 6], {}, {}, true, pending, {}, { 5: ARCHITECT });
+  reconcileExistingAgents(os, [5, 6], {}, {}, true, pending, {}, {}, {}, { 5: ARCHITECT });
 
   assert.deepEqual(os.roles, [
     [5, ARCHITECT],
@@ -228,7 +228,7 @@ test('layout not ready: the Role rides along on the buffered agent', () => {
   const os = fakeOffice();
   const pending: PendingAgent[] = [];
 
-  reconcileExistingAgents(os, [5, 6], {}, {}, false, pending, {}, { 5: ARCHITECT });
+  reconcileExistingAgents(os, [5, 6], {}, {}, false, pending, {}, {}, {}, { 5: ARCHITECT });
 
   assert.equal(os.roles.length, 0, 'nothing is named before the layout flush');
   assert.deepEqual(
@@ -244,7 +244,7 @@ test("layout ready: an agent the office already shows takes the snapshot's Role 
   const os = fakeOffice([5]);
   const pending: PendingAgent[] = [];
 
-  reconcileExistingAgents(os, [5], {}, {}, true, pending, {}, { 5: ARCHITECT });
+  reconcileExistingAgents(os, [5], {}, {}, true, pending, {}, {}, {}, { 5: ARCHITECT });
 
   assert.equal(os.calls.length, 0);
   assert.deepEqual(os.roles, [[5, ARCHITECT]]);
@@ -268,5 +268,35 @@ test('layout ready: agent with no metadata is still added with undefined fields'
       skipSpawnEffect: true,
       directoryName: undefined,
     },
+  ]);
+});
+
+// ── Worktrees survive a reload and a reconnect ──────────────────
+
+test('a restored Worktree agent wears its Worktree, buffered or added at once', () => {
+  const worktree = { name: 'brave-otter', branch: 'feature/brave-otter' };
+  const set: Array<{ id: number; worktree?: { name: string; branch: string } }> = [];
+  const os = fakeOffice();
+  os.setAgentWorktree = (id, wt) => set.push({ id, worktree: wt });
+
+  const pending: PendingAgent[] = [];
+  reconcileExistingAgents(os, [5, 6], {}, {}, false, pending, {}, { 5: worktree });
+  assert.deepEqual(pending[0].worktree, worktree);
+  assert.equal(pending[1].worktree, undefined);
+
+  reconcileExistingAgents(os, [5, 6], {}, {}, true, [], {}, { 5: worktree });
+  assert.deepEqual(set, [{ id: 5, worktree }]);
+});
+
+test('a reconnect re-applies each shown agent its Worktree, or none', () => {
+  const worktree = { name: 'brave-otter', branch: 'brave-otter' };
+  const set: Array<{ id: number; worktree?: { name: string; branch: string } }> = [];
+  const os = fakeOffice([5, 6]);
+  os.setAgentWorktree = (id, wt) => set.push({ id, worktree: wt });
+
+  reconcileExistingAgents(os, [5, 6], {}, {}, true, [], {}, { 5: worktree });
+  assert.deepEqual(set, [
+    { id: 5, worktree },
+    { id: 6, worktree: undefined },
   ]);
 });

@@ -12,16 +12,22 @@ import type {
   ReloadAssetsSideEffect,
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
-import { handleClientMessage } from './clientMessageHandler.js';
+import { handleClientMessage, uploadDirectoryOf } from './clientMessageHandler.js';
+import { readConfig } from './configPersistence.js';
 import {
   HOOK_API_PREFIX,
   MAX_HOOK_BODY_SIZE,
+  STATIC_FONT_MAX_AGE_SECONDS,
+  STATIC_HASHED_MAX_AGE_SECONDS,
   USAGE_API_PREFIX,
   WS_CLOSE_FORBIDDEN_ORIGIN,
   WS_CLOSE_UNAUTHORIZED,
 } from './constants.js';
 import { applyReportedContext } from './contextUsage.js';
+import type { OfficeMcpFeature } from './mcp/composeOfficeMcp.js';
+import type { PcShellRegistry, PcShellView } from './pcShells.js';
 import { hookProviderById } from './providers/index.js';
+import { startUploadSweeps } from './terminal/fileUploads.js';
 import { registerTerminalRoutes } from './terminal/terminalRoutes.js';
 import type { TerminalSessions } from './terminal/terminalSessions.js';
 import type { AgentState } from './types.js';
@@ -65,6 +71,10 @@ export interface HttpServerOptions {
   /** PTY terminals for standalone-launched agents. Absent = terminal feature off
    *  (VS Code embedded mode, where the editor owns terminals). */
   ptyManager?: TerminalSessions;
+  /** The PC shells: their list sent on connect, their ids kept in the card order (both surfaces). */
+  pcShells?: PcShellView;
+  /** The PC shells opened and closed over /ws (standalone only). */
+  pcShellControl?: PcShellRegistry;
   /** The package root holding dist/hooks/ (standalone), from which the Usage
    *  Bars toggle installs the status line bridge script. */
   packageRoot?: string;
@@ -72,6 +82,11 @@ export interface HttpServerOptions {
    *  privileged standalone handshake may arrive under -- e.g. a reverse proxy's
    *  public name. See wsAuth.privilegedHostnames. */
   allowedHosts?: readonly string[];
+  /** The Pixel Office MCP: mounted at /mcp when given (its own per-agent
+   *  tokens, never this server's), and handed to the message handler for its
+   *  messages, its part of the handshake and launches; each socket's
+   *  editing-lock report is dropped when it closes. */
+  officeMcp?: OfficeMcpFeature;
 }
 
 /** Result of createHttpServer(). */
@@ -81,6 +96,20 @@ export interface HttpServerHandle {
 }
 
 const startTime = Date.now();
+
+/** A Vite bundle: `assets/<name>-<8 hash characters>.js|css`. */
+const HASHED_BUNDLE = /[\\/]assets[\\/][^\\/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/;
+const FONT_FILE = /[\\/]fonts[\\/][^\\/]+\.woff2$/;
+
+/** The `Cache-Control` of a static file the browser may keep, or null to
+ *  leave it revalidated on every load. */
+export function staticCacheControl(filePath: string): string | null {
+  if (HASHED_BUNDLE.test(filePath)) {
+    return `public, max-age=${STATIC_HASHED_MAX_AGE_SECONDS}, immutable`;
+  }
+  if (FONT_FILE.test(filePath)) return `public, max-age=${STATIC_FONT_MAX_AGE_SECONDS}`;
+  return null;
+}
 
 /**
  * Create a Fastify server with hook endpoint, health check, and WebSocket support.
@@ -106,6 +135,15 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
     await app.register(fastifyStatic, {
       root: options.staticDir,
       prefix: '/',
+      // Files that never change under their name are kept by the browser, so a
+      // reopened office (a phone's home-screen app above all) doesn't fetch the
+      // font and the bundle again: Vite's hashed bundles for good, the font for
+      // STATIC_FONT_MAX_AGE_SECONDS. Everything else (index.html, the manifest,
+      // furniture art) is revalidated on every load, as before.
+      setHeaders: (res, filePath) => {
+        const cacheControl = staticCacheControl(filePath);
+        if (cacheControl) res.header('Cache-Control', cacheControl);
+      },
     });
     // HTML5 history fallback: serve index.html for unmatched routes
     app.setNotFoundHandler((_req, reply) => {
@@ -121,12 +159,19 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerHealthRoute(app);
   registerHookRoute(app, options);
   registerUsageRoute(app, options);
+  options.officeMcp?.registerRoutes(app);
   registerWebSocketRoute(app, options, allowedHostnames);
   registerTerminalRoutes(app, {
     token: options.token,
     allowedHostnames,
     ptyManager: options.ptyManager,
+    uploadDirectory: () => uploadDirectoryOf(options.store.getAdapter()),
+    sourceDirectories: () => readConfig().directories.map((directory) => directory.path),
   });
+  if (options.ptyManager) {
+    const stopUploadSweeps = startUploadSweeps();
+    app.addHook('onClose', () => stopUploadSweeps());
+  }
 
   // ── Listen ──────────────────────────────────────────────────
 
@@ -295,6 +340,10 @@ function registerWebSocketRoute(
           packageRoot: options.packageRoot,
           privileged,
           ptyManager: options.ptyManager,
+          pcShells: options.pcShells,
+          pcShellControl: options.pcShellControl,
+          officeMcp: options.officeMcp,
+          client: socket,
         });
       } catch {
         // Malformed JSON, ignore
@@ -305,6 +354,8 @@ function registerWebSocketRoute(
       store.off('agentAdded', onAgentAdded);
       store.off('agentRemoved', onAgentRemoved);
       store.off('broadcast', onBroadcast);
+      // A closed office no longer holds unsaved layout changes.
+      options.officeMcp?.clientGone(socket);
     });
   });
 }

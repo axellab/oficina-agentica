@@ -25,6 +25,7 @@ import { PIXEL_AGENTS_DIR, ROLE_PROMPTS_DIR_NAME, ROLES_FILE_NAME } from '../src
 import { BUILTIN_ROLES } from '../src/roles/builtinRoles.js';
 import { prepareRoleLaunch, roleCatalog, rolesLoadedMessage } from '../src/roles/roleCatalog.js';
 import { composeRolePrompt } from '../src/roles/rolePrompt.js';
+import { clearTestHome } from './helpers/removeTempDir.js';
 
 /**
  * Roles: the parts of a delivery team an agent can be launched as. Three
@@ -323,7 +324,7 @@ describe('the host catalog', () => {
   }
 
   beforeEach(() => {
-    fs.rmSync(dir(), { recursive: true, force: true });
+    clearTestHome(PIXEL_AGENTS_DIR);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });

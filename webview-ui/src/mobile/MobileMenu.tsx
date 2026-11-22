@@ -9,6 +9,7 @@ import {
   ConversationList,
   type ConversationSearchScope,
 } from '../conversations/ConversationList.js';
+import type { WorktreesListing } from '../conversations/WorktreeList.js';
 import type { SwipePanel } from './useEdgeSwipe.js';
 import { useEdgeSwipe } from './useEdgeSwipe.js';
 
@@ -28,8 +29,12 @@ interface MobileMenuProps {
   /** A running conversation pressed: go to its agent's terminal. */
   onOpenAgent: (agentId: number) => void;
   statusFor: (agentId: number) => TabStatus | null;
+  /** Each Directory's Worktrees, listed in its section. */
+  worktrees?: WorktreesListing;
   /** Open the conversation search (over the menu). */
   onSearch?: (scope: ConversationSearchScope) => void;
+  /** Add a Directory, offered while the list has none (the menu closes first). */
+  onAddDirectory?: () => void;
 }
 
 /**
@@ -54,7 +59,9 @@ export function MobileMenu({
   onResume,
   onOpenAgent,
   statusFor,
+  worktrees,
   onSearch,
+  onAddDirectory,
 }: MobileMenuProps) {
   useEffect(() => {
     if (!open) return;
@@ -127,7 +134,16 @@ export function MobileMenu({
               onClose();
             }}
             statusFor={statusFor}
+            worktrees={worktrees}
             onSearch={onSearch}
+            onAddDirectory={
+              onAddDirectory
+                ? () => {
+                    onClose();
+                    onAddDirectory();
+                  }
+                : undefined
+            }
           />
         ) : (
           <div className="flex-1" />

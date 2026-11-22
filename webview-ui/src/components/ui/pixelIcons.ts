@@ -187,6 +187,17 @@ export const ICONS = {
     '##..####',
     '....####',
   ],
+  // A clock: the conversations' history (the sidebar's empty view).
+  history: [
+    '..####..',
+    '.#....#.',
+    '#..#...#',
+    '#..#...#',
+    '#..###.#',
+    '#......#',
+    '.#....#.',
+    '..####..',
+  ],
   office: [
     '...##...',
     '..####..',
@@ -322,6 +333,28 @@ export const ICONS = {
     '........',
     '........',
   ],
+  // A git branch: the trunk's two commits on the left, a branch forking off
+  // to its own commit top right (a Worktree's mark).
+  trash: [
+    '...##...',
+    '.######.',
+    '........',
+    '.######.',
+    '.#.##.#.',
+    '.#.##.#.',
+    '.#.##.#.',
+    '.######.',
+  ],
+  worktree: [
+    '##...##.',
+    '##...##.',
+    '.#...#..',
+    '.#..#...',
+    '.#.#....',
+    '.##.....',
+    '##......',
+    '##......',
+  ],
   // A magnifying glass: the lens top-left, the handle out to the corner.
   search: [
     '.####...',
@@ -332,6 +365,18 @@ export const ICONS = {
     '.####...',
     '.....##.',
     '......##',
+  ],
+  // A brand mark keeps the website header's own grid, the one exception to
+  // 8×8: Discord's logo at 11×8.
+  discord: [
+    '..##...##..',
+    '.#########.',
+    '###########',
+    '##..###..##',
+    '##..###..##',
+    '###########',
+    '.###...###.',
+    '..#.....#..',
   ],
 } as const satisfies Record<string, readonly string[]>;
 

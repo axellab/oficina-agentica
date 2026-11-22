@@ -7,6 +7,7 @@ import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
 
 import { type HookServerConfig, waitForHookServer } from './hooks';
+import { removeTempDir } from './removeTempDir';
 
 const REPO_ROOT = path.join(__dirname, '../..');
 const STANDALONE_CLI = path.resolve(REPO_ROOT, 'dist', 'cli.js');
@@ -48,7 +49,8 @@ export interface LaunchStandaloneOptions {
   /** Reuse an existing workspace. A supplied directory is never removed by
    *  standalone cleanup. */
   workspaceDir?: string;
-  /** Pre-seed a granted Claude hooksConsent entry so the first-run dialog never
+  /** Pre-seed a granted Claude hooksConsent entry (and a declined Pixel Office
+   *  MCP answer) so the first-run dialog never
    *  covers the office (default). The consent specs opt out with `false` —
    *  they are the only ones that want the dialog. Never overwrites a
    *  config.json that already exists (a shared HOME was seeded by its owner). */
@@ -59,9 +61,16 @@ export interface LaunchStandaloneOptions {
    *  host's PATH, so agents launched from the browser spawn the scenario
    *  runner in the host's PTY instead of a real Claude CLI. */
   mockClaude?: boolean;
+  /** Extra environment for the host, which its PTYs (the mock claude) inherit
+   *  — e.g. `{ PIXEL_AGENTS_MOCK_STDIN: 'record' }`. */
+  hostEnv?: Record<string, string>;
   /** Browser viewport (default 1280×800, the desktop shell). A phone-sized
    *  viewport renders the mobile shell instead. */
   viewport?: { width: number; height: number };
+  /** Leave the desktop conversation sidebar as a new browser finds it (shut).
+   *  By default the harness opens it before the page loads: most specs reach
+   *  Settings and the conversations through it. */
+  conversationSidebarAsFound?: boolean;
   /** Pre-seed `~/.pixel-agents/layout.json` before the host starts (see
    *  helpers/layout-seed.ts — it must carry a high layoutRevision). */
   seedLayout?: unknown;
@@ -149,6 +158,7 @@ function spawnStandaloneHost(args: {
   workspaceDir: string;
   cliArgs?: string[];
   mockClaude?: boolean;
+  hostEnv?: Record<string, string>;
 }): ChildProcessWithoutNullStreams {
   if (!fs.existsSync(STANDALONE_CLI)) {
     throw new Error(
@@ -157,6 +167,7 @@ function spawnStandaloneHost(args: {
   }
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    ...args.hostEnv,
     HOME: args.homeDir,
     USERPROFILE: args.homeDir,
   };
@@ -280,10 +291,15 @@ async function waitForPrintedUrl(readOutput: () => string): Promise<string> {
 /** Open the SPA the way the operator does: by pasting in the URL the CLI printed. */
 async function openStandalonePage(page: Page, printedUrl: string): Promise<void> {
   await page.goto(printedUrl);
-  // Desktop's toolbar has Settings; the phone's top-left button is Menu.
-  await expect(page.getByRole('button', { name: /^(Settings|Menu)$/ }).first()).toBeVisible({
-    timeout: 30_000,
-  });
+  // Desktop has Settings (the toolbar's, or the open sidebar's); the phone's
+  // top-left button is Menu; a desktop left as a new browser finds it shows
+  // neither, only the button that opens its sidebar.
+  await expect(
+    page
+      .getByRole('button', { name: /^(Settings|Menu)$/ })
+      .or(page.getByTitle('Show conversations'))
+      .first(),
+  ).toBeVisible({ timeout: 30_000 });
 }
 
 export async function launchStandalone(
@@ -310,7 +326,12 @@ export async function launchStandalone(
     // default overrides `standalone` through seedConfig.
     const seeded = {
       standalone: { showHostDirectories: true },
-      ...((options.seedHooksConsent ?? true) ? { hooksConsent: { claude: 'granted' } } : {}),
+      // The first-run asks answered: hooks granted, the Pixel Office MCP
+      // declined (launches get no --mcp-config). The consent specs opt out
+      // of both with seedHooksConsent: false.
+      ...((options.seedHooksConsent ?? true)
+        ? { hooksConsent: { claude: 'granted' }, officeMcpConsent: 'declined' }
+        : {}),
       ...options.seedConfig,
     };
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -333,6 +354,7 @@ export async function launchStandalone(
       workspaceDir,
       cliArgs: options.cliArgs,
       mockClaude: options.mockClaude,
+      hostEnv: options.hostEnv,
     });
     proc.stdout.on('data', (chunk) => {
       hostStdout += chunk.toString();
@@ -351,6 +373,14 @@ export async function launchStandalone(
     await page.addInitScript(() => {
       (window as unknown as { __PIXEL_AGENTS_E2E?: boolean }).__PIXEL_AGENTS_E2E = true;
     });
+    if (!options.conversationSidebarAsFound) {
+      // Once per tab, so a spec that shuts the sidebar keeps it shut over a reload.
+      await page.addInitScript(() => {
+        if (sessionStorage.getItem('e2e.sidebarSeeded')) return;
+        sessionStorage.setItem('e2e.sidebarSeeded', '1');
+        localStorage.setItem('pixel-agents.conversationSidebarOpen', '1');
+      });
+    }
     await installMessageRecorder(page);
     await waitForHttpOk(`${hostUrl}/api/health`);
     // The hook-endpoint Bearer token is a different channel and legitimately
@@ -378,14 +408,14 @@ export async function launchStandalone(
       },
       cleanup: async () => {
         await stopProcess(hostProcess);
-        if (ownsHome) fs.rmSync(tmpHome, { recursive: true, force: true });
-        if (ownsWorkspace) fs.rmSync(workspaceDir, { recursive: true, force: true });
+        if (ownsHome) removeTempDir(tmpHome);
+        if (ownsWorkspace) removeTempDir(workspaceDir);
       },
     };
   } catch (error) {
     await stopProcess(hostProcess);
-    if (ownsHome) fs.rmSync(tmpHome, { recursive: true, force: true });
-    if (ownsWorkspace) fs.rmSync(workspaceDir, { recursive: true, force: true });
+    if (ownsHome) removeTempDir(tmpHome);
+    if (ownsWorkspace) removeTempDir(workspaceDir);
     // Setup failures never reach the fixture's log-attaching teardown, so fold
     // the host's output into the error itself — otherwise a host that dies at
     // boot on CI leaves nothing to diagnose but a connection-refused message.

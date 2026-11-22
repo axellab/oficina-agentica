@@ -32,8 +32,9 @@ interface BottomToolbarProps {
   /** Why the terminal is off (shown on the disabled button's tooltip). */
   terminalUnavailableReason: string | null;
   /** A Directory picked from the + drawer: launch into it (wearing `palette`
-   *  when a character was picked first). */
-  onLaunch: (directory: Directory, palette?: number, roleId?: string) => void;
+   *  when a character was picked first; into a new Worktree when `worktree`;
+   *  as the Role `roleId` when one was picked in the drawer). */
+  onLaunch: (directory: Directory, palette?: number, worktree?: boolean, roleId?: string) => void;
 }
 
 /** Every toolbar button's height: the labelled ones' natural height (26 px
@@ -101,9 +102,14 @@ export function BottomToolbar({
     closeDelayMs: ROSTER_HOVER_CLOSE_DELAY_MS,
   });
 
-  const handleDirectorySelect = (directory: Directory, palette?: number, roleId?: string) => {
+  const handleDirectorySelect = (
+    directory: Directory,
+    palette?: number,
+    worktree?: boolean,
+    roleId?: string,
+  ) => {
     closeDrawer();
-    onLaunch(directory, palette, roleId);
+    onLaunch(directory, palette, worktree, roleId);
   };
 
   const rosterPanel = usePresence(menus.isRosterOpen);

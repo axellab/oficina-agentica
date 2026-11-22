@@ -20,7 +20,6 @@ export const GLOBAL_KEY_LAST_SEEN_VERSION = 'pixel-agents.lastSeenVersion';
 export const GLOBAL_KEY_ALWAYS_SHOW_LABELS = 'pixel-agents.alwaysShowLabels';
 export const GLOBAL_KEY_GHOST_HEADLESS_AGENTS = 'pixel-agents.ghostHeadlessAgents';
 export const GLOBAL_KEY_WATCH_ALL_SESSIONS = 'pixel-agents.watchAllSessions';
-export const GLOBAL_KEY_HOOKS_INFO_SHOWN = 'pixel-agents.hooksInfoShown';
 export const GLOBAL_KEY_SHOW_AREAS = 'pixel-agents.showAreas';
 export const GLOBAL_KEY_BYPASS_PERMISSIONS = 'pixel-agents.bypassPermissions';
 export const GLOBAL_KEY_SHOW_HOST_DIRECTORIES = 'pixel-agents.showHostDirectories';
@@ -42,3 +41,8 @@ export const CONFIG_KEY_AUTO_SPAWN_AGENT = 'pixel-agents.autoSpawnAgent';
 export const VIEW_ID = 'pixel-agents.panelView';
 export const COMMAND_SHOW_PANEL = 'pixel-agents.showPanel';
 export const COMMAND_EXPORT_DEFAULT_LAYOUT = 'pixel-agents.exportDefaultLayout';
+
+// ── PC shells ───────────────────────────────────────────────
+/** A PC shell's integrated terminal is named `PC · <its Directory or Home>`
+ *  (never the Claude prefix, which the terminal scanner adopts). */
+export const PC_SHELL_TERMINAL_NAME_PREFIX = 'PC';

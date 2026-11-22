@@ -4,8 +4,14 @@ import fs from 'fs';
 import path from 'path';
 
 import { applyAllureLabels } from '../helpers/allure-labels';
-import { launchVSCode, type VSCodeSession, waitForWorkbench } from '../helpers/launch';
+import {
+  ARTIFACTS_DIR,
+  launchVSCode,
+  type VSCodeSession,
+  waitForWorkbench,
+} from '../helpers/launch';
 import { killTrackedExternalProcesses } from '../helpers/mock-claude';
+import { removeUnder } from '../helpers/removeTempDir';
 import {
   clearNarrationContext,
   finishNarration,
@@ -57,7 +63,7 @@ function shouldAttachRunVideo(testInfo: TestInfo): boolean {
 function removeDirIfExists(dirPath: string | undefined): void {
   try {
     if (!dirPath || !fs.existsSync(dirPath)) return;
-    fs.rmSync(dirPath, { recursive: true, force: true });
+    removeUnder(ARTIFACTS_DIR, dirPath);
   } catch {
     // Artifact cleanup failures are non-fatal in teardown.
   }
@@ -74,11 +80,14 @@ export const test = base.extend<{
   seedClaudeSettings: unknown;
   /** Folder basenames for a multi-root workspace (>1 → multi-root). */
   workspaceFolders: string[];
+  /** Workspace folders to make git repos (one commit) before VS Code opens. */
+  gitRepoFolders: string[];
 }>({
   seedConfig: [undefined, { option: true }],
   seedLayout: [undefined, { option: true }],
   seedClaudeSettings: [undefined, { option: true }],
   workspaceFolders: [[], { option: true }],
+  gitRepoFolders: [[], { option: true }],
   // Auto-fixture: tag every test with Allure epic + feature derived from its
   // @area: annotation and enclosing describe path. Runs before pixelAgents.
   _allureLabels: [
@@ -89,7 +98,7 @@ export const test = base.extend<{
     { auto: true },
   ],
   pixelAgents: async (
-    { seedConfig, seedLayout, seedClaudeSettings, workspaceFolders },
+    { seedConfig, seedLayout, seedClaudeSettings, workspaceFolders, gitRepoFolders },
     use,
     testInfo,
   ) => {
@@ -98,6 +107,7 @@ export const test = base.extend<{
       seedLayout,
       seedClaudeSettings,
       workspaceFolders,
+      gitRepoFolders,
     });
     const { window, tmpHome, workspaceDir, mockLogFile } = session;
     const runVideo = window.video();

@@ -1,5 +1,7 @@
 // ── JSONL File Watching ─────────────────────────────────────
 export const JSONL_POLL_INTERVAL_MS = 1000;
+/** Polls (1 s each) of a launch's missing transcript before a terminal /resume is looked for. */
+export const RESUME_FALLBACK_POLLS = 10;
 export const FILE_WATCHER_POLL_INTERVAL_MS = 500;
 export const PROJECT_SCAN_INTERVAL_MS = 1000;
 
@@ -123,6 +125,10 @@ export const HOOK_EVENT_BUFFER_MS = 5_000;
  *  the agent is cleaned up instead of staying as a zombie with pendingClear forever. */
 export const SESSION_END_GRACE_MS = 2000;
 export const MAX_HOOK_BODY_SIZE = 65_536; // 64KB
+/** How long a browser keeps a Vite bundle (its name carries its content's hash). */
+export const STATIC_HASHED_MAX_AGE_SECONDS = 31_536_000; // a year
+/** How long a browser keeps the font, whose name does not change with its content. */
+export const STATIC_FONT_MAX_AGE_SECONDS = 2_592_000; // 30 days
 
 // ── Standalone Embedded Terminal ────────────────────────────
 /** PTY module ids tried in order by the loader. @lydell/node-pty ships prebuilt
@@ -164,6 +170,38 @@ export const TERMINAL_KILL_GRACE_MS = 2_000;
 /** How long shutdown waits past the SIGKILL escalation for the exits to land. */
 export const TERMINAL_SHUTDOWN_SLACK_MS = 1_000;
 
+// ── Files sent to a terminal (server/src/terminal/fileUploads.ts) ──
+/** Where they land unless the user chose a folder: this folder of our own,
+ *  under ~/.pixel-agents, which the server keeps from growing (sweepUploads). */
+export const UPLOADS_DIRECTORY_NAME = 'uploads';
+/** A file in our own uploads folder is deleted this long after it was sent:
+ *  days, since an agent holds only its path and a conversation resumed the
+ *  next day may read it again. */
+export const UPLOAD_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Our own uploads folder never holds more than this: past it the oldest
+ *  files go first, whatever their age. */
+export const UPLOADS_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
+/** How often a running server sweeps its uploads folder (and once at start). */
+export const UPLOAD_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** The OS's Downloads folder, under the home directory: one of the places a
+ *  sent file's original is looked for. */
+export const DOWNLOADS_DIRECTORY_NAME = 'Downloads';
+/** Linux: the file under the XDG config directory that says where the
+ *  desktop's Downloads folder is (`XDG_DOWNLOAD_DIR`). */
+export const XDG_USER_DIRS_FILE_NAME = 'user-dirs.dirs';
+/** A saved file's name is cut to this many characters (its extension kept). */
+export const UPLOAD_FILE_NAME_MAX_LENGTH = 120;
+/** The name of a file that arrived with none usable. */
+export const UPLOAD_FALLBACK_FILE_NAME = 'file';
+/** Looking for a sent file's original on this machine (terminal/localFile.ts):
+ *  how long the check may take before it is given up. */
+export const LOCAL_FILE_SEARCH_TIMEOUT_MS = 2_000;
+/** A file system and a browser round a modification time differently: this
+ *  far apart still counts as the same moment. */
+export const LOCAL_FILE_MTIME_TOLERANCE_MS = 1_000;
+/** How many numbered names (`photo-2.jpg`, …) are tried for a taken one. */
+export const UPLOAD_NAME_ATTEMPTS = 1000;
+
 // ── PTY host (development only: `pixel-agents --pty-host`) ──
 /** The host exits after this long with no terminal and no server connected. */
 export const PTY_HOST_IDLE_EXIT_MS = 60_000;
@@ -184,6 +222,13 @@ export const TERMINAL_DISABLED_BY_FLAG_REASON = 'Terminal disabled with --no-ter
  *  gated exactly like the hooks toggle (wsAuth.standaloneHandshakeVerdict). */
 export const TERMINAL_REQUIRES_TOKEN_REASON =
   'Open the URL the CLI printed (with its ?token=), at localhost or a name passed with --allowed-host, to launch agents from this browser.';
+/** How long the "is a command running in this PC shell?" probe (`ps`) may take
+ *  before the × asks anyway: a probe that can't answer must not kill a build. */
+export const PC_SHELL_PROBE_TIMEOUT_MS = 2_000;
+/** The shell a PC opens where the user's own can't be found (POSIX). */
+export const PC_SHELL_FALLBACK = '/bin/sh';
+/** pcShellRejected reason where this office runs no terminals. */
+export const PC_SHELL_NO_TERMINAL_REASON = 'This office runs no terminals, so a PC opens no shell.';
 /** directoryRejected reason when the shared config write behind a Directory
  *  save or delete failed. The detail (permissions, disk full, ...) is on the
  *  host's console, where writeConfig logged it. */
@@ -207,6 +252,10 @@ export const USAGE_LIMITS_FILE_NAME = 'usage-limits.json';
 /** An unchanged usage report is still passed on (and saved) once this old, so
  *  the office's "updated N min ago" stays true while a session is open. */
 export const USAGE_UNCHANGED_REFRESH_MS = 60_000;
+/** A window that has reset and is missing from this many reports in a row is no longer part of the plan
+ *  (it is dropped, and its bar with it). One report without it is not enough: the CLI drops a window as it
+ *  resets and reports it again with the next reply. */
+export const USAGE_WINDOW_GONE_AFTER_REPORTS = 3;
 
 // ── Avatar Customization ────────────────────────────────────
 /** The character profiles agents are drawn from, in the persistence dir (shared by both surfaces). */
@@ -245,3 +294,170 @@ export const NEW_CONVERSATION_TITLE = 'New conversation';
 /** Most agent ids a saved card order keeps. The order is pruned to live agents
  *  on every save, so this only bounds a hand-edited or hostile payload. */
 export const MAX_CARD_ORDER_LENGTH = 1_000;
+
+// ── Worktrees (server/src/worktree*.ts) ─────────────────────
+/** The registry of the Worktrees Pixel Agents created, in the persistence dir
+ *  (machine-wide, like config.json). Being listed here is the only proof a
+ *  worktree is ours to manage. */
+export const WORKTREES_FILE_NAME = 'worktrees.json';
+/** Whose character each Worktree's row wears (the session of the agent it
+ *  belongs to, by folder), in the persistence dir. Both kinds of Worktree. */
+export const WORKTREE_AGENTS_FILE_NAME = 'worktree-agents.json';
+/** Most Worktrees whose agent is remembered (the newest are kept). */
+export const WORKTREE_AGENTS_MAX = 500;
+/** How long the scanners' reading of the host's Directories (worktree
+ *  attribution) is reused before config.json is read again. This process's
+ *  own Directory changes drop it at once; this only bounds how long another
+ *  process's edit takes to be seen. */
+export const ATTRIBUTION_DIRECTORIES_TTL_MS = 10_000;
+/** Where a Directory's Worktrees live under its repo root when no bundled
+ *  provider declares a worktrees folder of its own. With one that does (Claude
+ *  Code today), they live in the provider's (`HookProvider.worktrees`,
+ *  read by worktreeLocation.ts), so the CLI files their sessions with the
+ *  Directory's. */
+export const FALLBACK_WORKTREES_FOLDER: readonly string[] = ['.pixel-agents', 'worktrees'];
+/** The repo file listing the gitignored files a new Worktree gets a copy of
+ *  (gitignore syntax; the convention Claude Code, Conductor and Codex share). */
+export const WORKTREE_INCLUDE_FILE = '.worktreeinclude';
+/** Generated names tried before a create gives up on finding a free one. */
+export const WORKTREE_NAME_ATTEMPTS = 25;
+/** Base `fresh`: how long the fetch from origin may take before the Worktree
+ *  falls back to the main checkout's current commit. */
+export const WORKTREE_FETCH_TIMEOUT_MS = 15_000;
+/** The most branches the new-worktree modal lists (newest commit first). */
+export const WORKTREE_OPTIONS_MAX_BRANCHES = 500;
+/** Any other git call (all local): a hung one fails the create instead of
+ *  hanging the launch. */
+export const WORKTREE_GIT_TIMEOUT_MS = 30_000;
+/** The reason `git worktree lock` records on every Worktree of ours, for as
+ *  long as it lasts (running, kept or waiting on a decision): the lock keeps
+ *  `git worktree prune` and other tools' cleanup off it, and the reason says
+ *  where it is removed from. */
+export const WORKTREE_LOCK_REASON = 'Pixel Agents worktree: remove it from the Worktrees list';
+/** The trailer that marks a Save & remove commit (so a later restore can tell
+ *  it apart from the agent's own commits). */
+export const WORKTREE_SAVED_TRAILER = 'Pixel-Agents-Saved: true';
+/** The Save & remove commit's subject. */
+export const WORKTREE_SAVE_SUBJECT = 'Save uncommitted changes';
+/** The Save commit's identity when the user has none configured: a save must
+ *  never fail just because git doesn't know who is committing. */
+export const WORKTREE_FALLBACK_NAME = 'Pixel Agents';
+export const WORKTREE_FALLBACK_EMAIL = 'pixel-agents@localhost';
+/** Where what a half-done `git worktree remove` left is moved before it is
+ *  deleted: `<worktrees folder>/<prefix><name>-<ms>` (a dot name, so no
+ *  Worktree is ever made there). */
+export const WORKTREE_REMOVING_PREFIX = '.removing-';
+/** Commits of the base read when looking for a squash merge of a whole
+ *  branch: a bound on the work, newest first. */
+export const WORKTREE_SQUASH_SCAN_COMMITS = 500;
+/** The startup sweep: a kept Worktree folder nobody touched for this long
+ *  needs a decision again (the user forgot it). */
+export const WORKTREE_KEPT_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+/** The startup sweep waits this long after the server is up, so the first
+ *  office's handshake (and the agents restored or reattached for it) goes
+ *  first; git work runs in the background after it. */
+export const WORKTREE_SWEEP_DELAY_MS = 3000;
+/** How long a worktree's branch, read from its HEAD, is trusted before it is
+ *  read again (adoption asks once per session; the scanner never re-reads). */
+export const WORKTREE_BRANCH_CACHE_MS = 5000;
+/** Shutting down: how long the server waits for Worktree git work already
+ *  under way (a retirement, the sweep) before it exits anyway. */
+export const WORKTREE_SHUTDOWN_WAIT_MS = 10_000;
+/** An agent that moved (EnterWorktree / ExitWorktree) whose transcript isn't
+ *  where the CLI said yet: the move and the signal race, so look again this
+ *  often, this many times, before leaving it to the scanners. */
+export const AGENT_MOVE_RETRY_INTERVAL_MS = 500;
+export const AGENT_MOVE_RETRY_ATTEMPTS = 10;
+
+/** How long an answer given at the card's × (save / keep / discard) waits for
+ *  its agent to exit; past it the answer is dropped and the Worktree's leave
+ *  asks again, so a stale answer never applies to some later leave. */
+export const WORKTREE_CLOSE_CHOICE_TTL_MS = 30_000;
+
+// ── Pixel Office MCP (server/src/mcp/) ──────────────────────
+/** The MCP's id: what Claude Code's /mcp list and tool names show
+ *  (`mcp__pixel-office__list_agents`). */
+export const OFFICE_MCP_SERVER_NAME = 'pixel-office';
+/** The route the MCP is served on (Streamable HTTP, stateless). */
+export const OFFICE_MCP_PATH = '/mcp';
+/** Folder under ~/.pixel-agents holding one folder per running server, each
+ *  with one 0600 `--mcp-config` file per agent it launched. */
+export const OFFICE_MCP_CONFIG_DIR = 'mcp';
+/** Request body cap for /mcp (a layout edit batch can be larger than a hook). */
+export const OFFICE_MCP_MAX_BODY_SIZE = 1_048_576; // 1MB
+/** Bytes of randomness in an agent's MCP token. */
+export const OFFICE_MCP_TOKEN_BYTES = 32;
+/** What a changing tool answers while the MCP is read-only. */
+export const OFFICE_MCP_READ_ONLY_REASON =
+  'The Pixel Office MCP is read-only in Pixel Agents settings: listing and reading work, changes are refused. Ask the user to turn read-only off in Settings if this change is needed.';
+
+// ── Messages (read_agent_terminal / send_message) ───────────
+/** A Message's gist (shown in the sender's speech bubble) is at most this long. */
+export const MESSAGE_GIST_MAX_LENGTH = 80;
+/** Wait between a Message's text and the Enter that submits it. Claude Code's
+ *  TUI takes an Enter arriving with (or right on the heels of) a paste as
+ *  part of it — a newline in the input box, not a submit — so the Enter goes
+ *  as its own write, once the paste has landed. */
+export const MESSAGE_SUBMIT_DELAY_MS = 150;
+/** Hex characters of the screen hash a screen token keeps. */
+export const MESSAGE_SCREEN_TOKEN_LENGTH = 16;
+/** Wait between a Message's keys: each key is its own write, as a person's
+ *  keypresses are — a TUI may read one chunk of several keys as one input. */
+export const MESSAGE_KEY_DELAY_MS = 50;
+
+// ── Visits (server/src/visits.ts) ────────────────────────────
+/** A visit without `stay` is over once its character has walked there and
+ *  lingered (core's VISIT_LINGER_MS); this is the walk's allowance. An office
+ *  opened after linger + allowance no longer shows the visit. */
+export const VISIT_WALK_ALLOWANCE_MS = 30_000;
+
+// ── Launch (launch_agent) ───────────────────────────────────
+/** How long launch_agent waits for its agent to join before it says it didn't. */
+export const LAUNCH_JOIN_TIMEOUT_MS = 15_000;
+/** After an agent's CLI first draws, how long it must keep running to count as
+ *  joined: a CLI that rejects its arguments prints why and exits at once. */
+export const LAUNCH_JOIN_SETTLE_MS = 500;
+/** A Nickname is at most this long. */
+export const NICKNAME_MAX_LENGTH = 32;
+
+/** How many Pixel Office MCP layout edits the server remembers for undo (newest first). */
+export const LAYOUT_UNDO_DEPTH = 10;
+/** How many Pixel Office MCP Character edits the server remembers for undo. */
+export const CHARACTER_UNDO_DEPTH = 10;
+/** How many names a Character edit's summary lists per verb ("created A, B, C and 2 more"). */
+export const CHARACTER_SUMMARY_NAMES = 3;
+
+// ── Close (close_agent) ─────────────────────────────────────
+/** An agent closing itself is ended when its turn ends (the reply has reached
+ *  its CLI and the CLI has recorded the turn), or this long after close_agent
+ *  replied when no turn end is heard (a CLI without hooks or transcript). */
+export const SELF_CLOSE_FALLBACK_MS = 10_000;
+
+// ── Character art (server/src/characterArt.ts) ──────────────
+/** Screen pixels per sprite pixel in a character preview PNG (whole number, so the
+ *  pixel art stays crisp): a 16x32 frame becomes 64x128. */
+export const CHARACTER_PREVIEW_SCALE = 4;
+/** The most character previews one Pixel Office MCP reply carries (list_characters'
+ *  `preview`); past it the reply says how many it left out. */
+export const CHARACTER_PREVIEW_LIMIT = 6;
+/** The most ops one edit_directories batch takes. */
+export const MAX_DIRECTORY_OPS = 20;
+/** A refusal naming no known character spells out the roster up to this many
+ *  characters; a longer one is left to list_characters. */
+export const CHARACTER_ROSTER_HINT_MAX = 30;
+/** Where the build puts the wardrobe art, under dist/ (esbuild.js copyWardrobeArt). */
+export const WARDROBE_ART_DIST_DIR = 'assets/wardrobe';
+
+// ── The CLI's trust question (--trust-directories) ───────────
+/** How often a launched agent's screen is read for the question. */
+export const TRUST_PROMPT_POLL_MS = 500;
+/** How long after a launch it is looked for: it is the first thing a session shows, or it never comes. */
+export const TRUST_PROMPT_WATCH_MS = 30_000;
+
+// ── CLI sign-in (the Intro's sign-in step) ───────────────────
+/** How long asking a CLI whether it is signed in may take. */
+export const CLI_SIGN_IN_STATUS_TIMEOUT_MS = 10_000;
+/** How long a sign-in may stay open before it is ended: the user left the page, or the Intro. */
+export const CLI_SIGN_IN_TIMEOUT_MS = 15 * 60_000;
+/** The longest code a sign-in page hands back that is passed on to the CLI. */
+export const CLI_SIGN_IN_CODE_MAX_LENGTH = 1024;

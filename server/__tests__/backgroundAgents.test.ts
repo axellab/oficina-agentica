@@ -24,6 +24,7 @@ import {
 } from '../src/transcriptParser.js';
 import type { AgentState } from '../src/types.js';
 import { finishedNotice, interimNotice, noticeRecord } from './fixtures/taskNotifications.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 const LEAD_SESSION = 'lead-session-1';
 const SPAWN_TOOL_ID = 'toolu_01LMvN98KN4sn1fmvftm7vhk';
@@ -279,7 +280,7 @@ describe('background spawns (teams OFF) classified by sidecar name', () => {
     for (const t of pollingTimers.values()) clearInterval(t);
     pollingTimers.clear();
     vi.useRealTimers();
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    removeTempDir(tmpRoot);
   });
 
   // ── Unnamed spawn = Sub-agent (shadow-watched) ──────────────────────
@@ -691,6 +692,19 @@ describe('background spawns (teams OFF) classified by sidecar name', () => {
     expect(watch.isWatching(jsonlPath)).toBe(false);
   });
 
+  it("a Teammate of a Worktree agent wears its Lead's Worktree", () => {
+    lead.worktree = {
+      name: 'brave-otter',
+      path: '/repo/.claude/worktrees/brave-otter',
+      branch: 'feature/brave-otter',
+    };
+    seedSidecar({ name: 'ghost-writer' });
+    spawnAndLaunch();
+
+    const teammate = [...agents.values()].find((a) => a.leadAgentId === 1);
+    expect(teammate?.worktree).toEqual(lead.worktree);
+  });
+
   it('does not create a second teammate when the sidecar path is spelled differently', () => {
     // Windows only: the same transcript reaches the runtime spelled two ways
     // (hooks carry Claude's `process.cwd()` casing, scanners build from
@@ -960,7 +974,7 @@ describe('background spawn persistence & derived team lifecycle', () => {
       });
     } finally {
       runtime.dispose();
-      fs.rmSync(tmpRoot, { recursive: true, force: true });
+      removeTempDir(tmpRoot);
     }
   });
 
@@ -1061,7 +1075,7 @@ describe('background spawn persistence & derived team lifecycle', () => {
       expect(store.get(1)!.backgroundSpawns.has(SPAWN_TOOL_ID)).toBe(true);
     } finally {
       runtime.dispose();
-      fs.rmSync(tmpRoot, { recursive: true, force: true });
+      removeTempDir(tmpRoot);
     }
   });
 });
@@ -1112,7 +1126,7 @@ describe('a paused background agent that never comes back (Claude Code 2.1.312)'
 
   afterEach(() => {
     runtime.dispose();
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    removeTempDir(tmpRoot);
   });
 
   const writtenAt = (ms: number) => fs.utimesSync(transcript, ms / 1000, ms / 1000);

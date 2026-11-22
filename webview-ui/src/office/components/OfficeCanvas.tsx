@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 
+import type { PieceClick } from '../../../../core/src/furniture/pieceRules.js';
 import {
   CAMERA_FOLLOW_LERP,
   CAMERA_FOLLOW_SNAP_THRESHOLD,
+  FURNITURE_LABEL_SELECTOR,
+  GREETER_ID,
   OFFICE_CANVAS_TEST_ID,
   PAN_MARGIN_FRACTION,
   ZOOM_MAX,
@@ -11,7 +14,7 @@ import {
 } from '../../constants.js';
 import { unlockAudio } from '../../notificationSound.js';
 import { transport } from '../../transport/index.js';
-import { furnitureAt } from '../editor/editorActions.js';
+import { furnitureAt, furnitureInBox } from '../editor/editorActions.js';
 import { buildEditorRenderState } from '../editor/editorRenderState.js';
 import type { EditorState, SelectionButton } from '../editor/editorState.js';
 import { startGameLoop } from '../engine/gameLoop.js';
@@ -32,6 +35,19 @@ import { useCanvasTouchGestures } from './useCanvasTouchGestures.js';
  */
 function dragMoveCursor(editorState: EditorState): string {
   return editorState.dragDuplicate ? 'copy' : 'grabbing';
+}
+
+/** Whether the pointer can hover (a mouse), read once and kept current. Furniture
+ *  hover by mouse is off on touch devices: there the first tap hovers a piece
+ *  (OfficeState.pieces.tapAt). */
+const hoverQuery =
+  typeof window !== 'undefined' ? (window.matchMedia?.('(hover: hover)') ?? null) : null;
+let canHover = hoverQuery?.matches ?? true;
+hoverQuery?.addEventListener?.('change', (e) => {
+  canHover = e.matches;
+});
+function mouseHovers(): boolean {
+  return canHover;
 }
 
 interface OfficeCanvasProps {
@@ -60,6 +76,11 @@ interface OfficeCanvasProps {
    *  character fires onClick (opens its terminal). Desktop keeps single-click
    *  focus with tap-again-to-deselect. */
   tapSelectsFirst?: boolean;
+  /** A read-only office: furniture shows its label but offers no click (no pointer). */
+  readOnly?: boolean;
+  /** A click on a piece of interactive furniture, resolved by core's pieceView
+   *  (on touch, the second tap on the hovered piece). Unset: the click does nothing. */
+  onPieceClick?: (click: PieceClick, uid: string) => void;
 }
 
 export function OfficeCanvas({
@@ -80,6 +101,8 @@ export function OfficeCanvas({
   showAreas,
   activeAreaLabel,
   tapSelectsFirst = false,
+  readOnly = false,
+  onPieceClick,
 }: OfficeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -94,6 +117,12 @@ export function OfficeCanvas({
   const isEraseDraggingRef = useRef(false);
   // Zoom scroll accumulator for trackpad pinch sensitivity
   const zoomAccumulatorRef = useRef(0);
+  // While the Intro's greeter stands, the furniture opens nothing (its labels
+  // still show): the Intro is not to be left for a terminal half-way.
+  const piecesReadOnly = useCallback(
+    () => readOnly || officeState.greeter !== null,
+    [readOnly, officeState],
+  );
   // Clamp pan so the map edge can't go past a margin inside the viewport
   const clampPan = useCallback(
     (px: number, py: number): { x: number; y: number } => {
@@ -148,14 +177,19 @@ export function OfficeCanvas({
           : undefined;
 
         // Camera: smoothly center on the followed agent, or — while the greeter
-        // is speaking the Intro — on the character+bubble center the IntroBubble
+        // is speaking the Intro — on the point the IntroDialog
         // overlay feeds via greeterCameraTarget. An explicit follow (clicking an
-        // agent) outranks the greeter target; a manual pan cancels both.
+        // agent) outranks the greeter target; a manual pan cancels both. A
+        // clicked piece of interactive furniture is centred on the same way.
         const followCh =
           officeState.cameraFollowId !== null
             ? officeState.characters.get(officeState.cameraFollowId)
             : undefined;
-        const cameraFocus = followCh ?? officeState.greeterCameraTarget;
+        const followPiece =
+          officeState.cameraPieceUid !== null
+            ? officeState.pieces.center(officeState.cameraPieceUid)
+            : null;
+        const cameraFocus = followCh ?? followPiece ?? officeState.greeterCameraTarget;
         if (cameraFocus) {
           const layout = officeState.getLayout();
           const mapW = layout.cols * TILE_SIZE * zoom;
@@ -164,9 +198,13 @@ export function OfficeCanvas({
           const targetY = mapH / 2 - cameraFocus.y * zoom;
           const dx = targetX - panRef.current.x;
           const dy = targetY - panRef.current.y;
+          // The Intro's camera starts on its target (no drift across the office).
+          const jump =
+            cameraFocus === officeState.greeterCameraTarget && officeState.takeGreeterCameraSnap();
           if (
-            Math.abs(dx) < CAMERA_FOLLOW_SNAP_THRESHOLD &&
-            Math.abs(dy) < CAMERA_FOLLOW_SNAP_THRESHOLD
+            jump ||
+            (Math.abs(dx) < CAMERA_FOLLOW_SNAP_THRESHOLD &&
+              Math.abs(dy) < CAMERA_FOLLOW_SNAP_THRESHOLD)
           ) {
             panRef.current = { x: targetX, y: targetY };
           } else {
@@ -182,33 +220,30 @@ export function OfficeCanvas({
           selectedAgentId: officeState.selectedAgentId,
           hoveredAgentId: officeState.hoveredAgentId,
           hoveredTile: officeState.hoveredTile,
+          hoveredPieceUid: officeState.pieces.hoveredUid,
           seats: officeState.seats,
           characters: officeState.characters,
         };
 
-        const layout = officeState.getLayout();
-        const { offsetX, offsetY } = renderFrame(
-          ctx,
-          w,
-          h,
-          officeState.tileMap,
-          officeState.furniture,
-          officeState.getCharacters(),
+        // What the office shows: during a Buildout, the layout as built so far.
+        const layout = officeState.shownLayout();
+        const { offsetX, offsetY } = renderFrame(ctx, {
+          canvasWidth: w,
+          canvasHeight: h,
           zoom,
-          panRef.current.x,
-          panRef.current.y,
-          selectionRender,
-          editorRender,
-          layout.tileColors,
-          layout.cols,
-          layout.rows,
-          layout.carpetTiles,
-          layout.areas,
-          layout.areaTiles,
+          panX: panRef.current.x,
+          panY: panRef.current.y,
+          layout,
+          tileMap: officeState.shownTileMap(),
+          furniture: officeState.furniture,
+          characters: officeState.getCharacters(),
+          pets: officeState.pets,
+          selection: selectionRender,
+          editor: editorRender,
           showAreas,
           activeAreaLabel,
-          officeState.pets,
-        );
+          buildout: officeState.buildout.render(),
+        });
         offsetRef.current = { x: offsetX, y: offsetY };
 
         // Store delete/rotate button bounds for hit-testing
@@ -315,6 +350,10 @@ export function OfficeCanvas({
         if (tile) {
           editorState.ghostCol = tile.col;
           editorState.ghostRow = tile.row;
+          if (editorState.marquee) {
+            editorState.marquee.endCol = tile.col;
+            editorState.marquee.endRow = tile.row;
+          }
 
           // Drag-to-move: check if cursor moved to different tile
           if (editorState.dragUid) {
@@ -412,13 +451,25 @@ export function OfficeCanvas({
       const pos = screenToWorld(e.clientX, e.clientY);
       if (!pos) return;
       const hitId = officeState.getCharacterAt(pos.worldX, pos.worldY);
+      // The Intro's greeter takes the hover outline too, and nothing else: no
+      // click, no pointer (it is no agent).
+      const greeterHit = hitId === null && officeState.greeterAt(pos.worldX, pos.worldY);
       // Only run pet hit-test if no character was hit (avoids redundant work).
-      const petId = hitId === null ? officeState.getPetAt(pos.worldX, pos.worldY) : null;
+      const petId =
+        hitId === null && !greeterHit ? officeState.getPetAt(pos.worldX, pos.worldY) : null;
       const tile = screenToTile(e.clientX, e.clientY);
       officeState.hoveredTile = tile;
+      // The piece of furniture under the mouse (none under a character or a pet).
+      const piece =
+        mouseHovers() && !greeterHit
+          ? officeState.pieces.hoverAt(pos.worldX, pos.worldY, {
+              readOnly: piecesReadOnly(),
+            })
+          : null;
       const canvas = canvasRef.current;
       if (canvas) {
         canvas.style.cursor = computeNormalModeCursor({
+          pieceClickable: !!piece?.click,
           hitId,
           petId,
           selectedAgentId: officeState.selectedAgentId,
@@ -428,12 +479,13 @@ export function OfficeCanvas({
           getCharacter: (id) => officeState.characters.get(id),
         });
       }
-      officeState.hoveredAgentId = hitId;
+      officeState.hoveredAgentId = greeterHit ? GREETER_ID : hitId;
     },
     [
       officeState,
       screenToWorld,
       screenToTile,
+      piecesReadOnly,
       isEditMode,
       editorState,
       onEditorTileAction,
@@ -503,6 +555,12 @@ export function OfficeCanvas({
         (editorState.activeTool === EditTool.FURNITURE_PLACE && editorState.placing === null);
       if (actAsSelect && tile) {
         const hitFurniture = furnitureAt(officeState.getLayout(), tile.col, tile.row);
+        if (hitFurniture && e.shiftKey) {
+          // Shift+click: add the item to the selection, or take it out.
+          editorState.toggleFurnitureInSelection(hitFurniture.uid);
+          onEditorSelectionChange();
+          return;
+        }
         if (hitFurniture) {
           // Start drag — record offset from furniture's top-left. Alt at press
           // time means "drag out a copy"; mousemove keeps it in sync after that.
@@ -516,14 +574,22 @@ export function OfficeCanvas({
           );
           return;
         } else {
-          // Clicked empty space — deselect
-          editorState.clearSelection();
-          onEditorSelectionChange();
+          // Empty floor: start a box selection (Shift adds to the current one).
+          // A click without a drag catches nothing, so it deselects as before.
+          editorState.marquee = {
+            startCol: tile.col,
+            startRow: tile.row,
+            endCol: tile.col,
+            endRow: tile.row,
+            additive: e.shiftKey,
+          };
+          return;
         }
       }
 
       // Non-select tools: start paint drag
       editorState.isDragging = true;
+      editorState.sectionAdditive = e.shiftKey;
       if (tile) {
         onEditorTileAction(tile.col, tile.row);
       }
@@ -570,6 +636,24 @@ export function OfficeCanvas({
         return;
       }
 
+      // A box selection ends: select what it caught.
+      const marquee = editorState.marquee;
+      if (marquee) {
+        editorState.marquee = null;
+        const caught = furnitureInBox(
+          officeState.getLayout(),
+          marquee.startCol,
+          marquee.startRow,
+          marquee.endCol,
+          marquee.endRow,
+        );
+        editorState.selectPlacedGroup(
+          marquee.additive ? [...new Set([...editorState.selectedUids, ...caught])] : caught,
+        );
+        onEditorSelectionChange();
+        return;
+      }
+
       // Handle drag-to-move completion
       if (editorState.dragUid) {
         if (editorState.isDragMoving) {
@@ -582,7 +666,11 @@ export function OfficeCanvas({
         } else {
           // Click (no movement) — toggle selection. Selecting also collapses
           // the open tool tab, so the toolbar shows the item's own controls.
-          if (editorState.selectedFurnitureUid === editorState.dragUid) {
+          // A plain click in a selection of several narrows it to that item.
+          if (
+            editorState.selectedFurnitureUid === editorState.dragUid &&
+            editorState.extraSelectedUids.length === 0
+          ) {
             editorState.clearSelection();
           } else {
             editorState.selectPlacedFurniture(editorState.dragUid);
@@ -602,6 +690,7 @@ export function OfficeCanvas({
     },
     [
       editorState,
+      officeState,
       isEditMode,
       onDrop,
       onEditorSelectionChange,
@@ -613,11 +702,67 @@ export function OfficeCanvas({
   );
 
   // Shared by mouse click and touch tap — both resolve a viewport point to a
-  // character / pet / seat interaction.
+  // piece of furniture / character / pet / seat interaction.
   const performTap = useCallback(
-    (clientX: number, clientY: number) => {
+    (clientX: number, clientY: number, touch: boolean) => {
       const pos = screenToWorld(clientX, clientY);
       if (!pos) return;
+      // Whatever this tap lands on, the camera lets go of the piece it was on.
+      officeState.cameraPieceUid = null;
+
+      // A piece of interactive furniture (never under a character or a pet: they
+      // win). On touch the first tap only shows its outline and label; a tap
+      // anywhere else clears them.
+      // The Intro's greeter answers no click (and hides what stands behind it).
+      if (officeState.greeterAt(pos.worldX, pos.worldY)) return;
+
+      /** The selected agent (never a sub-agent) sent to a seat: its own (back to it)
+       *  or a free one (it moves there). False when the seat is someone else's. */
+      const seatSelected = (seatId: string): boolean => {
+        const id = officeState.selectedAgentId;
+        const ch = id !== null ? officeState.characters.get(id) : undefined;
+        const seat = officeState.seats.get(seatId);
+        if (id === null || !ch || ch.isSubagent || !seat) return false;
+        if (ch.seatId === seatId) {
+          officeState.sendToSeat(id);
+        } else if (!seat.assigned) {
+          officeState.reassignSeat(id, seatId);
+          transport.send({ type: 'saveAgentSeats', seats: officeState.getPersistableSeats() });
+        } else {
+          return false;
+        }
+        officeState.selectedAgentId = null;
+        officeState.cameraFollowId = null;
+        return true;
+      };
+
+      // An agent selected, then a workstation (a PC): the agent goes to the seat in
+      // front of it, as a click on that chair would (the PC often hides it).
+      if (officeState.selectedAgentId !== null && officeState.greeter === null) {
+        const pieceUid = officeState.pieces.at(pos.worldX, pos.worldY, {
+          readOnly: piecesReadOnly(),
+        });
+        const seatId = pieceUid !== null ? officeState.seatOfPiece(pieceUid) : null;
+        if (seatId !== null && seatSelected(seatId)) {
+          officeState.pieces.clearHover();
+          return;
+        }
+      }
+
+      const piece = officeState.pieces.tapAt(pos.worldX, pos.worldY, {
+        readOnly: piecesReadOnly(),
+        twoStep: touch,
+      });
+      if (piece) {
+        // During the Intro a piece answers nothing, the camera included (it stays on the greeter).
+        if (officeState.greeter !== null) return;
+        if (piece.click) onPieceClick?.(piece.click, piece.uid);
+        officeState.selectedAgentId = null;
+        officeState.cameraFollowId = null;
+        // The camera centres on it, as it does on a clicked character.
+        officeState.cameraPieceUid = piece.uid;
+        return;
+      }
 
       const hitId = officeState.getCharacterAt(pos.worldX, pos.worldY);
       if (hitId !== null) {
@@ -661,73 +806,71 @@ export function OfficeCanvas({
 
       // No agent hit — check seat click while agent is selected
       if (officeState.selectedAgentId !== null) {
-        const selectedCh = officeState.characters.get(officeState.selectedAgentId);
-        // Skip seat reassignment for sub-agents
-        if (selectedCh && !selectedCh.isSubagent) {
-          const tile = screenToTile(clientX, clientY);
-          if (tile) {
-            const seatId = officeState.getSeatAtTile(tile.col, tile.row);
-            if (seatId) {
-              const seat = officeState.seats.get(seatId);
-              if (seat && selectedCh) {
-                if (selectedCh.seatId === seatId) {
-                  // Clicked own seat — send agent back to it
-                  officeState.sendToSeat(officeState.selectedAgentId);
-                  officeState.selectedAgentId = null;
-                  officeState.cameraFollowId = null;
-                  return;
-                } else if (!seat.assigned) {
-                  // Clicked available seat — reassign
-                  officeState.reassignSeat(officeState.selectedAgentId, seatId);
-                  officeState.selectedAgentId = null;
-                  officeState.cameraFollowId = null;
-                  transport.send({
-                    type: 'saveAgentSeats',
-                    seats: officeState.getPersistableSeats(),
-                  });
-                  return;
-                }
-              }
-            }
-          }
-        }
+        const tile = screenToTile(clientX, clientY);
+        const seatId = tile ? officeState.getSeatAtTile(tile.col, tile.row) : null;
+        if (seatId !== null && seatSelected(seatId)) return;
         // Clicked empty space — deselect
         officeState.selectedAgentId = null;
         officeState.cameraFollowId = null;
       }
     },
-    [officeState, onClick, screenToWorld, screenToTile, tapSelectsFirst],
+    [
+      officeState,
+      onClick,
+      onPieceClick,
+      piecesReadOnly,
+      screenToWorld,
+      screenToTile,
+      tapSelectsFirst,
+    ],
   );
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       if (isEditMode) return; // handled by mouseDown/mouseUp
-      performTap(e.clientX, e.clientY);
+      performTap(e.clientX, e.clientY, false);
     },
     [isEditMode, performTap],
   );
 
-  const handleMouseLeave = useCallback(() => {
-    isPanningRef.current = false;
-    editorState.selectionButtonHover = null;
-    editorState.selectionButtonPressed = null;
-    isEraseDraggingRef.current = false;
-    editorState.isDragging = false;
-    editorState.endStroke();
-    editorState.clearDrag();
-    editorState.ghostCol = -1;
-    editorState.ghostRow = -1;
-    officeState.hoveredAgentId = null;
-    officeState.hoveredTile = null;
+  const handleMouseLeave = useCallback(
+    (e?: React.MouseEvent) => {
+      // Onto the hovered piece's own Furniture label (its ×): still that piece.
+      const onto = e?.relatedTarget;
+      const ontoLabel = onto instanceof Element && onto.closest(FURNITURE_LABEL_SELECTOR) !== null;
+      isPanningRef.current = false;
+      editorState.selectionButtonHover = null;
+      editorState.selectionButtonPressed = null;
+      isEraseDraggingRef.current = false;
+      editorState.isDragging = false;
+      editorState.endStroke();
+      editorState.clearDrag();
+      editorState.marquee = null;
+      editorState.ghostCol = -1;
+      editorState.ghostRow = -1;
+      officeState.hoveredAgentId = null;
+      officeState.hoveredTile = null;
+      // A touch-picked piece stays until a tap elsewhere: only a mouse leaves.
+      if (mouseHovers() && !ontoLabel) officeState.pieces.clearHover();
 
-    // Reset cursor in non-edit mode so pointer doesn't get stuck after hovering a pet.
-    if (!isEditMode) {
-      const canvas = canvasRef.current;
-      if (canvas) {
-        canvas.style.cursor = 'default';
+      // Reset cursor in non-edit mode so pointer doesn't get stuck after hovering a pet.
+      if (!isEditMode) {
+        const canvas = canvasRef.current;
+        if (canvas) {
+          canvas.style.cursor = 'default';
+        }
       }
-    }
-  }, [officeState, editorState, isEditMode]);
+    },
+    [officeState, editorState, isEditMode],
+  );
+
+  // The layout editor keeps hover and click on furniture for itself: the one
+  // place that says so. Opening it clears the hover before the next frame draws
+  // (a layout effect), and while it is open the pointer never reaches the
+  // pieces, so no outline or Furniture label shows over the editor.
+  useLayoutEffect(() => {
+    if (isEditMode) officeState.pieces.clearHover();
+  }, [isEditMode, officeState]);
 
   // Alt tapped or released with the mouse already down flips the in-flight drag
   // between move and copy without waiting for the next mouse move — the rAF
@@ -810,7 +953,7 @@ export function OfficeCanvas({
     panRef,
     clampPan,
     onManualPan: () => officeState.breakCameraFollow(),
-    onTap: performTap,
+    onTap: (clientX, clientY) => performTap(clientX, clientY, true),
   });
 
   // Prevent default middle-click browser behavior (auto-scroll)

@@ -46,6 +46,30 @@ export interface ClaudeMockDeletePathAction {
   filePath: string;
 }
 
+/** The session moves itself to another folder mid-session (Claude Code's
+ *  EnterWorktree / ExitWorktree in an interactive session): `{{cwd}}` becomes
+ *  `cwd`, and the transcript file moves into that folder's project dir. */
+export interface ClaudeMockRelocateSessionAction {
+  kind: 'relocateSession';
+  atMs: number;
+  cwd: string;
+}
+
+/** The session calls one Pixel Office MCP tool, the way the CLI's MCP client
+ *  does: with the endpoint and token from the `--mcp-config` file it was
+ *  launched with. `args` are templated against the scenario context (object
+ *  keys too; a string that is one whole `{{path}}` keeps that value's type),
+ *  which includes `{{mcp.<saveAs>.…}}` — earlier calls' results. Runs after
+ *  the previous action finished, `waitMs` later. */
+export interface ClaudeMockCallOfficeMcpAction {
+  kind: 'callOfficeMcp';
+  atMs: number;
+  tool: string;
+  args: Record<string, unknown>;
+  saveAs?: string;
+  waitMs?: number;
+}
+
 export interface ClaudeMockExitAction {
   kind: 'exit';
   atMs: number;
@@ -57,6 +81,8 @@ export type ClaudeMockAction =
   | ClaudeMockEmitHookAction
   | ClaudeMockWriteJsonAction
   | ClaudeMockDeletePathAction
+  | ClaudeMockRelocateSessionAction
+  | ClaudeMockCallOfficeMcpAction
   | ClaudeMockExitAction;
 
 export interface ClaudeMockScenario {
@@ -111,6 +137,31 @@ class TimedScenarioStepBuilder {
       kind: 'deletePath',
       atMs: this.atMs,
       filePath,
+    });
+    return this.scenario;
+  }
+
+  relocateSession(cwd: string): ClaudeMockScenarioBuilder {
+    this.scenario.pushAction({
+      kind: 'relocateSession',
+      atMs: this.atMs,
+      cwd,
+    });
+    return this.scenario;
+  }
+
+  callOfficeMcp(
+    tool: string,
+    args: Record<string, unknown>,
+    options?: { saveAs?: string; waitMs?: number },
+  ): ClaudeMockScenarioBuilder {
+    this.scenario.pushAction({
+      kind: 'callOfficeMcp',
+      atMs: this.atMs,
+      tool,
+      args,
+      saveAs: options?.saveAs,
+      waitMs: options?.waitMs,
     });
     return this.scenario;
   }
