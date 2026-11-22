@@ -1,3 +1,4 @@
+import type { RoleColor } from '../../core/src/messages.js';
 import type { ColorValue } from './components/ui/types.js';
 
 // ── Grid & Layout ────────────────────────────────────────────
@@ -327,6 +328,25 @@ export const CONTEXT_GAUGE_BG = '#222';
 // ── Agent Teams ─────────────────────────────────────────────
 export const TEAM_LEAD_COLOR = '#ffd700';
 export const TEAM_ROLE_COLOR = '#66aaff';
+
+// ── Roles ───────────────────────────────────────────────────
+/** The colour each Role colour name is drawn in (the wire carries the name:
+ *  core knows no colours). Light enough to read as text on the panel background. */
+export const ROLE_COLOR_HEX: Record<RoleColor, string> = {
+  red: '#f07178',
+  orange: '#f5a45d',
+  yellow: '#f2d16b',
+  green: '#8bd47c',
+  cyan: '#5fd4d4',
+  blue: '#66aaff',
+  purple: '#b48cff',
+  pink: '#f58fc8',
+  gray: '#a6a6b8',
+};
+/** Side of the square colour swatch beside a Role's name, in CSS px. */
+export const ROLE_SWATCH_SIZE_PX = 8;
+/** Height of the Role colour strip along the top of an agent card, in CSS px. */
+export const CARD_ROLE_STRIP_HEIGHT_PX = 3;
 
 // ── Pets ────────────────────────────────────────────────────────
 /** Walking speed in world pixels per second (matches character walk speed visually but slower). */

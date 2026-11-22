@@ -1,5 +1,6 @@
 import * as path from 'path';
 
+import { parseAgentRole } from '../../core/src/roles.js';
 import type { PersistedAgent } from '../../core/src/schemas.js';
 import type { AgentStateInit } from './agentState.js';
 import {
@@ -38,6 +39,7 @@ export function toPersistedAgent(agent: AgentState): PersistedAgent | null {
     backgroundSpawns: persistBackgroundSpawns(agent.backgroundSpawns),
     palette: agent.palette,
     repeat: agent.repeat,
+    role: agent.role,
   };
 }
 
@@ -75,6 +77,8 @@ export function restoredAgentInit(p: PersistedAgent): Omit<AgentStateInit, 'isEx
     teamUsesTmux: p.teamUsesTmux,
     palette: p.palette,
     repeat: p.repeat ?? legacyRepeat(p.clothesHue ?? p.hueShift),
+    // Read from a file a hand or an older build may have written.
+    role: parseAgentRole(p.role),
   };
 }
 

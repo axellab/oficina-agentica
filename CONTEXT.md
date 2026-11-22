@@ -52,6 +52,10 @@ _Avoid_: parent (that's the sub-agent relationship), orchestrator
 A named agent spawned by another agent — the name is what makes it a teammate. Its spawner is its Lead, and together they form a Team. Every teammate has its own transcript and sits in a seat; it may or may not have its own session or terminal — how it runs never changes what it is.
 _Avoid_: inline teammate, tmux teammate, session teammate (former run-style distinctions; a teammate's run style is a property, not an identity)
 
+**Role**:
+The part in the software lifecycle an agent is launched as — Architect, Developer, QA Engineer, Agile Project Manager and the like. A Role gives its agent standing instructions on top of the coding agent's own, and gives the office a name and a colour to mark it with. It is chosen at launch and kept for the agent's life, across reloads and a resumed conversation. Only agents the office launched have one: an adopted session, a Teammate and a Sub-agent were started by someone else. The Roles an office offers are its catalog: the built-in ones plus whatever the user's `roles.json` changes or adds. A Role says what an agent is for, never whom it answers to.
+_Avoid_: persona, agent type (that's a CLI's kind of sub-agent), Lead (a Team relationship; a Role is not a rank), character (that's the look)
+
 ## Agent Lifecycle
 
 **Launch**:
@@ -99,7 +103,7 @@ The characters an agent can be launched as, one card each, most recently launche
 _Avoid_: agent picker, agents (it lists characters, not running agents), card bar
 
 **New agent**:
-The `+` card that launches an agent. From it, a Directory is chosen; from the roster, a character too.
+The `+` card that launches an agent. From it, a Directory is chosen, and optionally a Role; from the roster, a character too.
 _Avoid_: `+ New` (that's the roster's add-a-character slot)
 
 **Item**:

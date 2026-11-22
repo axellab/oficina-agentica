@@ -13,6 +13,7 @@ import {
   OVERLAY_BUBBLE_Z_INDEX,
   OVERLAY_LABEL_SELECTED_Z_INDEX,
   OVERLAY_LABEL_Z_INDEX,
+  ROLE_COLOR_HEX,
   TEAM_LEAD_COLOR,
   TEAM_ROLE_COLOR,
   TOOL_OVERLAY_GAP_PX,
@@ -315,6 +316,17 @@ export function ToolOverlay({
                   />
                 )}
                 <div className="flex flex-col gap-0 overflow-hidden">
+                  {/* The Role it was launched as, in the Role's colour. */}
+                  {ch.role && (
+                    <span
+                      className="overflow-hidden text-ellipsis block leading-none"
+                      style={{ fontSize: '18px', color: ROLE_COLOR_HEX[ch.role.color] }}
+                      data-testid="agent-role"
+                      data-role-id={ch.role.id}
+                    >
+                      {ch.role.name}
+                    </span>
+                  )}
                   {teamRoleLabel && (
                     <span
                       className="overflow-hidden text-ellipsis block leading-none"

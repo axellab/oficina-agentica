@@ -15,6 +15,8 @@ declare global {
         waitingAwaitingInput?: boolean;
         isHeadless?: boolean;
         isGreeter?: boolean;
+        /** The id of the Role it was launched as, if any. */
+        roleId?: string;
         /** The character profile it wears, and which copy of it (0 = the first). */
         palette: number;
         repeat: number;
@@ -155,6 +157,7 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
       waitingAwaitingInput: ch.waitingAwaitingInput,
       isHeadless: ch.isHeadless,
       isGreeter: ch.isGreeter,
+      roleId: ch.role?.id,
       palette: ch.palette,
       repeat: ch.repeat,
     }));

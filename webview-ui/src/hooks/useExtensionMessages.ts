@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { Directory, HooksConsentRequest } from '../../../core/src/messages.js';
+import type { AgentRole, Directory, HooksConsentRequest } from '../../../core/src/messages.js';
+import { parseAgentRole } from '../../../core/src/roles.js';
 import { handleCastMessage } from '../characters/castMessages.js';
 import { castStore } from '../characters/castStore.js';
 import { startOfficeSync } from '../characters/officeSprites.js';
@@ -27,6 +28,7 @@ import {
 } from '../office/toolUtils.js';
 import type { OfficeLayout, ToolActivity } from '../office/types.js';
 import { setWallSprites } from '../office/wallTiles.js';
+import { handleRolesMessage } from '../roles/roleStore.js';
 import { isBrowserRuntime, isE2E } from '../runtime.js';
 import { transport } from '../transport/index.js';
 import { onReconnect } from '../transport/onReconnect.js';
@@ -350,6 +352,7 @@ export function useExtensionMessages(
 
       // Usage bars (usage/usageStore.ts): the bridge's state and the plan usage.
       if (handleUsageMessage(msg)) return;
+      if (handleRolesMessage(msg)) return;
       // The cast (characters/castMessages.ts): profiles, items, looks, external sprites.
       if (handleCastMessage(msg, os)) return;
 
@@ -458,6 +461,7 @@ export function useExtensionMessages(
           // A resumed conversation asks for the seat its agent sat in.
           const seatId = msg.seatId as string | undefined;
           os.addAgent(id, palette, repeat, seatId, undefined, directoryName);
+          os.setAgentRole(id, parseAgentRole(msg.role));
           noteDirectoryName(directoryName);
           if (isHeadlessAgent(msg.isExternal as boolean | undefined)) {
             os.setHeadless(id, true);
@@ -476,9 +480,12 @@ export function useExtensionMessages(
         const directoryNames = (msg.directoryNames || {}) as Record<number, string>;
         const externalAgents = (msg.externalAgents || {}) as Record<number, boolean>;
         const headlessAgents: Record<number, boolean> = {};
+        const listedRoles = (msg.roles || {}) as Record<number, unknown>;
+        const roles: Record<number, AgentRole | undefined> = {};
         for (const id of incoming) {
           noteDirectoryName(directoryNames[id]);
           if (isHeadlessAgent(externalAgents[id])) headlessAgents[id] = true;
+          roles[id] = parseAgentRole(listedRoles[id]);
         }
         // Order-independent restore: add agents now if the layout (and its seats)
         // is already built, otherwise buffer them for the next layoutLoaded.
@@ -493,6 +500,7 @@ export function useExtensionMessages(
             layoutReadyRef.current,
             pendingAgents,
             headlessAgents,
+            roles,
           )
         ) {
           saveAgentSeats(os);

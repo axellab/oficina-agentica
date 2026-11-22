@@ -1,3 +1,4 @@
+import type { AgentRole } from '../../core/src/messages.js';
 import type { AgentState } from './types.js';
 
 /**
@@ -19,5 +20,20 @@ export function agentCreatedMessage(id: number, agent: AgentState): Record<strin
     palette: agent.palette,
     repeat: agent.repeat,
     seatId: agent.seatId,
+    role: agent.role,
   };
+}
+
+/**
+ * `existingAgents.roles`: the Role of each agent that has one, by agent id.
+ * One builder for both surfaces, like agentCreatedMessage.
+ */
+export function existingAgentRoles(
+  agents: Iterable<[number, AgentState]>,
+): Record<number, AgentRole> {
+  const roles: Record<number, AgentRole> = {};
+  for (const [id, agent] of agents) {
+    if (agent.role) roles[id] = agent.role;
+  }
+  return roles;
 }

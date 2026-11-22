@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 
 import { test } from 'vitest';
 
+import type { AgentRole } from '../../core/src/messages.js';
 import type {
   ExistingAgentMeta,
   ExistingAgentsOffice,
@@ -43,17 +44,23 @@ function fakeOffice(existing: number[] = []): ExistingAgentsOffice & {
   headless: number[];
   synced: Array<{ id: number } & ExistingAgentMeta>;
   rested: number[];
+  roles: Array<[number, AgentRole]>;
 } {
   const ids = new Set(existing);
   const calls: AddAgentCall[] = [];
   const headless: number[] = [];
   const synced: Array<{ id: number } & ExistingAgentMeta> = [];
   const rested: number[] = [];
+  const roles: Array<[number, AgentRole]> = [];
   return {
     calls,
     headless,
     synced,
     rested,
+    roles,
+    setAgentRole: (id, role) => {
+      if (role) roles.push([id, role]);
+    },
     characters: { has: (id: number) => ids.has(id) },
     addAgent: (id, palette, repeat, seatId, skipSpawnEffect, directoryName) => {
       ids.add(id);
@@ -191,6 +198,45 @@ test('layout not ready: the headless flag rides along on the buffered agent', ()
       [6, false],
     ],
   );
+});
+
+// ── Roles: an agent keeps the Role it was launched as ───────────
+
+const ARCHITECT: AgentRole = { id: 'architect', name: 'Architect', color: 'purple' };
+
+test('layout ready: a restored agent is given its Role, an agent without one is not', () => {
+  const os = fakeOffice();
+  const pending: PendingAgent[] = [];
+
+  reconcileExistingAgents(os, [5, 6], {}, {}, true, pending, {}, { 5: ARCHITECT });
+
+  assert.deepEqual(os.roles, [[5, ARCHITECT]]);
+});
+
+test('layout not ready: the Role rides along on the buffered agent', () => {
+  const os = fakeOffice();
+  const pending: PendingAgent[] = [];
+
+  reconcileExistingAgents(os, [5, 6], {}, {}, false, pending, {}, { 5: ARCHITECT });
+
+  assert.equal(os.roles.length, 0, 'nothing is named before the layout flush');
+  assert.deepEqual(
+    pending.map((p) => [p.id, p.role]),
+    [
+      [5, ARCHITECT],
+      [6, undefined],
+    ],
+  );
+});
+
+test("layout ready: an agent the office already shows takes the snapshot's Role (reconnect)", () => {
+  const os = fakeOffice([5]);
+  const pending: PendingAgent[] = [];
+
+  reconcileExistingAgents(os, [5], {}, {}, true, pending, {}, { 5: ARCHITECT });
+
+  assert.equal(os.calls.length, 0);
+  assert.deepEqual(os.roles, [[5, ARCHITECT]]);
 });
 
 // ── missing metadata is tolerated (undefined seat fields) ───────

@@ -3,6 +3,7 @@ import { rosterPick } from '../../core/src/paletteUtils.js';
 import type { HookProvider } from '../../core/src/provider.js';
 import { resendAgentActivity } from './agentActivityResend.js';
 import { buildAgentDiagnostics } from './agentDiagnostics.js';
+import { existingAgentRoles } from './agentMessages.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
@@ -43,6 +44,7 @@ import { applyConsentChoice } from './providers/hook/consentExecutor.js';
 import { hooksConsentRequest } from './providers/hook/consentGate.js';
 import { claudeProvider, hookProviderById, hookProviders } from './providers/index.js';
 import { recentCharactersMessage, recordCharacterUse } from './recentCharacters.js';
+import { rolesLoadedMessage } from './roles/roleCatalog.js';
 import { launchStandaloneAgent } from './terminal/standaloneAgentLauncher.js';
 import type { TerminalSessions } from './terminal/terminalSessions.js';
 import { applyUsageBridgeChoice, usageSnapshotMessages } from './usageLimits.js';
@@ -190,6 +192,7 @@ export function handleClientMessage(
           directoryPath: msg.directoryPath as string | undefined,
           bypassPermissions: adapter?.getSetting(KEY_BYPASS_PERMISSIONS, false) ?? false,
           palette: picked,
+          roleId: msg.roleId,
         },
       );
       // A roster pick moves to the front of every office's roster, once an
@@ -246,6 +249,9 @@ export function handleClientMessage(
             transcript: resume.transcript,
             seatId: resume.look?.seatId,
           },
+          // As the Role it was first launched as: its instructions belong to
+          // the process, not to the saved session.
+          roleId: resume.look?.roleId,
         },
       );
       break;
@@ -710,6 +716,13 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     send(directoriesMessage(ctx));
   }
 
+  // 4d. Roles: what a launch from this office can be launched as. Only where
+  // a launch is possible -- a read-only office has no launch drawer to list
+  // them in (the Role of each agent rides existingAgents for everyone).
+  if (ctx.ptyManager && ctx.privileged) {
+    send({ ...rolesLoadedMessage() });
+  }
+
   // Sync runtime refs with the persisted settings so scanners behave correctly
   // from the first tick after a server restart.
   if (runtime) {
@@ -749,6 +762,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     agentMeta,
     directoryNames,
     externalAgents,
+    roles: existingAgentRoles(store),
   });
 
   // 7. Layout last (see step 3): flushes the webview's buffered existingAgents

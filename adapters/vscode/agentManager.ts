@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import type { StateAdapter } from '../../core/src/adapter.js';
 import type { PersistedAgent } from '../../core/src/schemas.js';
 import { resendAgentActivity } from '../../server/src/agentActivityResend.js';
+import { existingAgentRoles } from '../../server/src/agentMessages.js';
 import {
   isPersistedSpawnChild,
   restoredAgentInit,
@@ -26,6 +27,7 @@ import { loadLayout } from '../../server/src/layoutPersistence.js';
 import { assignPaletteIfNeeded } from '../../server/src/paletteAssigner.js';
 import { CLAUDE_TERMINAL_NAME_PREFIX } from '../../server/src/providers/hook/claude/constants.js';
 import { claudeProvider } from '../../server/src/providers/index.js';
+import { prepareRoleLaunch } from '../../server/src/roles/roleCatalog.js';
 import { sessionMarkersUnset } from '../../server/src/terminal/terminalEnv.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from '../../server/src/timerManager.js';
 import { workspaceDirectories } from './hostDirectories.js';
@@ -44,6 +46,36 @@ export function getProjectDirPath(cwd?: string): string {
   return projectDir;
 }
 
+type LaunchShell = 'posix' | 'powershell' | 'cmd';
+
+function launchShell(): LaunchShell {
+  const platform =
+    process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'osx' : 'linux';
+  const config = vscode.workspace.getConfiguration('terminal.integrated');
+  const profileName = config.get<string>(`defaultProfile.${platform}`);
+  const profiles = config.get<Record<string, { path?: string | string[] }>>(`profiles.${platform}`);
+  const profilePath = profileName ? profiles?.[profileName]?.path : undefined;
+  const executable = Array.isArray(profilePath) ? profilePath[0] : profilePath;
+  const shell = path.basename(executable || profileName || '').toLowerCase();
+
+  if (
+    /^(pwsh|powershell)(\.exe)?$/.test(shell) ||
+    (platform === 'windows' && (!shell || shell.includes('powershell')))
+  ) {
+    return 'powershell';
+  }
+  if (/^cmd(\.exe)?$/.test(shell) || shell.includes('command prompt')) return 'cmd';
+  return 'posix';
+}
+
+/** Quote one word for the configured terminal shell. */
+function shellWord(word: string, shell: LaunchShell): string {
+  if (/^[\w@%+=:,./-]+$/.test(word)) return word;
+  if (shell === 'powershell') return `'${word.replace(/'/g, "''")}'`;
+  if (shell === 'posix') return `'${word.replace(/'/g, "'\\''")}'`;
+  return `"${word}"`;
+}
+
 /** What a launch asks for, beyond the runtime it registers with. */
 export interface LaunchTerminalOptions {
   /** The Directory to launch into; absent = the first workspace folder, else home. */
@@ -55,6 +87,9 @@ export interface LaunchTerminalOptions {
   /** The character picked from the roster (a palette index); absent = the
    *  launch Directory's default characters, else a random pick. */
   palette?: number;
+  /** The Role to launch as (a catalog id). Absent or naming no Role of this
+   *  host, the agent launches without one. */
+  roleId?: unknown;
 }
 
 export async function launchNewTerminal(
@@ -70,7 +105,7 @@ export async function launchNewTerminal(
   jsonlPollTimers: Map<number, ReturnType<typeof setInterval>>,
   projectScanTimerRef: { current: ReturnType<typeof setInterval> | null },
   persistAgents: () => void,
-  { directoryPath, bypassPermissions, suppressShow, palette }: LaunchTerminalOptions = {},
+  { directoryPath, bypassPermissions, suppressShow, palette, roleId }: LaunchTerminalOptions = {},
 ): Promise<void> {
   const folders = vscode.workspace.workspaceFolders;
   // Use home directory as fallback cwd when no workspace is open (common on Linux/macOS).
@@ -96,11 +131,20 @@ export async function launchNewTerminal(
   }
 
   const sessionId = crypto.randomUUID();
-  const launch = claudeProvider.buildLaunchCommand?.(sessionId, cwd, { bypassPermissions });
+  // The Role's instructions are written before the command that names them.
+  const roleLaunch = prepareRoleLaunch(roleId);
+  const launch = claudeProvider.buildLaunchCommand?.(sessionId, cwd, {
+    bypassPermissions,
+    model: roleLaunch?.model,
+    appendSystemPromptFile: roleLaunch?.appendSystemPromptFile,
+  });
   if (!launch) {
     throw new Error('claudeProvider.buildLaunchCommand is not implemented');
   }
-  terminal.sendText([launch.command, ...launch.args].join(' '));
+  const shell = launchShell();
+  terminal.sendText(
+    [launch.command, ...launch.args].map((word) => shellWord(word, shell)).join(' '),
+  );
 
   const projectDir = getProjectDirPath(cwd);
 
@@ -138,6 +182,7 @@ export async function launchNewTerminal(
     projectDir,
     jsonlFile: expectedFile,
     directoryName,
+    role: roleLaunch?.role,
   });
 
   // Only a launch the office aimed at a Directory wears its defaults.
@@ -528,6 +573,7 @@ export function sendExistingAgents(
     agentMeta,
     directoryNames,
     externalAgents,
+    roles: existingAgentRoles(agents),
   });
   // Note: sendCurrentAgentStatuses is called separately AFTER layoutLoaded
   // so that agentStatus/agentToolStart messages arrive after characters are created.

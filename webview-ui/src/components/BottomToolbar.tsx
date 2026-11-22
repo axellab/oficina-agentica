@@ -1,3 +1,5 @@
+import { useRef } from 'react';
+
 import { ROSTER_ARROW_WIDTH_PX, ROSTER_HOVER_CLOSE_DELAY_MS } from '../constants.js';
 import type { Directory } from '../hooks/useExtensionMessages.js';
 import { useHoverPin } from '../hooks/useHoverPin.js';
@@ -31,7 +33,7 @@ interface BottomToolbarProps {
   terminalUnavailableReason: string | null;
   /** A Directory picked from the + drawer: launch into it (wearing `palette`
    *  when a character was picked first). */
-  onLaunch: (directory: Directory, palette?: number) => void;
+  onLaunch: (directory: Directory, palette?: number, roleId?: string) => void;
 }
 
 /** Every toolbar button's height: the labelled ones' natural height (26 px
@@ -78,13 +80,15 @@ export function BottomToolbar({
   // a press pins it open until a press elsewhere, Escape, or a second press
   // on the +. A drawer the roster opened is a question waiting for an answer
   // (where to launch the picked character): the pointer wandering off doesn't
-  // cancel it, only a press outside or Escape does.
+  // cancel it, only a press outside or Escape does. The same goes for a
+  // drawer whose Role row was used (LaunchDrawer `onHoldOpen`).
+  const roleHeld = useRef(false);
   const drawerHover = useHoverPin({
     isOpen: isDrawerOpen,
     open: menus.openDrawer,
     close: closeDrawer,
     closeDelayMs: 0,
-    holdOpen: () => !!menus.pendingPick,
+    holdOpen: () => !!menus.pendingPick || roleHeld.current,
   });
 
   // Hovering the arrow opens the roster, as hovering the + opens its drawer;
@@ -97,9 +101,9 @@ export function BottomToolbar({
     closeDelayMs: ROSTER_HOVER_CLOSE_DELAY_MS,
   });
 
-  const handleDirectorySelect = (directory: Directory, palette?: number) => {
+  const handleDirectorySelect = (directory: Directory, palette?: number, roleId?: string) => {
     closeDrawer();
-    onLaunch(directory, palette);
+    onLaunch(directory, palette, roleId);
   };
 
   const rosterPanel = usePresence(menus.isRosterOpen);
@@ -177,6 +181,9 @@ export function BottomToolbar({
                 isOpen={isDrawerOpen}
                 directories={directories}
                 pick={menus.pendingPick}
+                onHoldOpen={(hold) => {
+                  roleHeld.current = hold;
+                }}
                 onSelect={handleDirectorySelect}
                 onAddDirectory={() => {
                   closeDrawer();

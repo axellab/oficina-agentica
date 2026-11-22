@@ -24,6 +24,7 @@ export type TileType = (typeof TileType)[keyof typeof TileType];
 
 /** Re-export ColorValue for consumers that import color types from office/types */
 export type { ColorValue } from '../components/ui/types.js';
+import type { AgentRole } from '../../../core/src/messages.js';
 import type { ColorValue } from '../components/ui/types.js';
 
 export const CharacterState = {
@@ -240,6 +241,9 @@ export interface Character extends Blinker {
    *  focus. Rendered translucent. Teammates and sub-agents are never headless —
    *  clicking them reaches their lead's / parent's terminal. */
   isHeadless?: boolean;
+  /** The Role the agent was launched as (Architect, Developer, ...), named on
+   *  its label and its card. Only agents the office launched have one. */
+  role?: AgentRole;
   /** The first-run consent greeter. A MARKER, not a gate: the greeter lives in
    *  OfficeState.greeter, outside the agent map, so seat assignment, palette
    *  diversity, the FSM, hit-testing and seat persistence never see it — no

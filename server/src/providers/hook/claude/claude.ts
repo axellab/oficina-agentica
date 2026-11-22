@@ -125,11 +125,22 @@ function sessionDirOf(workspacePath: string): string {
 function buildLaunchCommand(
   sessionId: string,
   cwd: string,
-  opts?: { bypassPermissions?: boolean; resume?: boolean },
+  opts?: {
+    bypassPermissions?: boolean;
+    resume?: boolean;
+    model?: string;
+    appendSystemPromptFile?: string;
+  },
 ): { command: string; args: string[]; env?: Record<string, string> } {
   // A resumed session keeps its id and appends to its old transcript.
   const args = [opts?.resume ? '--resume' : '--session-id', sessionId];
   if (opts?.bypassPermissions) args.push('--dangerously-skip-permissions');
+  if (opts?.model) args.push('--model', opts.model);
+  // Added to Claude Code's own system prompt, never replacing it. Given again
+  // on a resume: the flag applies to the process, not to the saved session.
+  if (opts?.appendSystemPromptFile) {
+    args.push('--append-system-prompt-file', opts.appendSystemPromptFile);
+  }
   return { command: 'claude', args, env: { PWD: cwd } };
 }
 

@@ -46,6 +46,7 @@ import {
   setHooksEnabled as persistHooksEnabled,
   writeConfig,
 } from '../../server/src/configPersistence.js';
+import { recordConversationLooks } from '../../server/src/conversations.js';
 import {
   handleDirectoryClientMessage,
   type HostDirectoryEntry,
@@ -71,6 +72,7 @@ import {
   hookProviders,
 } from '../../server/src/providers/index.js';
 import { recentCharactersMessage, recordCharacterUse } from '../../server/src/recentCharacters.js';
+import { rolesLoadedMessage } from '../../server/src/roles/roleCatalog.js';
 import { PixelAgentsServer } from '../../server/src/server.js';
 import { applyUsageBridgeChoice, usageSnapshotMessages } from '../../server/src/usageLimits.js';
 import {
@@ -504,6 +506,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
               false,
             ),
             palette: picked,
+            roleId: message.roleId,
           },
         );
         // A roster pick moves to the front of the roster.
@@ -544,6 +547,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         // Store seat assignments in a separate key (never touched by persistAgents)
         console.log(`[Pixel Agents] State: saveAgentSeats:`, JSON.stringify(message.seats));
         this.adapter.saveSeats(message.seats);
+        recordConversationLooks(this.store, message.seats);
       } else if (message.type === 'saveCardOrder') {
         const loaded = saveCardOrder(this.adapter, message.order, (id) => this.store.has(id));
         if (loaded) this.sendOrBuffer(loaded);
@@ -891,6 +895,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         // Character profiles (the cast agents are drawn from), before any asset or layout
         this.webview?.postMessage(characterProfilesLoadedMessage());
         this.webview?.postMessage(recentCharactersMessage());
+        // What a launch from this office can be launched as.
+        this.webview?.postMessage(rolesLoadedMessage());
 
         // Load furniture assets BEFORE sending layout
         (async () => {

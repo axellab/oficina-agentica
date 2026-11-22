@@ -7,7 +7,11 @@ import type { Directory } from '../../core/src/messages.js';
 import type { HookProvider } from '../../core/src/provider.js';
 import { createAgentState } from '../src/agentState.js';
 import { AgentStateStore } from '../src/agentStateStore.js';
-import { CONVERSATIONS_LIMIT_MAX } from '../src/constants.js';
+import {
+  CONVERSATIONS_FILE_NAME,
+  CONVERSATIONS_LIMIT_MAX,
+  PIXEL_AGENTS_DIR,
+} from '../src/constants.js';
 import {
   conversationLimitsFrom,
   conversationLook,
@@ -276,6 +280,54 @@ describe('conversations', () => {
     transcript(uuid(1), line({ type: 'ai-title', aiTitle: 'Seated' }), 1);
     const [listed] = listConversations([directory], provider, new Map());
     expect(listed.conversations[0]).toMatchObject({ palette: 2, repeat: 1 });
+  });
+
+  it('remembers the Role an agent was launched as, so a resume launches as it again', () => {
+    const store = new AgentStateStore();
+    const agent = createAgentState({
+      id: 4,
+      sessionId: uuid(1),
+      projectDir,
+      jsonlFile: path.join(projectDir, `${uuid(1)}.jsonl`),
+      isExternal: false,
+      palette: 2,
+      repeat: 0,
+      role: { id: 'architect', name: 'Architect', color: 'purple' },
+    });
+    store.set(4, agent);
+    recordConversationLooks(store, { '4': { seatId: 'chair-3' } });
+    expect(conversationLook(uuid(1))).toMatchObject({ seatId: 'chair-3', roleId: 'architect' });
+
+    transcript(uuid(1), line({ type: 'ai-title', aiTitle: 'Designed' }), 1);
+    store.delete(4);
+    expect(
+      resumeRequest(store, provider, { sessionId: uuid(1), directoryPath: directory.path })?.look
+        ?.roleId,
+    ).toBe('architect');
+  });
+
+  it('reads a remembered Role id that is not one as no Role', () => {
+    const store = new AgentStateStore();
+    store.set(
+      4,
+      createAgentState({
+        id: 4,
+        sessionId: uuid(1),
+        projectDir,
+        jsonlFile: path.join(projectDir, `${uuid(1)}.jsonl`),
+        isExternal: false,
+        palette: 2,
+        repeat: 0,
+      }),
+    );
+    recordConversationLooks(store, { '4': { seatId: 'chair-3' } });
+    const file = path.join(os.homedir(), PIXEL_AGENTS_DIR, CONVERSATIONS_FILE_NAME);
+    const looks = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    looks[uuid(1)].roleId = '../../etc/passwd';
+    fs.writeFileSync(file, JSON.stringify(looks));
+
+    expect(conversationLook(uuid(1))).toMatchObject({ palette: 2, seatId: 'chair-3' });
+    expect(conversationLook(uuid(1))?.roleId).toBeUndefined();
   });
 
   describe('title cache', () => {

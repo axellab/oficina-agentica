@@ -1012,6 +1012,58 @@ describe('clientMessageHandler: standalone terminal control plane', () => {
     expect(broadcasts).toContainEqual({ type: 'terminalSessionOpened', agentId: id });
   });
 
+  it('launchAgent with a Role launches the agent as it', () => {
+    const { manager, spawnArgs } = workingPtyManager();
+
+    dispatch(
+      { type: 'launchAgent', roleId: 'devsecops-engineer' },
+      ctx({ runtime, ptyManager: manager }),
+    );
+
+    const [, agent] = [...store][0];
+    expect(agent.role).toEqual({
+      id: 'devsecops-engineer',
+      name: 'DevSecOps Engineer',
+      color: 'orange',
+    });
+    expect(spawnArgs[0]).toContain('--append-system-prompt-file');
+  });
+
+  // ── Roles in the handshake ───────────────────────────────────
+
+  it('webviewReady lists the Roles where a launch is possible, before the agents', () => {
+    const { manager } = workingPtyManager();
+
+    dispatch({ type: 'webviewReady' }, ctx({ ptyManager: manager }));
+
+    const types = sent.map((m) => m.type);
+    const roles = sent.find((m) => m.type === 'rolesLoaded')?.roles as Array<{ id: string }>;
+    expect(roles.map((role) => role.id)).toContain('agile-project-manager');
+    // No prompt leaves the host.
+    expect(JSON.stringify(roles)).not.toContain('prompt');
+    expect(types.indexOf('rolesLoaded')).toBeLessThan(types.indexOf('existingAgents'));
+  });
+
+  it('webviewReady lists no Roles for a read-only office, nor without a terminal host', () => {
+    const { manager } = workingPtyManager();
+
+    dispatch({ type: 'webviewReady' }, ctx({ ptyManager: manager, privileged: false }));
+    dispatch({ type: 'webviewReady' }, ctx());
+
+    expect(sent.map((m) => m.type)).not.toContain('rolesLoaded');
+  });
+
+  it("webviewReady tells every office each agent's Role, read-only ones too", () => {
+    const { manager } = workingPtyManager();
+    const role = { id: 'architect', name: 'Architect', color: 'purple' } as const;
+    store.set(1, { ...makeAgent(1), role });
+    store.set(2, makeAgent(2));
+
+    dispatch({ type: 'webviewReady' }, ctx({ ptyManager: manager, privileged: false }));
+
+    expect(sent.find((m) => m.type === 'existingAgents')?.roles).toEqual({ 1: role });
+  });
+
   it('launchAgent with a roster pick moves it to the front of the roster', () => {
     const { manager } = workingPtyManager();
 

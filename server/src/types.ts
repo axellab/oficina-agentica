@@ -1,5 +1,6 @@
 import type * as vscode from 'vscode';
 
+import type { AgentRole } from '../../core/src/messages.js';
 import type { BackgroundSpawns } from './backgroundSpawns.js';
 
 export interface AgentState {
@@ -102,4 +103,8 @@ export interface AgentState {
   /** The seat it asks for when it appears (a resumed conversation's old seat);
    *  the office seats it elsewhere when that one is taken. */
   seatId?: string;
+  /** The Role it was launched as, for its life. Only agents the office
+   *  launched have one: an adopted session, a Teammate and a Sub-agent were
+   *  started by someone else, with no Role's instructions. */
+  role?: AgentRole;
 }

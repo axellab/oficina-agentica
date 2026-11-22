@@ -11,6 +11,8 @@
 // Depending on layoutLoaded always arriving last stranded restored agents on any
 // surface that sends layout first (e.g. the VS Code no-assets path), issue #334.
 
+import type { AgentRole } from '../../../../core/src/messages.js';
+
 /** Per-agent seat metadata carried by the existingAgents message. */
 export interface ExistingAgentMeta {
   palette?: number;
@@ -26,6 +28,7 @@ export interface PendingAgent {
   seatId?: string;
   directoryName?: string;
   isHeadless?: boolean;
+  role?: AgentRole;
 }
 
 /** Minimal structural view of OfficeState this reconciler needs. */
@@ -40,6 +43,8 @@ export interface ExistingAgentsOffice {
     directoryName?: string,
   ) => void;
   setHeadless: (id: number, headless: boolean) => void;
+  /** Name the Role an agent was launched as (undefined = leave it). */
+  setAgentRole: (id: number, role: AgentRole | undefined) => void;
   /** Start an agent at rest: not working, resting in its chair if it has one. */
   restAgent: (id: number) => void;
   /** Give an agent the office already shows the server's look and seat. */
@@ -54,6 +59,7 @@ export interface ExistingAgentsOffice {
 export function restoreAgent(os: ExistingAgentsOffice, p: PendingAgent): void {
   os.addAgent(p.id, p.palette, p.repeat, p.seatId, true, p.directoryName);
   if (p.isHeadless) os.setHeadless(p.id, true);
+  os.setAgentRole(p.id, p.role);
   os.restAgent(p.id);
 }
 
@@ -73,6 +79,7 @@ export function reconcileExistingAgents(
   layoutReady: boolean,
   pending: PendingAgent[],
   headlessAgents: Record<number, boolean> = {},
+  roles: Record<number, AgentRole | undefined> = {},
 ): boolean {
   let addedDirectly = false;
   for (const id of incoming) {
@@ -85,6 +92,8 @@ export function reconcileExistingAgents(
       directoryName: directoryNames[id],
       isHeadless: headlessAgents[id] === true,
     };
+    const role = roles[id];
+    if (role) p.role = role;
     if (layoutReady) {
       if (!os.characters.has(p.id)) {
         restoreAgent(os, p);
@@ -94,6 +103,7 @@ export function reconcileExistingAgents(
         // office's own look and seat and saving them back reshuffled the
         // office for every other viewer.
         os.syncAgent(p.id, p.palette, p.repeat, p.seatId);
+        os.setAgentRole(p.id, p.role);
       }
     } else {
       pending.push(p);

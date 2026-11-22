@@ -11,11 +11,12 @@ import type { Directory } from './useExtensionMessages.js';
  */
 export function useLaunchActions(expectLaunch: () => void) {
   // palette: the character picked from the roster (absent = the Directory's
-  // default characters, else a random pick, server-side).
+  // default characters, else a random pick, server-side). roleId: the Role
+  // picked in the drawer (absent = an agent with no Role).
   const launch = useCallback(
-    (directory: Directory, palette?: number) => {
+    (directory: Directory, palette?: number, roleId?: string) => {
       expectLaunch();
-      transport.send({ type: 'launchAgent', directoryPath: directory.path, palette });
+      transport.send({ type: 'launchAgent', directoryPath: directory.path, palette, roleId });
     },
     [expectLaunch],
   );
