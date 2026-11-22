@@ -158,9 +158,11 @@ describe('shellWord', () => {
   });
 
   it('quotes the words a shell would read as something else', () => {
-    // PowerShell: two arguments, a splatted variable, the stop-parsing token.
+    // PowerShell: two arguments, a splatted variable.
     expect(shellWord('a,b', 'powershell')).toBe("'a,b'");
     expect(shellWord('@args', 'powershell')).toBe("'@args'");
+    // Its stop-parsing token: quoted, PowerShell drops that one word; plain, it
+    // would pass the rest of the line on unparsed.
     expect(shellWord('--%', 'powershell')).toBe("'--%'");
     // PowerShell splits a flag at its dot; the other shells do not.
     expect(shellWord('-Dkey.name', 'powershell')).toBe("'-Dkey.name'");
@@ -261,10 +263,11 @@ describe('a real shell hands the program every word', () => {
     'opus[1m]',
     'ñandú',
   ];
-  /** Words an older PowerShell loses on the way to a program whatever the
-   *  quoting (before 7.3 it drops an empty argument and unwraps a double
-   *  quote). A launch holds neither. */
-  const LOST_BY_OLD_POWERSHELL = new Set(['', '"quoted"']);
+  /** Words PowerShell does not hand a program whatever the quoting. Before
+   *  7.3 it drops an empty argument and unwraps a double quote; and it drops
+   *  `--%`, its stop-parsing token, even quoted (seen in PowerShell 7; plain,
+   *  it would pass the rest of the line on unparsed). A launch holds none. */
+  const NOT_CARRIED_BY_POWERSHELL = new Set(['', '"quoted"', '--%']);
 
   const REAL_SHELLS: Array<{ program: string; args: string[]; quoting: LaunchShell }> = [
     { program: 'sh', args: ['-c'], quoting: 'posix' },
@@ -307,7 +310,7 @@ describe('a real shell hands the program every word', () => {
       () => {
         const words =
           shell.quoting === 'powershell'
-            ? WORDS.filter((word) => !LOST_BY_OLD_POWERSHELL.has(word))
+            ? WORDS.filter((word) => !NOT_CARRIED_BY_POWERSHELL.has(word))
             : WORDS;
         const line = launchCommandLine([process.execPath, printArgs, ...words], shell.quoting);
         const run = spawnSync(shell.program, [...shell.args, line], {

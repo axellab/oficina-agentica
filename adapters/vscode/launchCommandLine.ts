@@ -42,7 +42,7 @@ export function launchShellOf({ platform, executable, profileName }: TerminalShe
  *  most shells read them plainly: `,` (PowerShell splits the word into two
  *  arguments), `@` (PowerShell splats a word that starts with it), `=` (zsh
  *  expands a word that starts with it into a command's path) and `%`
- *  (PowerShell stops parsing at `--%`). */
+ *  (PowerShell passes the rest of the line on unparsed after a plain `--%`). */
 const PLAIN_WORD_RE = /^[\w+:./-]+$/;
 
 /** A flag PowerShell passes on whole. One with a `.` is split at it
@@ -67,7 +67,8 @@ const POWERSHELL_QUOTES_RE = /['\u2018-\u201B]/g;
  * - fish: single quotes too, but a backslash escapes inside them, so a
  *   backslash and a quote are each written after one.
  * - PowerShell: single quotes, each quote character doubled (which keeps the
- *   character it was).
+ *   character it was). The one word it cannot carry is `--%`: quoted, it is
+ *   dropped, which a launch never holds.
  * - cmd: double quotes, a `"` doubled. Two things it cannot carry, neither of
  *   which a launch holds: `%NAME%` is expanded even inside the quotes, and a
  *   word ending in a backslash escapes the closing quote.
