@@ -86,15 +86,22 @@ test.describe('Standalone / hooks', () => {
       session_id: sessionId,
       hook_event_name: 'PostToolUse',
     });
-    const postToolMessages = await standalone.drainMessages();
-    expect(
-      postToolMessages.some(
-        (message) =>
-          message.type === 'agentToolDone' &&
-          message.toolId === toolStart?.toolId &&
-          message.id === toolStart?.id,
-      ),
-    ).toBe(true);
+    // Polled: the hook's HTTP reply and the broadcast travel on different
+    // connections, and nothing on the page changes for this event (the bubble
+    // stays), so there is no visible outcome to wait on first as the other
+    // steps do. Reading the recorder once lost that race on Windows runners.
+    const postToolMessages: RecordedServerMessage[] = [];
+    await expect
+      .poll(async () => {
+        postToolMessages.push(...(await standalone.drainMessages()));
+        return postToolMessages.some(
+          (message) =>
+            message.type === 'agentToolDone' &&
+            message.toolId === toolStart?.toolId &&
+            message.id === toolStart?.id,
+        );
+      })
+      .toBe(true);
     await expectOverlayVisible(page, 'Needs approval');
 
     await sendHookEvent(standalone.hookServerConfig, {
