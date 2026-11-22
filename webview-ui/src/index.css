@@ -4,8 +4,10 @@
   font-family: 'FS Pixel Sans';
   font-style: normal;
   font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/FSPixelSansUnicode-Regular.ttf') format('truetype');
+  /* block, not swap: text waits for the pixel font (preloaded, so a moment at
+     most) instead of flashing in the system font first. */
+  font-display: block;
+  src: url('/fonts/FSPixelSansUnicode-Regular.woff2') format('woff2');
 }
 
 :root {
@@ -53,6 +55,9 @@
   --color-preview-wall: #2b2942;
   --color-preview-wall-seam: #25233a;
   --color-figure-shadow: rgba(10, 10, 20, 0.45);
+
+  /* The Intro's dialog box: its frame and its words */
+  --color-dialog-line: #ffffff;
 
   /* Shadow */
   --color-shadow: #0a0a14;
@@ -258,6 +263,45 @@
     border: 2px solid var(--color-border);
     border-radius: 0;
     box-shadow: var(--shadow-pixel);
+  }
+  /* Sending files to a terminal (terminal/fileSending.ts): the frame shown
+     while files are dragged over the pane, and the line that says what is
+     being sent or why it failed. Neither takes pointer events: the pane
+     under them is what the drag and the touches are addressed to. */
+  .terminal-drop-target {
+    position: absolute;
+    inset: 0;
+    z-index: 11;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: var(--color-text);
+    background: color-mix(in srgb, var(--color-bg) 80%, transparent);
+    border: 2px dashed var(--color-accent);
+    pointer-events: none;
+  }
+  .terminal-file-status {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    z-index: 11;
+    transform: translateX(-50%);
+    max-width: calc(100% - 16px);
+    padding: 6px 12px;
+    font-size: 17px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: var(--color-btn-bg);
+    color: var(--color-text);
+    border: 2px solid var(--color-border);
+    box-shadow: var(--shadow-pixel);
+    pointer-events: none;
+  }
+  .terminal-file-status[data-kind='error'] {
+    border-color: var(--color-danger);
+    white-space: normal;
   }
   /* The wrapper is the touch strip centered on the selection edge (the only
      thing that hit-tests); the bar (::before, one cell tall) and the square
@@ -693,4 +737,137 @@
   animation-name: usage-heart-beat;
   animation-timing-function: step-end;
   animation-iteration-count: infinite;
+}
+
+/* The Intro's dialog, a game's: a dark box framed in white with a hard shadow,
+   the greeter's message in large type, a "more" arrow blinking in its corner.
+   The step's menu above it wears the same frame. */
+.intro-dialog-box {
+  background: var(--color-bg);
+  border: 2px solid var(--color-dialog-line);
+  outline: 2px solid var(--color-bg);
+  box-shadow: 4px 4px 0 2px var(--color-shadow);
+}
+.intro-options .intro-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+/* A step's options inside the dialog box, under the greeter's words. */
+.intro-options-inline {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  /* Into the box's right padding (14px), as far from its side as from its foot (6px). */
+  margin-right: -8px;
+}
+/* The way on (IntroOption `forward`): its arrow as far in from the box's right
+   side as Back's is from its left (the box's 14px padding). */
+.intro-options-inline .intro-option-forward:last-child {
+  margin-right: 8px;
+}
+.intro-options-inline:empty,
+.intro-options-inline[hidden] {
+  display: none;
+}
+/* The dialog box's foot: Back on the left, the inline options on the right
+   (the Next arrow sits over its right end). Always there, at one height. */
+.intro-dialog-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 6px;
+  /* Back's height, whole pixels: the box keeps one height with or without it. */
+  min-height: 40px;
+  margin-top: 4px;
+}
+/* A stack of options: each row the dialog box's own colour, the 2px between
+   them (the box's background here) a lighter line. */
+.intro-options {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 2px;
+  width: 200px;
+  max-width: 100%;
+  padding: 0;
+  background: var(--color-btn-bg);
+}
+/* The menu over the dialog box: clear of the speaker on its top border while
+   what stands on the box spans its width (a panel, the choices' cards); a
+   stack of options at the right edge always sits right on the box, whatever
+   is above it. */
+.intro-menu-wrap:has(> .intro-menu > :last-child:not(.intro-options)) {
+  margin-bottom: var(--intro-speaker-h);
+}
+/* The menu scrolls when it is taller than the office; the padding keeps its
+   boxes' outlines and shadows inside the scrolled area. */
+.intro-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 8px 4px;
+  margin: -4px -8px -8px -4px;
+}
+/* The speaker, standing on the dialog box's top border at its left (offsets
+   count from inside the 2px border): the mug shot, and beside it the name in
+   the regular size, "bold" the pixel way — the font has one weight, so each
+   letter is drawn twice, one CSS px apart. */
+.intro-dialog-speaker {
+  position: absolute;
+  left: 12px;
+  bottom: calc(100% + 2px);
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  cursor: default;
+}
+.intro-dialog-name {
+  font-size: var(--text-base);
+  line-height: 0.8;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  color: var(--color-dialog-line);
+  text-shadow: 1px 0 0 currentColor;
+  letter-spacing: 1px;
+}
+.intro-dialog-text {
+  font-size: 26px;
+  /* Whole pixels (not 1.15 / 2.3em), so the box is a whole number of pixels
+     tall and the speaker's mug shot on its top border lands on the pixel grid. */
+  line-height: 30px;
+  color: var(--color-dialog-line);
+  /* Two rows, so a one-row message doesn't shrink the box. */
+  min-height: 60px;
+}
+.intro-dialog-next {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  width: 0;
+  height: 0;
+  padding: 0;
+  background: none;
+  border: 6px solid transparent;
+  border-bottom: 0;
+  border-top: 7px solid var(--color-dialog-line);
+  cursor: pointer;
+  animation: intro-dialog-blink 1s steps(2) infinite;
+}
+.intro-dialog-next.is-typing {
+  animation: none;
+  opacity: 0.35;
+}
+@keyframes intro-dialog-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .intro-dialog-next {
+    animation: none;
+  }
 }

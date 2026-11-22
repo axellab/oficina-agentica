@@ -1,9 +1,10 @@
 import path from 'node:path';
 
-import type { Locator, Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 import { expect, test } from '../../fixtures/standalone';
 import { arrangeNextClaudeInvocation, claudeScenario } from '../../helpers/mock-claude';
+import { heldTouch } from '../../helpers/touch';
 
 /**
  * The standalone mobile shell on a phone-sized touch viewport: office and
@@ -133,22 +134,6 @@ async function longPress(page: Page, x: number, y: number, ms: number) {
   await fire('touchstart', true);
   await page.waitForTimeout(ms);
   await fire('touchend', false);
-}
-
-/** A real one-finger press held for `ms` on the middle of `target`, through
- *  CDP so the page also gets the pointer events a finger produces (the
- *  TouchEvent-only `longPress` above has none). */
-async function heldTouch(page: Page, target: Locator, ms: number) {
-  // A trial tap waits for the target to stop moving (the roster slides in).
-  await target.tap({ trial: true });
-  const box = await target.boundingBox();
-  if (!box) throw new Error('nothing to press');
-  const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
-  await page.waitForTimeout(ms);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await cdp.detach();
 }
 
 /** Launch a mock-claude session from the + card and wait for its terminal. */
@@ -406,37 +391,12 @@ test.describe('Standalone / mobile shell', () => {
     // Paste: a hold on the input area (the cursor's row, under the word)
     // offers it; with no clipboard to read, it asks for the text instead.
     await longPress(page, at.x, at.y + at.h, 900);
-    await expect(pill.getByRole('button')).toHaveText(['Paste']);
+    await expect(pill.getByRole('button')).toHaveText(['Paste', 'Attach file']);
     page.once('dialog', (d) => void d.accept('pastedviaprompt'));
     await pill.getByRole('button', { name: 'Paste', exact: true }).tap();
     await expect(pill).toHaveCount(0);
     await expect(terminal).toContainText('pastedviaprompt', { timeout: 10_000 });
     expect(errors).toEqual([]);
-  });
-
-  test('the hooks info modal fits the phone screen @area:mobile', async ({
-    page,
-    standalone: _launched,
-  }) => {
-    // Seeded consent means hooks are installed: the first-run tooltip offers
-    // the info modal.
-    await page.getByText('View more', { exact: true }).tap();
-    const title = page.getByText('Instant Detection is ON', { exact: true });
-    await expect(title).toBeVisible();
-    const gotIt = page.getByRole('button', { name: 'Got it', exact: true });
-    // The modal header's close button (the tooltip has a close button of its own).
-    const close = page
-      .locator('div', { has: title })
-      .last()
-      .getByRole('button', { name: 'Close', exact: true });
-    for (const el of [title, gotIt, close]) {
-      const box = await el.boundingBox();
-      if (!box) throw new Error('modal part has no box');
-      expect(box.x).toBeGreaterThanOrEqual(0);
-      expect(box.x + box.width).toBeLessThanOrEqual(PHONE.width);
-    }
-    await close.tap();
-    await expect(title).toHaveCount(0);
   });
 
   test('a two-finger pan stops the camera following a character; a pure pinch does not @area:mobile', async ({

@@ -11,6 +11,12 @@ type WebviewSurface = Frame | Page;
 const WEBVIEW_TIMEOUT_MS = 30_000;
 const PANEL_OPEN_TIMEOUT_MS = 15_000;
 const MIN_PANEL_HEIGHT_PX = 320;
+/**
+ * What only the Pixel Agents webview shows: the bottom toolbar's "+" (New
+ * agent), or, while the Intro is up (it hides that toolbar), the Intro's
+ * dialog box — the only role="dialog" an office opens by itself.
+ */
+const PIXEL_AGENTS_FRAME_MARKER = 'button[aria-label="New agent"], [role="dialog"]';
 
 export interface WebviewSettings {
   watchAllSessions?: boolean;
@@ -163,7 +169,7 @@ export async function closeBottomPanel(window: Page): Promise<void> {
         for (const frame of window.frames()) {
           if (!frame.url().startsWith('vscode-webview://')) continue;
           try {
-            if ((await frame.locator('button[aria-label="New agent"]').count()) > 0) return true;
+            if ((await frame.locator(PIXEL_AGENTS_FRAME_MARKER).count()) > 0) return true;
           } catch {
             // Frame detached mid-check — treat as gone.
           }
@@ -212,7 +218,7 @@ async function findPixelAgentsFrameOnce(window: Page): Promise<Frame | null> {
     try {
       // count() resolves immediately (no waiting); a non-zero count means
       // this is the Pixel Agents frame.
-      const buttonCount = await frame.locator('button[aria-label="New agent"]').count();
+      const buttonCount = await frame.locator(PIXEL_AGENTS_FRAME_MARKER).count();
       if (buttonCount === 0) continue;
       const frameElement = await frame.frameElement();
       const box = await frameElement.boundingBox();
@@ -399,8 +405,8 @@ export async function arrangeReviewLayout(window: Page): Promise<void> {
  *
  * VS Code renders WebviewViewProvider content in an <iframe> whose URL
  * starts with "vscode-webview://". Because VS Code can have multiple
- * webviews, we wait until one frame exposes the "+" (New agent) button before
- * returning it.
+ * webviews, we wait until one frame exposes the "+" (New agent) button, or
+ * the Intro that hides it, before returning it.
  */
 export async function getPixelAgentsFrame(window: Page): Promise<Frame> {
   let foundFrame: Frame | null = null;
@@ -412,7 +418,7 @@ export async function getPixelAgentsFrame(window: Page): Promise<Frame> {
         return foundFrame !== null;
       },
       {
-        message: 'Pixel Agents webview frame with "+" (New agent) button not found',
+        message: 'Pixel Agents webview frame with "+" (New agent) button or Intro not found',
         timeout: WEBVIEW_TIMEOUT_MS,
         intervals: [250, 500, 1000],
       },
@@ -476,6 +482,28 @@ export async function directoryPencil(
 /** The Directory modal, once opened from the drawer's `+ Directory` / pencil. */
 export function getDirectoryModal(surface: WebviewSurface): Locator {
   return surface.locator('[data-testid="directory-modal"]');
+}
+
+/**
+ * Answer the new-worktree modal a row's worktree button opens: optionally
+ * rename it and pick the branch to start from (`local:<name>` /
+ * `origin:<name>`), then Launch. Returns the name it launched with.
+ */
+export async function confirmNewWorktree(
+  surface: WebviewSurface,
+  choices: { name?: string; from?: string } = {},
+): Promise<string> {
+  const modal = surface.locator('[data-testid="new-worktree-modal"]');
+  await expect(modal).toBeVisible();
+  const nameField = modal.locator('[data-testid="new-worktree-name"]');
+  if (choices.name !== undefined) await nameField.fill(choices.name);
+  if (choices.from !== undefined) {
+    await modal.locator(`[data-testid="new-worktree-base"][data-branch="${choices.from}"]`).click();
+  }
+  const name = await nameField.inputValue();
+  await modal.locator('[data-testid="new-worktree-launch"]').click();
+  await expect(modal).toHaveCount(0);
+  return name;
 }
 
 /** Open the drawer's `+ Directory` row and return the modal it opens. */

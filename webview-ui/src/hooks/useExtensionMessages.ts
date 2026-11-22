@@ -1,13 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { AgentRole, Directory, HooksConsentRequest } from '../../../core/src/messages.js';
+import type {
+  AgentCloseQuestion,
+  AgentMessageShow,
+  AgentRole,
+  AgentVisit,
+  AgentWorktree,
+  Directory,
+  GridShift,
+  HooksConsentRequest,
+  LayoutBuildout,
+  WorktreeSummary,
+} from '../../../core/src/messages.js';
 import { parseAgentRole } from '../../../core/src/roles.js';
 import { handleCastMessage } from '../characters/castMessages.js';
 import { castStore } from '../characters/castStore.js';
 import { startOfficeSync } from '../characters/officeSprites.js';
-import { cardOrderOf } from '../components/cardBar.js';
+import { type Card, cardOrderOf } from '../components/cardBar.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import { clearAgentContextUsed, setAgentContextUsed } from '../office/contextGauge.js';
+import { applyAgentMessageShow, applyAgentVisit } from '../office/engine/agentVisit.js';
 import type { ExistingAgentMeta, PendingAgent } from '../office/engine/existingAgents.js';
 import {
   reconcileExistingAgents,
@@ -28,11 +40,19 @@ import {
 } from '../office/toolUtils.js';
 import type { OfficeLayout, ToolActivity } from '../office/types.js';
 import { setWallSprites } from '../office/wallTiles.js';
+import { handleAgentCharacterEditMessage } from '../officeMcp/agentCharacterEdits.js';
+import { handleAgentLayoutEditMessage } from '../officeMcp/agentLayoutEdits.js';
+import { handleOfficeMcpMessage } from '../officeMcp/officeMcpStore.js';
+import { handlePcShellMessage, usePcShells } from '../pcShells/pcShellStore.js';
 import { handleRolesMessage } from '../roles/roleStore.js';
 import { isBrowserRuntime, isE2E } from '../runtime.js';
+import { handleSignInMessage } from '../signIn/signInStore.js';
 import { transport } from '../transport/index.js';
 import { onReconnect } from '../transport/onReconnect.js';
+import { handleTutorialMessage } from '../tutorial/tutorialStore.js';
 import { handleUsageMessage } from '../usage/usageStore.js';
+import type { Pane } from './terminalPanes.js';
+import { prefersReducedMotion } from './usePresence.js';
 
 /**
  * A Headless agent is one the office adopted from outside (`claude -p`, a session
@@ -94,6 +114,23 @@ export interface DirectorySaved {
   seq: number;
 }
 
+/** A Worktree launch the server could not make (nothing was launched): shown
+ *  to this office until dismissed. `seq` rises with every one. */
+export interface WorktreeRejection {
+  directoryPath: string;
+  reason: string;
+  seq: number;
+}
+
+/** A `decideWorktree` this office sent that the server could not carry out
+ *  (the Worktree is as it was): the decision dialog shows `reason`. */
+export interface WorktreeDecisionError {
+  directoryPath: string;
+  name: string;
+  reason: string;
+  seq: number;
+}
+
 interface ExtensionMessageState {
   agents: number[];
   selectedAgent: number | null;
@@ -116,6 +153,22 @@ interface ExtensionMessageState {
   /** Paths the host recovered from past sessions, offered as taps in the
    *  Directory modal. Refreshed every time the modal asks. */
   directorySuggestions: string[];
+  /** The last Worktree launch this office made that failed, until dismissed. */
+  worktreeRejection: WorktreeRejection | null;
+  dismissWorktreeRejection: () => void;
+  /** Each Directory's Worktrees as the server last listed them (privileged
+   *  offices only; read-only ones are never sent any). */
+  worktreesByDirectory: Record<string, WorktreeSummary[]>;
+  /** The name of the CLI whose own worktrees (`owner: cli`) are listed, as
+   *  the server last named it; undefined = it named none. */
+  worktreesCliName: string | undefined;
+  /** The last decision of this office's the server refused. */
+  worktreeDecisionError: WorktreeDecisionError | null;
+  /** The × this office pressed on an agent that would leave a Worktree with
+   *  uncommitted files: the server asked before closing it. Cleared when
+   *  answered, dismissed, or the agent goes. */
+  agentCloseQuestion: AgentCloseQuestion | null;
+  clearAgentCloseQuestion: () => void;
   /** Distinct directoryNames seen across agents this session — source for the Areas Directory dropdown. */
   agentDirectoryNames: string[];
   externalAssetDirectories: string[];
@@ -136,7 +189,6 @@ interface ExtensionMessageState {
    *  failed install re-reports the `false` already held, so no effect runs. The Intro needs the ARRIVAL to tell a
    *  pending install from a failed one, per provider — A's status is never a verdict on B's install. */
   hooksStatusSeq: Record<string, number>;
-  hooksInfoShown: boolean;
   /** First-run consent ask (hooksConsentRequest). Non-null while the server waits on an answer; carries the provider
    *  and the server's exact disclosure copy, so the consent step renders the terms being approved with no client
    *  duplicate to drift. Cleared on answer/dismissal, and by a matching provider's hooksStatus installed=true. */
@@ -153,6 +205,10 @@ interface ExtensionMessageState {
   /** Whether the host lists its own Directories (workspace folders / start directory). */
   showHostDirectories: boolean;
   setShowHostDirectories: (v: boolean) => void;
+  /** Where the host saves files sent to a terminal (null: it never said, so
+   *  it has no such thing). A new object on every answer, so a refused change
+   *  still tells the Settings field to show the folder that stands. */
+  uploadDirectory: { path: string } | null;
   /** A read-only office (standalone without the server token): every change it
    *  sends is refused, so the UI hides the controls that would send one. */
   officeReadOnly: boolean;
@@ -162,9 +218,13 @@ interface ExtensionMessageState {
   terminalUnavailableReason: string | null;
   /** Agent ids with a live server-side PTY, in the order they opened. */
   terminalAgentIds: number[];
-  /** The agents that get a card, in the card order every client shares:
-   *  `agents` minus Teammates, the server's order first, newer agents after. */
-  cardAgents: number[];
+  /** The panes this office may attach to, in the order they opened: agents',
+   *  then PC shells' (only where this office runs terminals; a read-only one
+   *  is never told of shells). */
+  panes: Pane[];
+  /** The cards, in the card order every client shares: `agents` minus
+   *  Teammates, and the live PC shells; the server's order first, newer after. */
+  cards: Card[];
   /** Reorder the cards (a finished drag): shown at once, saved by the server,
    *  which tells every open office. */
   saveCardOrder: (order: number[]) => void;
@@ -208,6 +268,17 @@ export function useExtensionMessages(
   const [directoryRejection, setDirectoryRejection] = useState<DirectoryRejection | null>(null);
   const [directorySaved, setDirectorySaved] = useState<DirectorySaved | null>(null);
   const [directorySuggestions, setDirectorySuggestions] = useState<string[]>([]);
+  const [worktreeRejection, setWorktreeRejection] = useState<WorktreeRejection | null>(null);
+  const dismissWorktreeRejection = useCallback(() => setWorktreeRejection(null), []);
+  const [worktreesByDirectory, setWorktreesByDirectory] = useState<
+    Record<string, WorktreeSummary[]>
+  >({});
+  const [worktreesCliName, setWorktreesCliName] = useState<string | undefined>(undefined);
+  const [worktreeDecisionError, setWorktreeDecisionError] = useState<WorktreeDecisionError | null>(
+    null,
+  );
+  const [agentCloseQuestion, setAgentCloseQuestion] = useState<AgentCloseQuestion | null>(null);
+  const clearAgentCloseQuestion = useCallback(() => setAgentCloseQuestion(null), []);
   const [agentDirectoryNames, setAgentDirectoryNames] = useState<string[]>([]);
   const [externalAssetDirectories, setExternalAssetDirectories] = useState<string[]>([]);
   const [lastSeenVersion, setLastSeenVersion] = useState('');
@@ -218,7 +289,6 @@ export function useExtensionMessages(
   const [hooksEnabled, setHooksEnabled] = useState(true);
   const [hooksInstalled, setHooksInstalled] = useState<Record<string, boolean>>({});
   const [hooksStatusSeq, setHooksStatusSeq] = useState<Record<string, number>>({});
-  const [hooksInfoShown, setHooksInfoShown] = useState(true);
   // FIFO of pending consent asks, at most one per provider (a re-ask replaces that provider's entry in place). The
   // HEAD is what the Intro renders; answering, dismissing, or mooting it advances to the next provider's ask rather
   // than dropping it — the server sends one request per provider on the same handshake.
@@ -228,6 +298,7 @@ export function useExtensionMessages(
   const [showAreas, setShowAreas] = useState(false);
   const [bypassPermissions, setBypassPermissions] = useState(false);
   const [showHostDirectories, setShowHostDirectories] = useState(false);
+  const [uploadDirectory, setUploadDirectory] = useState<{ path: string } | null>(null);
   // Never sent under VS Code, so it stays false there.
   const [officeReadOnly, setOfficeReadOnly] = useState(false);
   // Terminal control plane (standalone only; the server never sends these in
@@ -243,9 +314,21 @@ export function useExtensionMessages(
   const unmarkTeammate = (id: number) =>
     setTeammateIds((prev) => (prev.has(id) ? new Set([...prev].filter((t) => t !== id)) : prev));
   const [cardOrder, setCardOrder] = useState<number[]>([]);
-  const cardAgents = useMemo(
-    () => cardOrderOf(cardOrder, agents, teammateIds),
-    [cardOrder, agents, teammateIds],
+  // PC shells (pcShells/pcShellStore.ts): a card each, and a pane where this
+  // office runs terminals. Not agents: never in `agents` or the office's characters.
+  const { shells: pcShells } = usePcShells();
+  const cards = useMemo(
+    () => cardOrderOf(cardOrder, agents, teammateIds, pcShells),
+    [cardOrder, agents, teammateIds, pcShells],
+  );
+  const panes = useMemo(
+    (): Pane[] => [
+      ...terminalAgentIds.map((id): Pane => ({ kind: 'agent', id })),
+      ...(terminalAvailable
+        ? pcShells.map((shell): Pane => ({ kind: 'pcShell', id: shell.id }))
+        : []),
+    ],
+    [terminalAvailable, terminalAgentIds, pcShells],
   );
   const saveCardOrder = useCallback((order: number[]) => {
     setCardOrder(order);
@@ -291,6 +374,8 @@ export function useExtensionMessages(
       // an agent can be removed without its PTY ever reporting an exit (e.g.
       // stale cleanup), and a tab for a gone agent would attach to nothing.
       setTerminalAgentIds((prev) => prev.filter((a) => a !== id));
+      // Gone on its own while asked: its leave asks again if it must.
+      setAgentCloseQuestion((prev) => (prev?.id === id ? null : prev));
       unmarkTeammate(id);
       setAgentTools((prev) => omitKey(prev, id));
       setAgentStatuses((prev) => omitKey(prev, id));
@@ -353,6 +438,15 @@ export function useExtensionMessages(
       // Usage bars (usage/usageStore.ts): the bridge's state and the plan usage.
       if (handleUsageMessage(msg)) return;
       if (handleRolesMessage(msg)) return;
+      if (handleSignInMessage(msg)) return;
+      // The Pixel Office MCP (officeMcp/officeMcpStore.ts): its settings and Intro step.
+      if (handleOfficeMcpMessage(msg)) return;
+      // The tutorial (tutorial/tutorialStore.ts): its offer, its run, a refused start.
+      if (handleTutorialMessage(msg)) return;
+      // PC shells (pcShells/pcShellStore.ts): the live list (it lights their PCs), answers.
+      if (handlePcShellMessage(msg, os)) return;
+      if (handleAgentLayoutEditMessage(msg)) return;
+      if (handleAgentCharacterEditMessage(msg)) return;
       // The cast (characters/castMessages.ts): profiles, items, looks, external sprites.
       if (handleCastMessage(msg, os)) return;
 
@@ -366,6 +460,9 @@ export function useExtensionMessages(
 
       if (msg.type === 'officeAccess') {
         setOfficeReadOnly(msg.readOnly === true);
+        // Every connect's snapshot re-sends the Worktrees from scratch: one
+        // answered (or removed) while this office was away must not linger.
+        setWorktreesByDirectory({});
         return;
       }
 
@@ -398,7 +495,16 @@ export function useExtensionMessages(
         const rawLayout = msg.layout as OfficeLayout | null;
         const layout = rawLayout && rawLayout.version === 1 ? migrateLayoutColors(rawLayout) : null;
         if (layout) {
-          os.rebuildFromLayout(layout);
+          // An agent's edit builds in (the Buildout) in an office already showing
+          // the layout, unless the user prefers reduced motion: then, like any
+          // other layout, it just appears (moved with the edit's resize).
+          const buildout = msg.buildout as LayoutBuildout | undefined;
+          const shift = msg.shift as GridShift | undefined;
+          if (buildout && layoutReadyRef.current && !prefersReducedMotion()) {
+            os.startBuildout(layout, buildout, shift);
+          } else {
+            os.rebuildFromLayout(layout, shift);
+          }
           onLayoutLoaded?.(layout);
         } else {
           // Default layout — snapshot whatever OfficeState built
@@ -454,15 +560,32 @@ export function useExtensionMessages(
             ch.leadAgentId = teammateParentId;
             ch.teamName = teamName ?? parentCh?.teamName;
             ch.agentName = teammateName;
+            // A teammate works on its lead's branch.
+            ch.worktree = (msg.worktree as AgentWorktree | undefined) ?? parentCh?.worktree;
           }
         } else {
           const palette = msg.palette as number | undefined;
           const repeat = msg.repeat as number | undefined;
           // A resumed conversation asks for the seat its agent sat in.
           const seatId = msg.seatId as string | undefined;
-          os.addAgent(id, palette, repeat, seatId, undefined, directoryName);
+          // The tutorial's agent, where this office's greeter sat for it, takes
+          // its seat and its place: no spawn effect, one character throughout.
+          const handoffSeat = os.handoff.claim(msg.nickname as string | undefined);
+          os.addAgent(
+            id,
+            palette,
+            repeat,
+            handoffSeat ?? seatId,
+            handoffSeat !== null ? true : undefined,
+            directoryName,
+          );
           os.setAgentRole(id, parseAgentRole(msg.role));
+          if (handoffSeat !== null) os.replaceGreeterWith(id);
           noteDirectoryName(directoryName);
+          const worktree = msg.worktree as AgentWorktree | undefined;
+          const ch = os.characters.get(id);
+          if (ch && worktree) ch.worktree = worktree;
+          if (ch) ch.nickname = msg.nickname as string | undefined;
           if (isHeadlessAgent(msg.isExternal as boolean | undefined)) {
             os.setHeadless(id, true);
           }
@@ -500,6 +623,8 @@ export function useExtensionMessages(
             layoutReadyRef.current,
             pendingAgents,
             headlessAgents,
+            (msg.worktrees || {}) as Record<number, AgentWorktree>,
+            (msg.nicknames || {}) as Record<number, string>,
             roles,
           )
         ) {
@@ -791,11 +916,33 @@ export function useExtensionMessages(
       } else if (msg.type === 'directoriesLoaded') {
         const directories = msg.directories as Directory[];
         setDirectories(directories);
+        os.pieces.setDirectoryNames(directories.map((d) => d.name));
       } else if (msg.type === 'directorySuggestions') {
         setDirectorySuggestions((msg.paths ?? []) as string[]);
       } else if (msg.type === 'directorySaved') {
         const directory = msg.directory as Directory;
         setDirectorySaved((prev) => ({ directory, seq: (prev?.seq ?? 0) + 1 }));
+      } else if (msg.type === 'worktreesLoaded') {
+        const directoryPath = msg.directoryPath as string;
+        const worktrees = msg.worktrees as WorktreeSummary[];
+        setWorktreesByDirectory((prev) => ({ ...prev, [directoryPath]: worktrees }));
+        setWorktreesCliName(msg.cliName as string | undefined);
+      } else if (msg.type === 'worktreeDecisionRejected') {
+        // The decision dialog (or the Worktrees list) says why.
+        setWorktreeDecisionError((prev) => ({
+          directoryPath: msg.directoryPath as string,
+          name: msg.name as string,
+          reason: msg.reason as string,
+          seq: (prev?.seq ?? 0) + 1,
+        }));
+      } else if (msg.type === 'agentCloseQuestion') {
+        setAgentCloseQuestion(msg as AgentCloseQuestion);
+      } else if (msg.type === 'worktreeRejected') {
+        setWorktreeRejection((prev) => ({
+          directoryPath: msg.directoryPath as string,
+          reason: msg.reason as string,
+          seq: (prev?.seq ?? 0) + 1,
+        }));
       } else if (msg.type === 'directoryRejected') {
         setDirectoryRejection((prev) => ({
           path: msg.path as string,
@@ -817,9 +964,6 @@ export function useExtensionMessages(
         if (typeof msg.hooksEnabled === 'boolean') {
           setHooksEnabled(msg.hooksEnabled as boolean);
         }
-        if (typeof msg.hooksInfoShown === 'boolean') {
-          setHooksInfoShown(msg.hooksInfoShown as boolean);
-        }
         if (typeof msg.showAreas === 'boolean') {
           setShowAreas(msg.showAreas as boolean);
         }
@@ -828,6 +972,9 @@ export function useExtensionMessages(
         }
         if (typeof msg.showHostDirectories === 'boolean') {
           setShowHostDirectories(msg.showHostDirectories as boolean);
+        }
+        if (typeof msg.uploadDirectory === 'string') {
+          setUploadDirectory({ path: msg.uploadDirectory });
         }
         if (Array.isArray(msg.externalAssetDirectories)) {
           setExternalAssetDirectories(msg.externalAssetDirectories as string[]);
@@ -867,7 +1014,10 @@ export function useExtensionMessages(
             type: 'hooksConsentRequest',
             providerId: msg.providerId as string,
             headline: msg.headline as string,
+            summary: typeof msg.summary === 'string' ? msg.summary : '',
             disclosure: msg.disclosure as string,
+            // An older server never says: assume installed (no extra step).
+            cliInstalled: msg.cliInstalled !== false,
           };
           setConsentQueue((q) => {
             const i = q.findIndex((r) => r.providerId === request.providerId);
@@ -909,10 +1059,24 @@ export function useExtensionMessages(
           msg.leadAgentId as number | undefined,
           msg.teamUsesTmux as boolean | undefined,
         );
+      } else if (msg.type === 'agentWorktreeChanged') {
+        // The agent moved itself into or out of a worktree mid-session: its
+        // label and card follow (the card re-renders with the agent list).
+        os.setAgentWorktree(msg.id as number, msg.worktree as AgentWorktree | undefined);
+        setAgents((prev) => [...prev]);
       } else if (msg.type === 'agentContextUsage') {
         const id = msg.id as number;
         os.setAgentContext(id, msg.contextTokens as number, msg.maxContextTokens as number);
         setAgentContextUsed(id, msg.contextTokens as number, msg.maxContextTokens as number);
+      } else if (msg.type === 'agentVisit') {
+        // A Visit sent through the Pixel Office MCP (or its end); the connect
+        // snapshot re-sends every agent's, so a reconnect takes it as the truth.
+        applyAgentVisit(os, msg as AgentVisit);
+      } else if (msg.type === 'agentMessageShow') {
+        // An agent messaged others: its character walks to each one with the
+        // gist in its bubble (shown only by the offices open at the time).
+        // Under reduced motion it says it at its desk instead.
+        applyAgentMessageShow(os, msg as AgentMessageShow, { walk: !prefersReducedMotion() });
       }
     };
     const unsubscribe = transport.onMessage(handler);
@@ -947,7 +1111,7 @@ export function useExtensionMessages(
 
   return {
     agents,
-    cardAgents,
+    cards,
     saveCardOrder,
     selectedAgent,
     agentTools,
@@ -962,6 +1126,13 @@ export function useExtensionMessages(
     directoryRejection,
     directorySaved,
     directorySuggestions,
+    worktreeRejection,
+    dismissWorktreeRejection,
+    worktreesByDirectory,
+    worktreesCliName,
+    worktreeDecisionError,
+    agentCloseQuestion,
+    clearAgentCloseQuestion,
     agentDirectoryNames,
     externalAssetDirectories,
     lastSeenVersion,
@@ -975,7 +1146,6 @@ export function useExtensionMessages(
     hooksInstalled,
     hooksStatusSeq,
     setHooksEnabled,
-    hooksInfoShown,
     consentRequest,
     // Called when a tour ends (answer + Let's Go, the X, Escape) with the providerId that tour was ABOUT, removing
     // that entry so the next provider's ask becomes the head. Keyed by id, not a blind shift: an answered ask's own
@@ -996,9 +1166,11 @@ export function useExtensionMessages(
     setBypassPermissions,
     showHostDirectories,
     setShowHostDirectories,
+    uploadDirectory,
     officeReadOnly,
     terminalAvailable,
     terminalUnavailableReason,
     terminalAgentIds,
+    panes,
   };
 }

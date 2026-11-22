@@ -18,6 +18,7 @@ import {
   conversationQueryFrom,
   listConversations,
   liveSessions,
+  noWorktrees,
   recordConversationLooks,
   remapConversationLooks,
   resumeRequest,
@@ -26,6 +27,7 @@ import {
 import { claudeProvider } from '../src/providers/hook/claude/claude.js';
 import { CONVERSATION_TITLE_SCAN_BYTES } from '../src/providers/hook/claude/constants.js';
 import { conversationTitle } from '../src/providers/hook/claude/conversationTitle.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 /**
  * The sidebar's recent conversations: Claude's own titles read off the
@@ -40,7 +42,12 @@ describe('conversations', () => {
   let dir: string;
   let projectDir: string;
   const provider: HookProvider = { ...claudeProvider, getSessionDirs: () => [projectDir] };
-  const directory: Directory = { name: 'Web', path: '/work/web', source: 'user' };
+  const directory: Directory = {
+    name: 'Web',
+    path: '/work/web',
+    source: 'user',
+    isRepo: false,
+  };
 
   function transcript(sessionId: string, body: string, mtime: number): string {
     const file = path.join(projectDir, `${sessionId}.jsonl`);
@@ -56,7 +63,7 @@ describe('conversations', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeTempDir(dir);
   });
 
   describe('conversationTitle', () => {
@@ -125,7 +132,7 @@ describe('conversations', () => {
       [uuid(2), { agentId: 3, palette: 4, repeat: 0 }],
       [uuid(10), { agentId: 4, palette: 1, repeat: 1 }],
     ]);
-    const [listed] = listConversations([directory], provider, live);
+    const [listed] = listConversations([directory], provider, live, noWorktrees);
     expect(listed.name).toBe('Web');
     expect(listed.conversations.map((c) => c.title)).toEqual([
       'Chat 8',
@@ -143,6 +150,7 @@ describe('conversations', () => {
       [directory],
       provider,
       live,
+      noWorktrees,
       conversationLimitsFrom([{ directoryPath: '/work/web', count: 20 }]),
     )[0];
     expect(all.conversations.map((c) => c.title).slice(-3)).toEqual([
@@ -165,6 +173,7 @@ describe('conversations', () => {
         [directory],
         provider,
         new Map(),
+        noWorktrees,
         count === undefined
           ? undefined
           : conversationLimitsFrom([{ directoryPath: '/work/web', count }]),
@@ -198,7 +207,7 @@ describe('conversations', () => {
   });
 
   describe('searchConversations', () => {
-    const other: Directory = { name: 'Api', path: '/work/api', source: 'user' };
+    const other: Directory = { name: 'Api', path: '/work/api', source: 'user', isRepo: false };
     let otherDir: string;
     const twoDirs: HookProvider = {
       ...claudeProvider,
@@ -217,7 +226,7 @@ describe('conversations', () => {
     });
 
     const search = (query: string, limit = 50, directoryPath?: string) =>
-      searchConversations([directory, other], twoDirs, new Map(), {
+      searchConversations([directory, other], twoDirs, new Map(), noWorktrees, {
         query,
         limit,
         ...(directoryPath ? { directoryPath } : {}),
@@ -279,7 +288,7 @@ describe('conversations', () => {
     expect(conversationLook(uuid(1))).toMatchObject({ palette: 2, repeat: 1, seatId: 'chair-3' });
 
     transcript(uuid(1), line({ type: 'ai-title', aiTitle: 'Seated' }), 1);
-    const [listed] = listConversations([directory], provider, new Map());
+    const [listed] = listConversations([directory], provider, new Map(), noWorktrees);
     expect(listed.conversations[0]).toMatchObject({ palette: 2, repeat: 1 });
   });
 
@@ -302,8 +311,12 @@ describe('conversations', () => {
     transcript(uuid(1), line({ type: 'ai-title', aiTitle: 'Designed' }), 1);
     store.delete(4);
     expect(
-      resumeRequest(store, provider, { sessionId: uuid(1), directoryPath: directory.path })?.look
-        ?.roleId,
+      resumeRequest(
+        store,
+        provider,
+        { sessionId: uuid(1), directoryPath: directory.path },
+        noWorktrees,
+      )?.look?.roleId,
     ).toBe('architect');
   });
 
@@ -406,13 +419,15 @@ describe('conversations', () => {
     // Resumed, it launches as the Role again, in a look picked afresh.
     transcript(uuid(1), line({ type: 'ai-title', aiTitle: 'Tested' }), 1);
     store.delete(1);
-    const resume = resumeRequest(store, provider, {
-      sessionId: uuid(1),
-      directoryPath: directory.path,
-    });
+    const resume = resumeRequest(
+      store,
+      provider,
+      { sessionId: uuid(1), directoryPath: directory.path },
+      noWorktrees,
+    );
     expect(resume?.look).toMatchObject({ roleId: 'qa-engineer' });
     expect(resume?.look?.palette).toBeUndefined();
-    const [listed] = listConversations([directory], provider, new Map());
+    const [listed] = listConversations([directory], provider, new Map(), noWorktrees);
     expect(listed.conversations[0]).toMatchObject({ sessionId: uuid(1), title: 'Tested' });
     expect(listed.conversations[0].palette).toBeUndefined();
   });
@@ -432,7 +447,9 @@ describe('conversations', () => {
       };
     }
     const titles = (p: HookProvider) =>
-      listConversations([directory], p, new Map())[0].conversations.map((c) => c.title);
+      listConversations([directory], p, new Map(), noWorktrees)[0].conversations.map(
+        (c) => c.title,
+      );
 
     it('reads an unchanged transcript once, untitled ones included', () => {
       const { provider: counting, reads } = countingProvider();
@@ -470,7 +487,7 @@ describe('conversations', () => {
       const { provider: counting, reads } = countingProvider();
       transcript(uuid(1), line({ type: 'ai-title', aiTitle: 'Kept' }), 60_000);
       titles(counting);
-      listConversations([], counting, new Map());
+      listConversations([], counting, new Map(), noWorktrees);
       titles(counting);
       expect(reads()).toBe(2);
     });
@@ -495,7 +512,9 @@ describe('conversations', () => {
       recordConversationLooks(store, { '4': { seatId: 'chair-3' } });
       store.delete(4);
       const file = transcript(uuid(1), line({ type: 'ai-title', aiTitle: 'Back' }), 1);
-      expect(resumeRequest(store, provider, { sessionId: uuid(1), directoryPath: '/w' })).toEqual({
+      expect(
+        resumeRequest(store, provider, { sessionId: uuid(1), directoryPath: '/w' }, noWorktrees),
+      ).toEqual({
         sessionId: uuid(1),
         directoryPath: '/w',
         transcript: file,
@@ -507,16 +526,16 @@ describe('conversations', () => {
       const store = new AgentStateStore();
       transcript(uuid(1), line({ type: 'ai-title', aiTitle: 'Here' }), 1);
       expect(
-        resumeRequest(store, provider, { sessionId: '--help', directoryPath: '/w' }),
+        resumeRequest(store, provider, { sessionId: '--help', directoryPath: '/w' }, noWorktrees),
       ).toBeNull();
-      expect(resumeRequest(store, provider, { sessionId: uuid(1) })).toBeNull();
+      expect(resumeRequest(store, provider, { sessionId: uuid(1) }, noWorktrees)).toBeNull();
       expect(
-        resumeRequest(store, provider, { sessionId: uuid(2), directoryPath: '/w' }),
+        resumeRequest(store, provider, { sessionId: uuid(2), directoryPath: '/w' }, noWorktrees),
       ).toBeNull();
       // A background child counts too: its session is in the office.
       store.set(7, agent(7, uuid(1), 'toolu_1'));
       expect(
-        resumeRequest(store, provider, { sessionId: uuid(1), directoryPath: '/w' }),
+        resumeRequest(store, provider, { sessionId: uuid(1), directoryPath: '/w' }, noWorktrees),
       ).toBeNull();
     });
 
@@ -524,7 +543,12 @@ describe('conversations', () => {
       transcript(uuid(1), line({ type: 'ai-title', aiTitle: 'Here' }), 1);
       const untitled: HookProvider = { ...provider, conversationTitle: undefined };
       expect(
-        resumeRequest(new AgentStateStore(), untitled, { sessionId: uuid(1), directoryPath: '/w' }),
+        resumeRequest(
+          new AgentStateStore(),
+          untitled,
+          { sessionId: uuid(1), directoryPath: '/w' },
+          noWorktrees,
+        ),
       ).toBeNull();
     });
   });

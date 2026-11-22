@@ -43,6 +43,8 @@ Claude Code is supported today; Codex, Gemini, Cursor, and others are on the roa
 - **Recent conversations** — past sessions listed per Directory, resumed with one click as the character they had
 - **Usage and context bars** — health bars for your plan limits, and one on every agent for the context it has left
 - **Office radio** — procedural 8-bit background music with moods and shareable song codes
+- **Agents that work the office** — with the [Pixel Office MCP](#pixel-office-mcp), agents you launch can see the office, rearrange it, launch helpers and message each other, and you watch them walk over to do it
+- **A hands-on tutorial** — at the end of the first-run Intro, [the greeter, Byte, can become a real agent](#the-tutorial) and show you around the office
 
 <p align="center">
   <img src="webview-ui/public/characters.png" alt="Pixel Agents characters" width="600" style="image-rendering: pixelated;">
@@ -118,7 +120,7 @@ Only devices on your tailnet can reach it.
 
 ### Layout
 
-Click **Layout** to edit the office: paint floors, walls and carpets, place and recolour furniture, add pets you can click on, and paint named **Areas** that a Directory's agents prefer to sit in. Layouts can be exported and imported as JSON.
+Click **Layout** to edit the office: paint floors, walls and carpets, place and recolour furniture, add pets you can click on, and paint named **Areas** that a Directory's agents prefer to sit in. Layouts can be exported and imported as JSON. The default office comes with two Areas, Studio and Lounge.
 
 ### Office assets
 
@@ -132,13 +134,61 @@ Your workspace folders (VS Code) or the directory the CLI started in (standalone
 
 ### Roles
 
-A Role is the part an agent plays in the team. In the launch drawer, press the **Role** row, pick one (Architect, Developer, QA Engineer, DevSecOps Engineer, Security Engineer, Cloud Engineer, Agile Project Manager), then pick the Directory: the agent starts with that Role's instructions and wears its name on its label. To change what a Role is told, give it a model, or add Roles of your own, write `~/.pixel-agents/roles.json`. See [docs/roles.md](docs/roles.md).
+A Role is the part an agent plays in the team. In the launch drawer, press the **Role** row, pick one (Architect, Developer, QA Engineer, DevSecOps Engineer, Security Engineer, Cloud Engineer, Agile Project Manager), then pick the Directory: the agent starts with that Role's instructions and wears its name on its label. To change what a Role is told, give it a model, or add Roles of your own, write `~/.pixel-agents/roles.json`. Where you allowed the Pixel Office MCP, the Roles also see who is in the office, message each other, and the Agile Project Manager can launch a missing Role once you agree. See [docs/roles.md](docs/roles.md).
 
 ### Characters
 
 Open the roster from the arrow beside **+** and press a character's pencil (or **+ New**) to open the **Characters** view. Dress a character from the wardrobe tabs, recolour any piece, and touch up pixels in the editor; a piece you redraw can be saved as a custom item for the rest of the cast. Nothing changes in the office until you press **Save**. Characters export as a PNG or a config file, and the whole roster as a zip.
 
 Picking a character in the roster and then a Directory launches an agent as that character. In a Directory's settings you can also list its default characters, so its agents are recognisable at a glance.
+
+## Pixel Office MCP
+
+The **Pixel Agents Office MCP** (Pixel Office MCP for short) lets the agents you launch from the office see and act on it. An agent can list who else is working and what they are doing, read and rearrange the office, launch a helper into another Directory with a first instruction, read another agent's terminal and message it, and close agents when the work is done. You see it happen in the office: a character walks over to the agent it messages and says the gist in a speech bubble, an agent sent on a visit walks to the spot, and a layout edit builds outward from where the editing agent's character stands.
+
+### Turning it on
+
+- **The Intro asks.** The first-run tour's choices step has a box for it (off to start) beside the live updates and usage bars ones; if you finished the tour before it existed, the greeter asks this one alone. Unanswered means no: agents launched meanwhile get nothing.
+- **Settings → Pixel Office MCP** turns it on or off at any time. Off takes effect at once, also for agents already running.
+- **Settings → Pixel Office MCP Read-only** lets agents look (list agents, read the layout, the catalogue and terminals) but not change anything, launch, close or message. Also at once.
+
+Ask an agent in plain words — "start an agent in the api repo to review the README", "tell agent 3 the tests pass", "make a room for the docs repo" — and it picks the tools.
+
+### What it never does
+
+- **Nothing is installed.** Nothing is written to your `~/.claude` files. The office adds `--mcp-config <file>` to the agents it launches or resumes, so agents started outside the office (in your own terminal, or adopted by Watch All Sessions) never get it.
+- **Each agent has its own key.** The file, readable only by you under `~/.pixel-agents/mcp/`, holds the server address and a key made for that one agent. It stops working when the agent leaves, when the server stops, or when you turn the feature off — and it is never the server token in your browser's URL. Agents kept alive across a `--pty-host` restart need a resume to get access back.
+- **Claude Code still asks.** Its own MCP permission prompts apply in the agent's terminal, so you can approve risky calls there.
+- **A read-only office stays read-only.** A browser without the token can't reach any of it.
+- **Your unsaved work wins.** Layout edits wait while someone has unsaved changes in the layout editor, and undoing an agent's edit is refused once the layout has changed since.
+
+### Tools
+
+| Tool                  | What an agent can do                                                                                                                                                                                        |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_agents`         | See every agent: id, nickname, Directory, Worktree, status, activity, sub-agents, context left, conversation title, team, seat and Area, character, whether it can be messaged, and which one is itself     |
+| `get_layout`          | Read the office: a summary of Areas, seats and furniture by default, or the furniture list, or a tile map                                                                                                   |
+| `list_catalog`        | See what can be placed: furniture, floor patterns, wall sets, carpets, pets                                                                                                                                 |
+| `edit_layout`         | Change the office in one all-or-nothing batch: furniture, floors, walls, erase, carpets, pets, Areas and their Directories, grid size                                                                       |
+| `undo_layout_edit`    | Undo the last agent layout edit (also a button in the layout editor: "Undo <agent>'s edit")                                                                                                                 |
+| `visit`               | Walk a character to a tile or next to a piece of furniture, briefly or to stay until its agent has work                                                                                                     |
+| `launch_agent`        | Launch an agent into a Directory with a first message, character, seat, nickname, new Worktree, model or permission mode, or resume a past conversation (skipping permissions only when Settings allows it) |
+| `close_agent`         | Close an agent, answering the Worktree question if its Worktree has uncommitted files                                                                                                                       |
+| `read_agent_terminal` | Read another agent's terminal screen                                                                                                                                                                        |
+| `send_message`        | Type text (tagged with who sent it) or press keys (to answer a prompt or a menu) in other agents' terminals, refused if their screen changed since it was read                                              |
+| `get_feature_guide`   | Read what Pixel Agents does, feature by feature, to answer your questions about the office accurately                                                                                                       |
+| `tutorial`            | The tutorial's quests and progress; its Guide also gets its skill's name (the brief on request) and skips a quest when you ask it to. Quests tick when the office sees them                                 |
+
+In VS Code there is no screen to read: `read_agent_terminal` gives an agent's status only, and `send_message` types text only, and only to agents that are done or working. `launch_agent` and `close_agent` aren't offered in VS Code yet: agents there are launched and closed from the office.
+
+### The tutorial
+
+The Intro's last step offers a guided tour, saying up front what yes does, because the tour is run by a **real Claude Code session**: the greeter (Byte, unless you renamed that character) walks to a free desk, sits down, and becomes an agent with its own terminal and card. It tells you what Pixel Agents is, then asks whether you'd like to try something in particular or be shown around. It uses your plan like any session you start. It needs the Pixel Office MCP on, and you can start it later from **Settings → Play the Tutorial**.
+
+- **Four first steps, in any order**: create your first character, add a project (a Directory), put an agent to work, and make the office yours. Each ticks itself off when the office sees it happen. Along the way Byte offers more (an Area for your Directory, default characters, resuming conversations, what agents can do through the Pixel Office MCP), and it stays around once you're done.
+- **A checklist** sits collapsed at the top right; open it to see progress, **Skip** a step, or **Quit** at any time: quitting closes Byte's session. Once every step is done it says so and goes away.
+- **How Byte knows what to do**: an onboarding skill, loaded for that one session with `--plugin-dir` from a folder under `~/.pixel-agents` (nothing is installed into `~/.claude`).
+- **What Byte may do**: read the office without asking (its read-only tools are pre-approved for this one session). It runs in Claude Code's auto mode, even when Settings skips permissions: safe actions go ahead, and anything risky waits for Claude Code's own permission prompt in its terminal. It launches into the folder `pixel-agents` was started in (VS Code: the first workspace folder).
 
 ## Where This Is Going
 

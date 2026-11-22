@@ -1,4 +1,5 @@
-import type { AgentRole } from '../../../../core/src/messages.js';
+import { spotBeside } from '../../../../core/src/layout/visitSpot.js';
+import type { AgentRole, AgentWorktree, LayoutBuildout } from '../../../../core/src/messages.js';
 import { chooseLook } from '../../../../core/src/paletteUtils.js';
 import {
   CHARACTER_HIT_HALF_WIDTH,
@@ -7,7 +8,6 @@ import {
   DISMISS_BUBBLE_FAST_FADE_SEC,
   FURNITURE_ANIM_INTERVAL_SEC,
   GREETER_ID,
-  GREETER_TILE_MARGIN,
   INACTIVE_SEAT_TIMER_MIN_SEC,
   INACTIVE_SEAT_TIMER_RANGE_SEC,
   MAX_PET_ID_LENGTH,
@@ -16,7 +16,11 @@ import {
   WAITING_BUBBLE_DURATION_SEC,
 } from '../../constants.js';
 import { contextUsedShare } from '../contextGauge.js';
-import { getAnimationFrames, getCatalogEntry, getOnStateType } from '../layout/furnitureCatalog.js';
+import {
+  getAnimationFrames,
+  getCatalogEntry,
+  getStateVariant,
+} from '../layout/furnitureCatalog.js';
 import {
   createDefaultLayout,
   getBlockedTiles,
@@ -40,10 +44,20 @@ import type {
 } from '../types.js';
 import { CharacterState, Direction, PetState, TILE_SIZE } from '../types.js';
 import { tickBlink } from './blink.js';
-import { createCharacter, restInChair, updateCharacter, updateHelper } from './characters.js';
+import { BuildoutPlayer } from './buildoutPlayer.js';
+import {
+  createCharacter,
+  restInChair,
+  updateCharacter,
+  updateHelper,
+  updateVisit,
+} from './characters.js';
+import { GreeterHandoff } from './greeterHandoff.js';
 import { advanceMatrixEffect, startMatrixEffect } from './matrixEffectState.js';
 import { createPet, updatePet } from './petEntity.js';
+import { PiecesController } from './piecesController.js';
 import { anchorTile, closestFreeSeat } from './seatPlacement.js';
+import { VisitsController } from './visitsController.js';
 
 /** Whether a character sits in a chair: helpers stand by their lead, and a
  *  departing character is leaving. */
@@ -53,8 +67,8 @@ function takesSeat(ch: Character): boolean {
 
 type Tile = { col: number; row: number };
 
-function sameSet<T>(a: ReadonlySet<T>, b: ReadonlySet<T>): boolean {
-  return a.size === b.size && [...a].every((x) => b.has(x));
+function sameMap<K, V>(a: ReadonlyMap<K, V>, b: ReadonlyMap<K, V>): boolean {
+  return a.size === b.size && [...a].every(([k, v]) => b.get(k) === v);
 }
 
 /** Score by steps from `from` (Manhattan distance). */
@@ -77,10 +91,11 @@ export class OfficeState {
   layout: OfficeLayout;
   tileMap: TileTypeVal[][];
   seats: Map<string, Seat>;
-  /** Seat uid → the uid of the PC that seat works at (workstations.ts). */
+  /** Seat uid → the uid of the workstation that seat works at (workstations.ts). */
   seatWorkstations: Map<string, string> = new Map();
-  /** The PCs lit in the current furniture instances. */
-  private litPcs: ReadonlySet<string> = new Set();
+  /** Piece uid → the declared state it shows in the current furniture instances
+   *  (its state rules under pieceFacts); pieces showing their usual sprite are absent. */
+  private shownStates: ReadonlyMap<string, string> = new Map();
   blockedTiles: Set<string>;
   furniture: FurnitureInstance[];
   walkableTiles: Array<{ col: number; row: number }>;
@@ -106,6 +121,10 @@ export class OfficeState {
     return () => this.selectionListeners.delete(listener);
   }
   cameraFollowId: number | null = null;
+  /** The piece of interactive furniture the camera centres on (the last one
+   *  clicked), as it follows a clicked character. A followed character
+   *  outranks it; a manual pan or a click anywhere else lets go of it. */
+  cameraPieceUid: string | null = null;
   hoveredAgentId: number | null = null;
   hoveredTile: { col: number; row: number } | null = null;
   /** Maps "parentId:toolId" → sub-agent character ID (negative) */
@@ -143,12 +162,77 @@ export class OfficeState {
   greeter: Character | null = null;
 
   /** World-space point the camera drifts to while the greeter is up
-   *  (the bubble overlay recomputes it every frame: the combined center of the
-   *  character and its speech bubble). An explicit cameraFollowId outranks it. */
+   *  (the Intro's dialog recomputes it every frame: the greeter, centred in what the
+   *  dialog leaves of the office). An explicit cameraFollowId outranks it. */
   greeterCameraTarget: { x: number; y: number } | null = null;
   /** Latched by a manual pan during the ask: the user took the camera, so the
    *  overlay's per-frame updates stop re-centering. Reset on spawn/despawn. */
   private greeterCameraCancelled = false;
+  /** The Intro's camera goes to its first target at once (no drift): the
+   *  office opens already centred on the greeter's spot. */
+  private greeterCameraSnap = false;
+  /** Where the greeter appeared (world px, its feet): what the Intro's camera
+   *  stays on, wherever the greeter walks to afterwards. */
+  greeterHome: { x: number; y: number } | null = null;
+
+  /** The Buildout playing, if any: drawing reads it (shownLayout, shownTileMap). */
+  readonly buildout = new BuildoutPlayer();
+
+  /** Interactive furniture: each piece's facts, state, label and click, and the
+   *  piece under a pointer (piecesController.ts). */
+  readonly pieces = new PiecesController({
+    layout: () => this.layout,
+    shownLayout: () => this.shownLayout(),
+    furniture: () => this.furniture,
+    characters: this.characters,
+    seats: () => this.seats,
+    seatWorkstations: () => this.seatWorkstations,
+    areaMappings: () => this.areaMappings,
+    occupiedAt: (x, y) => this.getCharacterAt(x, y) !== null || this.getPetAt(x, y) !== null,
+    shellsChanged: () => this.rebuildFurnitureInstances(),
+  });
+
+  /** Visits, Message shows and Buildout work: each character's errand stack. */
+  readonly visits = new VisitsController({
+    characters: this.characters,
+    walk: (ch, visit, dt) =>
+      this.withOwnSeatUnblocked(ch, () =>
+        updateVisit(ch, visit, dt, this.tileMap, this.blockedTiles),
+      ),
+    spotBeside: (ch, target) =>
+      this.withOwnSeatUnblocked(ch, () =>
+        spotBeside({ tileMap: this.tileMap, blockedTiles: this.blockedTiles }, target, {
+          from: { col: ch.tileCol, row: ch.tileRow },
+          taken: this.takenTiles({ except: ch.id, destinations: true }),
+        }),
+      ),
+    sendToSeat: (id) => this.sendToSeat(id),
+  });
+
+  /** The greeter becoming the tutorial's Guide: its walk to a seat, then the Guide taking its place. */
+  readonly handoff = new GreeterHandoff({
+    greeter: () => this.greeter,
+    freeSeats: () => [...this.seats].flatMap(([uid, seat]) => (seat.assigned ? [] : [uid])),
+    seat: (id) => this.seats.get(id),
+    pathTo: (ch, seat) => {
+      // The greeter holds no seat: unblock the one it walks to for the query.
+      const key = `${seat.seatCol},${seat.seatRow}`;
+      const blocked = this.blockedTiles.delete(key);
+      const path = findPath(
+        ch.tileCol,
+        ch.tileRow,
+        seat.seatCol,
+        seat.seatRow,
+        this.tileMap,
+        this.blockedTiles,
+      );
+      if (blocked) this.blockedTiles.add(key);
+      return path;
+    },
+  });
+  /** The agent that took the greeter's place (handoff), until the Intro closes:
+   *  the camera stays on it. */
+  private greeterStandInId: number | null = null;
 
   setAreaMappings(mappings: Record<string, string[]>): void {
     this.areaMappings = mappings;
@@ -169,6 +253,8 @@ export class OfficeState {
   /** Rebuild all derived state from a new layout. Reassigns existing characters.
    *  @param shift Optional pixel shift to apply when grid expands left/up */
   rebuildFromLayout(layout: OfficeLayout, shift?: { col: number; row: number }): void {
+    // Any layout ends a Buildout under way: what it was building shows at once.
+    this.buildout.stop();
     this.layout = layout;
     this.tileMap = layoutToTileMap(layout);
     this.seats = layoutToSeats(layout.furniture);
@@ -213,6 +299,17 @@ export class OfficeState {
         const seat = this.seats.get(ch.seatId)!;
         if (!seat.assigned) {
           seat.assigned = true;
+          const inGrid =
+            ch.tileCol >= 0 &&
+            ch.tileCol < layout.cols &&
+            ch.tileRow >= 0 &&
+            ch.tileRow < layout.rows;
+          if (ch.errands?.length && inGrid) {
+            // Away on a visit: keep it there; it re-paths on the new layout.
+            ch.path = [];
+            ch.moveProgress = 0;
+            continue;
+          }
           // Snap character to seat position
           ch.tileCol = seat.seatCol;
           ch.tileRow = seat.seatRow;
@@ -318,6 +415,29 @@ export class OfficeState {
     return result;
   }
 
+  /**
+   * The free seats a new agent may be given: every unassigned seat, except those
+   * whose workstation has a live PC shell (the user works there) while any other
+   * seat is free. Only the office's own picks go through this; a seat asked for
+   * by name (a resume's, launch_agent's) or assigned by hand ignores it.
+   */
+  private seatChoices(): string[] {
+    const free: string[] = [];
+    const shared: string[] = [];
+    for (const [uid, seat] of this.seats) {
+      if (seat.assigned) continue;
+      const piece = this.seatWorkstations.get(uid);
+      (piece !== undefined && this.pieces.hasShell(piece) ? shared : free).push(uid);
+    }
+    return free.length > 0 ? free : shared;
+  }
+
+  /** The free seat closest to a tile (teammates beside their lead), by seatChoices. */
+  private closestSeatChoice(col: number, row: number): string | null {
+    const choices = new Set(this.seatChoices());
+    return closestFreeSeat(this.seats, col, row, (uid) => choices.has(uid));
+  }
+
   /** Find the area label assigned to a seat's tile, or null. Public for e2e
    *  observability (getAgentSeats hook reads a seated agent's area). */
   seatZone(uid: string): string | null {
@@ -361,16 +481,14 @@ export class OfficeState {
    *   Stage 2: Prefer free seats whose tile has NO area label (unzoned).
    *   Stage 3: Any free seat.
    *
-   * Each stage routes through `pickFromSeats` for the PC-bias rule. Returns
-   * null only when every seat is already occupied. Passing `undefined`
+   * Each stage routes through `pickFromSeats` for the PC-bias rule, over
+   * `seatChoices` (a seat at a PC with a live PC shell only once no other is
+   * free). Returns null only when every seat is already occupied. Passing `undefined`
    * preserves pre-Areas single-stage behavior (skips Stage 1; Stage 2 picks
    * unzoned seats from a layout without `areaTiles`, which is every seat).
    */
   private findFreeSeat(directoryName?: string): string | null {
-    const freeSeats: string[] = [];
-    for (const [uid, seat] of this.seats) {
-      if (!seat.assigned) freeSeats.push(uid);
-    }
+    const freeSeats = this.seatChoices();
     if (freeSeats.length === 0) return null;
 
     const areaLabels = directoryName ? this.areaMappings[directoryName] : undefined;
@@ -488,7 +606,7 @@ export class OfficeState {
       }
     }
     if (!seatId && anchorAt) {
-      seatId = closestFreeSeat(this.seats, anchorAt.col, anchorAt.row);
+      seatId = this.closestSeatChoice(anchorAt.col, anchorAt.row);
     }
     if (!seatId) {
       seatId = this.findFreeSeat(directoryName);
@@ -525,27 +643,38 @@ export class OfficeState {
   }
 
   // ── Greeter ───────────────────────────────────────────────────
-  // The Intro is diegetic: a character (Suit, by id: see greeterPalette) stands near the office's
-  // bottom-left corner and "speaks" the tour through a DOM bubble
-  // (IntroBubble). It is not an agent — see the `greeter` field.
+  // The Intro is diegetic: a character (Byte, by id: see greeterPalette) stands in the middle of
+  // the office and "speaks" the tour through a DOM dialog box
+  // (IntroDialog). It is not an agent — see the `greeter` field.
 
-  /** Spawn the greeter near the office's bottom-left corner: target tile
-   *  GREETER_TILE_MARGIN in from the left and bottom edges, falling
-   *  back to the closest walkable tile when the target is a seat, furniture,
+  /** Spawn the greeter in the middle of the office: the centre of the box
+   *  round its walkable tiles, falling
+   *  back to the closest walkable tile when that is a seat, furniture,
    *  a wall, or VOID (seat tiles are in blockedTiles, so closestFreeWalkableTile
    *  covers every one of those). Idempotent; a remount mid-despawn (StrictMode)
    *  revives it. */
   spawnGreeter(): void {
     this.greeterCameraCancelled = false;
+    this.greeterCameraSnap = true;
+    this.greeterStandInId = null;
     if (this.greeter) {
       if (this.greeter.matrixEffect === 'despawn') startMatrixEffect(this.greeter, 'spawn');
       return;
     }
+    // The middle of the floor, not of the grid: a layout may keep rows of
+    // void around its rooms.
+    let [minCol, maxCol, minRow, maxRow] = [Infinity, -Infinity, Infinity, -Infinity];
+    for (const tile of this.walkableTiles) {
+      minCol = Math.min(minCol, tile.col);
+      maxCol = Math.max(maxCol, tile.col);
+      minRow = Math.min(minRow, tile.row);
+      maxRow = Math.max(maxRow, tile.row);
+    }
     const spawn = this.closestFreeWalkableTile(
-      GREETER_TILE_MARGIN,
-      this.layout.rows - 1 - GREETER_TILE_MARGIN,
+      Math.floor((minCol + maxCol + 1) / 2),
+      Math.floor((minRow + maxRow + 1) / 2),
     );
-    if (!spawn) return; // no walkable tile — IntroBubble falls back to a fixed panel
+    if (!spawn) return; // no walkable tile — the dialog speaks with no character
     const ch = createCharacter(GREETER_ID, 0, null, null, 0);
     ch.isGreeter = true;
     ch.state = CharacterState.IDLE;
@@ -557,9 +686,10 @@ export class OfficeState {
     ch.tileRow = spawn.row;
     startMatrixEffect(ch, 'spawn');
     this.greeter = ch;
+    this.greeterHome = { x: ch.x, y: ch.y };
   }
 
-  /** Dress the greeter as a cast character (IntroBubble picks which). */
+  /** Dress the greeter as a cast character (IntroDialog picks which). */
   setGreeterPalette(palette: number): void {
     if (this.greeter) this.greeter.palette = palette;
   }
@@ -570,13 +700,57 @@ export class OfficeState {
   despawnGreeter(): void {
     this.greeterCameraTarget = null;
     this.greeterCameraCancelled = false;
+    this.greeterStandInId = null;
+    this.handoff.cancel();
     if (!this.greeter || this.greeter.matrixEffect === 'despawn') return;
     startMatrixEffect(this.greeter, 'despawn');
   }
 
-  /** Per-frame update from the bubble overlay; ignored once the user panned. */
+  /** The tutorial's agent joined where the greeter sat for it (handoff.claim):
+   *  it takes the greeter's place and pose, and the greeter is gone, with no
+   *  effect either way. */
+  replaceGreeterWith(id: number): void {
+    const ch = this.characters.get(id);
+    const greeter = this.greeter;
+    if (!ch || !greeter) return;
+    ch.x = greeter.x;
+    ch.y = greeter.y;
+    ch.tileCol = greeter.tileCol;
+    ch.tileRow = greeter.tileRow;
+    ch.dir = greeter.dir;
+    ch.state = greeter.state;
+    ch.path = greeter.path;
+    ch.moveProgress = greeter.moveProgress;
+    // Seated, it rests in the chair as an agent arriving there would. At rest,
+    // not mid-turn: its first idle status is then no turn ending, which would
+    // stand it up at once; its first turn has it typing where it sits.
+    if (ch.state === CharacterState.TYPE) {
+      ch.isActive = false;
+      restInChair(ch);
+    }
+    this.greeter = null;
+    this.greeterStandInId = id;
+  }
+
+  /** The Intro's speaker: the greeter, or the agent that took its place. */
+  greeterAnchor(): Character | null {
+    if (this.greeter) return this.greeter;
+    return this.greeterStandInId === null
+      ? null
+      : (this.characters.get(this.greeterStandInId) ?? null);
+  }
+
+  /** Per-frame update from the Intro's dialog; ignored once the user panned. */
   setGreeterCameraTarget(p: { x: number; y: number }): void {
     if (!this.greeterCameraCancelled) this.greeterCameraTarget = p;
+  }
+
+  /** Whether the camera should jump to the greeter target (true once per
+   *  spawn: the first frame it is applied), rather than drift there. */
+  takeGreeterCameraSnap(): boolean {
+    const snap = this.greeterCameraSnap;
+    this.greeterCameraSnap = false;
+    return snap;
   }
 
   /** Manual pan during the ask: stop re-centering until the next spawn. */
@@ -589,6 +763,7 @@ export class OfficeState {
    *  automatic drivers: character follow and the greeter's ask. */
   breakCameraFollow(): void {
     this.cameraFollowId = null;
+    this.cameraPieceUid = null;
     this.cancelGreeterCamera();
   }
 
@@ -598,6 +773,7 @@ export class OfficeState {
     if (!this.characters.has(id)) return;
     this.selectedAgentId = id;
     this.cameraFollowId = id;
+    this.cameraPieceUid = null;
   }
 
   /** The agent that owns `id`'s terminal: a sub-agent's parent, else itself. */
@@ -608,6 +784,7 @@ export class OfficeState {
   removeAgent(id: number): void {
     const ch = this.characters.get(id);
     if (!ch) return;
+    this.visits.forget(id);
     if (ch.matrixEffect === 'despawn') return; // already despawning
     // Give the seat up at once: a departing character holds none, so nothing
     // (a layout rebuild included) can mark it taken again during the effect.
@@ -629,6 +806,14 @@ export class OfficeState {
   }
 
   /** Find seat uid at a given tile position, or null */
+  /** The seat paired with a workstation piece (the chair in front of a PC), or null. */
+  seatOfPiece(pieceUid: string): string | null {
+    for (const [seatId, piece] of this.seatWorkstations) {
+      if (piece === pieceUid) return seatId;
+    }
+    return null;
+  }
+
   getSeatAtTile(col: number, row: number): string | null {
     for (const [uid, seat] of this.seats) {
       if (seat.seatCol === col && seat.seatRow === row) return uid;
@@ -649,6 +834,21 @@ export class OfficeState {
       const seat = this.seats.get(seatId);
       if (seat && !seat.assigned) this.reassignSeat(agentId, seatId);
     }
+  }
+
+  /** Give an agent the Worktree it runs in (or none); its sub-agents wear it too. */
+  setAgentWorktree(agentId: number, worktree: AgentWorktree | undefined): void {
+    for (const ch of this.characters.values()) {
+      if (ch.id === agentId || (ch.isSubagent && ch.parentAgentId === agentId)) {
+        ch.worktree = worktree;
+      }
+    }
+  }
+
+  /** Give an agent its Nickname (or none). */
+  setAgentNickname(agentId: number, nickname: string | undefined): void {
+    const ch = this.characters.get(agentId);
+    if (ch) ch.nickname = nickname;
   }
 
   /** Give an agent a new look (its character moved in the list); its sub-agents wear it too. */
@@ -711,7 +911,7 @@ export class OfficeState {
     if (!teammate || !lead) return;
     const anchorAt = anchorTile(lead, this.seats);
     if (!anchorAt) return;
-    const target = closestFreeSeat(this.seats, anchorAt.col, anchorAt.row);
+    const target = this.closestSeatChoice(anchorAt.col, anchorAt.row);
     if (!target || target === teammate.seatId) return;
     const targetSeat = this.seats.get(target)!;
     const targetDist =
@@ -729,6 +929,7 @@ export class OfficeState {
   sendToSeat(agentId: number): void {
     const ch = this.characters.get(agentId);
     if (!ch || !ch.seatId) return;
+    this.visits.drop(ch); // the user's word ends a visit (a Message show too)
     const seat = this.seats.get(ch.seatId);
     if (!seat) return;
     const path = this.withOwnSeatUnblocked(ch, () =>
@@ -765,12 +966,48 @@ export class OfficeState {
       findPath(ch.tileCol, ch.tileRow, col, row, this.tileMap, this.blockedTiles),
     );
     if (path.length === 0) return false;
+    this.visits.drop(ch); // the user's word ends a visit (a Message show too)
     ch.path = path;
     ch.moveProgress = 0;
     ch.state = CharacterState.WALK;
     ch.frame = 0;
     ch.frameTimer = 0;
     return true;
+  }
+
+  /**
+   * Apply an agent's layout edit as a Buildout (`layoutLoaded.buildout`): the
+   * office takes `layout` at once (state, seats, walking — the edit is saved
+   * already), and SHOWS it building in from `origin` (buildout.ts: changes one
+   * by one outward, removals in matrix rain, within BUILDOUT_MAX_SEC), diffed
+   * against the layout it held until now — so an edit arriving mid-buildout
+   * builds from the last one's result. The builder's character, when this
+   * office shows it, walks to a spot beside the origin, faces it and works
+   * there for the build's length (after it gets there), then goes back to its
+   * desk; the build never waits for the walk. An edit with nothing visible to
+   * build (Areas only) just applies.
+   */
+  startBuildout(
+    layout: OfficeLayout,
+    buildout: LayoutBuildout,
+    shift?: { col: number; row: number },
+  ): void {
+    const before = this.layout;
+    this.rebuildFromLayout(layout, shift);
+    const plan = this.buildout.start(before, layout, buildout.origin, shift);
+    if (!plan) return;
+    this.rebuildFurnitureInstances();
+    this.visits.sendBuilder(buildout.agentId, plan.origin, plan.duration);
+  }
+
+  /** The layout as the office draws it now: the Buildout's frame, else the layout. */
+  shownLayout(): OfficeLayout {
+    return this.buildout.layout() ?? this.layout;
+  }
+
+  /** The tile map as the office draws it now (shownLayout's). */
+  shownTileMap(): TileTypeVal[][] {
+    return this.buildout.tileMap() ?? this.tileMap;
   }
 
   /** Create a sub-agent character with the parent's palette. Returns the sub-agent ID. */
@@ -802,6 +1039,8 @@ export class OfficeState {
     ch.dir = this.helperFacing(parentCh) ?? ch.dir;
     ch.isSubagent = true;
     ch.parentAgentId = parentAgentId;
+    // A sub-agent works on its parent's branch: same Worktree marker.
+    ch.worktree = parentCh?.worktree;
     const spot = this.resyncSubagentSpots.get(key);
     if (spot) {
       // Re-created by a resync replay: it never left, so no spawn effect.
@@ -936,43 +1175,32 @@ export class OfficeState {
     this.rebuildFurnitureInstances();
   }
 
-  /**
-   * The PCs whose seat has an agent working at it: active, sitting in that
-   * seat and typing. Walking to the seat, resting there between turns, or
-   * standing beside it does not count.
-   */
-  private litWorkstations(): Set<string> {
-    const lit = new Set<string>();
-    for (const ch of this.characters.values()) {
-      if (!ch.isActive || !ch.seatId || ch.state !== CharacterState.TYPE || ch.matrixEffect) {
-        continue;
-      }
-      const seat = this.seats.get(ch.seatId);
-      if (!seat || ch.tileCol !== seat.seatCol || ch.tileRow !== seat.seatRow) continue;
-      const pc = this.seatWorkstations.get(ch.seatId);
-      if (pc) lit.add(pc);
-    }
-    return lit;
+  /** Rebuild furniture instances, each piece in the state its rules say (a piece
+   *  with no art for that state keeps its usual sprite), animated states on the
+   *  current frame. */
+  /** The declared state a piece is drawn in now (its state rules' pick, e.g. a PC's
+   *  "on"), or null when it shows its usual sprite. */
+  pieceShownState(uid: string): string | null {
+    return this.shownStates.get(uid) ?? null;
   }
 
-  /** Rebuild furniture instances with auto-state applied (a working agent's PC turns ON) */
-  private rebuildFurnitureInstances(lit = this.litWorkstations()): void {
-    this.litPcs = lit;
-    if (lit.size === 0) {
-      this.furniture = layoutToFurnitureInstances(this.layout.furniture);
+  private rebuildFurnitureInstances(shown = this.pieces.showingStates()): void {
+    this.shownStates = shown;
+    const placed = this.shownLayout().furniture;
+    if (shown.size === 0) {
+      this.furniture = layoutToFurnitureInstances(placed);
       return;
     }
 
-    // Build modified furniture list with auto-state and animation applied
     const animFrame = Math.floor(this.furnitureAnimTimer / FURNITURE_ANIM_INTERVAL_SEC);
-    const modifiedFurniture: PlacedFurniture[] = this.layout.furniture.map((item) => {
-      if (!lit.has(item.uid)) return item;
-      let onType = getOnStateType(item.type);
-      if (onType === item.type) return item;
-      // Check if the on-state type has animation frames
-      const frames = getAnimationFrames(onType);
-      if (frames && frames.length > 1) onType = frames[animFrame % frames.length];
-      return { ...item, type: onType };
+    const modifiedFurniture: PlacedFurniture[] = placed.map((item) => {
+      const state = shown.get(item.uid);
+      if (!state) return item;
+      let type = getStateVariant(item.type, state);
+      if (!type || type === item.type) return item;
+      const frames = getAnimationFrames(type);
+      if (frames && frames.length > 1) type = frames[animFrame % frames.length];
+      return { ...item, type };
     });
 
     this.furniture = layoutToFurnitureInstances(modifiedFurniture);
@@ -1201,6 +1429,8 @@ export class OfficeState {
   }
 
   update(dt: number): void {
+    if (this.buildout.advance(dt)) this.rebuildFurnitureInstances();
+
     // Furniture animation cycling
     const prevFrame = Math.floor(this.furnitureAnimTimer / FURNITURE_ANIM_INTERVAL_SEC);
     this.furnitureAnimTimer += dt;
@@ -1212,6 +1442,7 @@ export class OfficeState {
     // The greeter materializes and dematerializes like anyone else, but runs
     // no FSM — it stands where it spawned for as long as the ask is up.
     if (this.greeter) tickBlink(this.greeter, dt, false);
+    this.handoff.update(dt);
     if (this.greeter && advanceMatrixEffect(this.greeter, dt) === 'despawned') {
       this.greeter = null;
     }
@@ -1239,11 +1470,17 @@ export class OfficeState {
           this.tileMap,
           this.blockedTiles,
         );
-      } else {
-        // Temporarily unblock own seat so character can pathfind to it
+      } else if (!this.visits.step(ch, dt)) {
+        // On no errand: the usual FSM. Temporarily unblock own seat so
+        // character can pathfind to it
         this.withOwnSeatUnblocked(ch, () =>
           updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles),
         );
+      }
+
+      if (ch.saying) {
+        ch.saying.left -= dt;
+        if (ch.saying.left <= 0) ch.saying = null;
       }
 
       // Tick bubble timer for waiting bubbles
@@ -1260,9 +1497,10 @@ export class OfficeState {
       this.characters.delete(id);
     }
 
-    // A PC turns on when its agent sits down to work, not when the turn starts.
-    const lit = this.litWorkstations();
-    if (!sameSet(lit, this.litPcs)) this.rebuildFurnitureInstances(lit);
+    // A piece's state follows its facts as they change: a PC turns on when its agent
+    // sits down to work, not when the turn starts.
+    const shown = this.pieces.showingStates();
+    if (!sameMap(shown, this.shownStates)) this.rebuildFurnitureInstances(shown);
 
     // ── Pet FSM ────────────────────────────────────────────────
     for (const pet of this.pets) {
@@ -1310,20 +1548,27 @@ export class OfficeState {
   getCharacterAt(worldX: number, worldY: number): number | null {
     const chars = Array.from(this.characters.values()).sort((a, b) => b.y - a.y);
     for (const ch of chars) {
-      // Skip characters that are despawning
-      if (ch.matrixEffect === 'despawn') continue;
-      // Character sprite is 16x24, anchored bottom-center
-      // Apply sitting offset to match visual position
-      const sittingOffset = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;
-      const anchorY = ch.y + sittingOffset;
-      const left = ch.x - CHARACTER_HIT_HALF_WIDTH;
-      const right = ch.x + CHARACTER_HIT_HALF_WIDTH;
-      const top = anchorY - CHARACTER_HIT_HEIGHT;
-      const bottom = anchorY;
-      if (worldX >= left && worldX <= right && worldY >= top && worldY <= bottom) {
-        return ch.id;
-      }
+      if (characterHit(ch, worldX, worldY)) return ch.id;
     }
     return null;
   }
+
+  /** Is the Intro's greeter under this point? (It is no agent: hovered, never clicked.) */
+  greeterAt(worldX: number, worldY: number): boolean {
+    return this.greeter !== null && characterHit(this.greeter, worldX, worldY);
+  }
+}
+
+/** A character's hit box: its 16×24 sprite, anchored bottom-centre, lower while it
+ *  sits; none while it dematerializes. */
+function characterHit(ch: Character, worldX: number, worldY: number): boolean {
+  if (ch.matrixEffect === 'despawn') return false;
+  const sittingOffset = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;
+  const anchorY = ch.y + sittingOffset;
+  return (
+    worldX >= ch.x - CHARACTER_HIT_HALF_WIDTH &&
+    worldX <= ch.x + CHARACTER_HIT_HALF_WIDTH &&
+    worldY >= anchorY - CHARACTER_HIT_HEIGHT &&
+    worldY <= anchorY
+  );
 }

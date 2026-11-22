@@ -24,8 +24,13 @@ export type ServerMessage =
   | SubagentClear
   | SubagentToolPermission
   | AgentTeamInfo
+  | AgentWorktreeChanged
   | AgentContextUsage
+  | AgentVisit
+  | AgentMessageShow
   | LayoutLoaded
+  | AgentLayoutEditStatus
+  | AgentCharacterEditStatus
   | FurnitureAssetsLoaded
   | CharacterProfilesLoaded
   | RecentCharactersLoaded
@@ -39,6 +44,11 @@ export type ServerMessage =
   | BypassPermissionsUpdated
   | HooksStatus
   | HooksConsentRequest
+  | OfficeMcpConsentRequest
+  | OfficeMcpStatus
+  | TutorialStatus
+  | TutorialRejected
+  | CliSignInStatus
   | UsageBridgeStatus
   | UsageLimits
   | ExternalAssetDirectoriesUpdated
@@ -51,9 +61,19 @@ export type ServerMessage =
   | RolesLoaded
   | ConversationsLoaded
   | ConversationSearchResults
+  | WorktreeRejected
+  | WorktreeOptions
+  | WorktreeDecisionRejected
+  | AgentCloseQuestion
+  | WorktreesLoaded
   | TerminalAvailability
   | TerminalSessionOpened
   | TerminalSessionClosed
+  | PcShellsLoaded
+  | PanelsInUse
+  | PcShellReady
+  | PcShellCloseQuestion
+  | PcShellRejected
   | AgentDiagnostics;
 
 export type ClientMessage =
@@ -63,7 +83,11 @@ export type ClientMessage =
   | CloseAgent
   | SaveAgentSeats
   | SaveLayout
+  | LayoutEditing
+  | UndoAgentLayoutEdit
   | SaveCharacterProfiles
+  | CharactersEditing
+  | UndoAgentCharacterEdit
   | SetSoundEnabled
   | SetLastSeenVersion
   | SetAlwaysShowLabels
@@ -71,7 +95,15 @@ export type ClientMessage =
   | SetHooksEnabled
   | HooksConsentResponse
   | SetUsageBridgeEnabled
-  | SetHooksInfoShown
+  | RequestCliSignInStatus
+  | StartCliSignIn
+  | SubmitCliSignInCode
+  | OfficeMcpConsentResponse
+  | SetOfficeMcpEnabled
+  | SetOfficeMcpReadOnly
+  | StartTutorial
+  | SkipTutorialQuest
+  | QuitTutorial
   | SetWatchAllSessions
   | ExportLayout
   | ImportLayout
@@ -84,12 +116,19 @@ export type ClientMessage =
   | SetShowAreas
   | SetBypassPermissions
   | SetShowHostDirectories
+  | SetUploadDirectory
+  | ReplayIntro
   | SaveDirectory
   | RemoveDirectory
   | RequestDirectorySuggestions
   | RequestConversations
   | SearchConversations
   | ResumeConversation
+  | RequestWorktrees
+  | RequestWorktreeOptions
+  | DecideWorktree
+  | OpenPcShell
+  | ClosePcShell
   | RequestDiagnostics;
 
 export interface ProviderCapabilities {
@@ -107,6 +146,8 @@ export interface AgentCreated {
   repeat?: number;
   seatId?: string;
   role?: AgentRole;
+  worktree?: AgentWorktree;
+  nickname?: string;
 }
 
 export interface AgentRole {
@@ -117,6 +158,11 @@ export interface AgentRole {
 
 export type RoleColor =
   'red' | 'orange' | 'yellow' | 'green' | 'cyan' | 'blue' | 'purple' | 'pink' | 'gray';
+
+export interface AgentWorktree {
+  name: string;
+  branch: string;
+}
 
 export interface AgentClosed {
   type: 'agentClosed';
@@ -135,6 +181,8 @@ export interface ExistingAgents {
   directoryNames: Record<string, string>;
   externalAgents: Record<string, boolean>;
   roles?: Record<string, AgentRole>;
+  worktrees?: Record<string, AgentWorktree>;
+  nicknames?: Record<string, string>;
 }
 
 export interface AgentSeatMeta {
@@ -221,6 +269,12 @@ export interface AgentTeamInfo {
   teamUsesTmux?: boolean;
 }
 
+export interface AgentWorktreeChanged {
+  type: 'agentWorktreeChanged';
+  id: number;
+  worktree?: AgentWorktree;
+}
+
 export interface AgentContextUsage {
   type: 'agentContextUsage';
   id: number;
@@ -228,10 +282,61 @@ export interface AgentContextUsage {
   maxContextTokens: number;
 }
 
+export interface AgentVisit {
+  type: 'agentVisit';
+  id: number;
+  to?: TilePosition;
+  facing?: Facing;
+  stay?: boolean;
+  cleared?: boolean;
+}
+
+export interface TilePosition {
+  col: number;
+  row: number;
+}
+
+export type Facing = 'up' | 'down' | 'left' | 'right';
+
+export interface AgentMessageShow {
+  type: 'agentMessageShow';
+  fromId: number;
+  toIds: number[];
+  gist: string;
+}
+
 export interface LayoutLoaded {
   type: 'layoutLoaded';
   layout: Record<string, any> | null;
   wasReset?: boolean;
+  buildout?: LayoutBuildout;
+  shift?: GridShift;
+}
+
+export interface LayoutBuildout {
+  agentId: number;
+  origin: TilePosition;
+}
+
+export interface GridShift {
+  col: number;
+  row: number;
+}
+
+export interface AgentLayoutEditStatus {
+  type: 'agentLayoutEditStatus';
+  agentId?: number;
+  agentName?: string;
+  refused?: string;
+}
+
+export interface AgentCharacterEditStatus {
+  type: 'agentCharacterEditStatus';
+  agentId?: number;
+  agentName?: string;
+  summary?: string;
+  landed?: boolean;
+  refused?: string;
 }
 
 export interface FurnitureAssetsLoaded {
@@ -261,6 +366,35 @@ export interface FurnitureAssetMessage {
   rotationScheme?: string;
   animationGroup?: string;
   frame?: number;
+  interactive?: FurnitureInteractive;
+}
+
+export interface FurnitureInteractive {
+  agentUse?: FurnitureAgentUse;
+  label?: FurnitureLabelSpec;
+  panel?: FurniturePanel;
+  states?: FurnitureStateRule[];
+}
+
+export type FurnitureAgentUse = 'workstation';
+
+export interface FurnitureLabelSpec {
+  name: string;
+  lines?: FurnitureLabelLine[];
+}
+
+export interface FurnitureLabelLine {
+  when: FurnitureCondition[];
+  text: string;
+}
+
+export type FurnitureCondition = 'agentWorking' | 'agentSeated' | 'panelInUse' | 'free';
+
+export type FurniturePanel = 'terminal';
+
+export interface FurnitureStateRule {
+  state: string;
+  when: FurnitureCondition[];
 }
 
 export interface CharacterProfilesLoaded {
@@ -384,11 +518,11 @@ export interface SettingsLoaded {
   alwaysShowLabels: boolean;
   ghostHeadlessAgents: boolean;
   hooksEnabled: boolean;
-  hooksInfoShown: boolean;
   externalAssetDirectories: string[];
   showAreas: boolean;
   bypassPermissions: boolean;
   showHostDirectories: boolean;
+  uploadDirectory?: string;
 }
 
 export interface BypassPermissionsUpdated {
@@ -406,7 +540,64 @@ export interface HooksConsentRequest {
   type: 'hooksConsentRequest';
   providerId: string;
   headline: string;
+  summary: string;
+  cliInstalled: boolean;
   disclosure: string;
+}
+
+export interface OfficeMcpConsentRequest {
+  type: 'officeMcpConsentRequest';
+  headline: string;
+  summary: string;
+  disclosure: string;
+}
+
+export interface OfficeMcpStatus {
+  type: 'officeMcpStatus';
+  consent: OfficeMcpConsentState;
+  readOnly: boolean;
+  headline: string;
+  disclosure: string;
+}
+
+export type OfficeMcpConsentState = 'unanswered' | 'granted' | 'declined';
+
+export interface TutorialStatus {
+  type: 'tutorialStatus';
+  available: boolean;
+  unavailableReason?: string;
+  headline: string;
+  disclosure: string;
+  run?: TutorialRun;
+}
+
+export interface TutorialRun {
+  agentId: number;
+  quests: TutorialQuestProgress[];
+  finished: boolean;
+}
+
+export interface TutorialQuestProgress {
+  id: string;
+  state: TutorialQuestState;
+}
+
+export type TutorialQuestState = 'open' | 'done' | 'skipped';
+
+export interface TutorialRejected {
+  type: 'tutorialRejected';
+  reason: string;
+}
+
+export interface CliSignInStatus {
+  type: 'cliSignInStatus';
+  providerId: string;
+  signedIn: boolean;
+  planLimits?: boolean;
+  cliMissing?: boolean;
+  signInUrl?: string;
+  openedOnHost?: boolean;
+  error?: string;
 }
 
 export interface UsageBridgeStatus {
@@ -414,6 +605,7 @@ export interface UsageBridgeStatus {
   providerId: string;
   providerName: string;
   installed: boolean;
+  summary: string;
   disclosure: string;
   error?: string;
 }
@@ -455,11 +647,17 @@ export interface Directory {
   name: string;
   path: string;
   source: DirectorySource;
+  isRepo: boolean;
+  hasOrigin?: boolean;
+  worktreeBase?: WorktreeBase;
+  worktreeBranchPrefix?: string;
   characters?: number[];
   characterOrder?: DirectoryCharacterOrder;
 }
 
 export type DirectorySource = 'user' | 'host';
+
+export type WorktreeBase = 'head' | 'fresh';
 
 export type DirectoryCharacterOrder = 'priority' | 'random';
 
@@ -513,6 +711,7 @@ export interface Conversation {
   palette?: number;
   repeat?: number;
   agentId?: number;
+  worktree?: AgentWorktree;
 }
 
 export interface ConversationSearchResults {
@@ -529,6 +728,70 @@ export interface FoundConversation {
   directoryName: string;
   conversation: Conversation;
 }
+
+export interface WorktreeRejected {
+  type: 'worktreeRejected';
+  directoryPath: string;
+  reason: string;
+}
+
+export interface WorktreeOptions {
+  type: 'worktreeOptions';
+  directoryPath: string;
+  name: string;
+  prefix: string;
+  branches: WorktreeBranch[];
+  defaultBase?: WorktreeBranch;
+}
+
+export interface WorktreeBranch {
+  name: string;
+  location: WorktreeBranchLocation;
+  current?: boolean;
+}
+
+export type WorktreeBranchLocation = 'local' | 'origin';
+
+export interface WorktreeDecisionRejected {
+  type: 'worktreeDecisionRejected';
+  directoryPath: string;
+  name: string;
+  reason: string;
+}
+
+export interface AgentCloseQuestion {
+  type: 'agentCloseQuestion';
+  id: number;
+  directoryPath: string;
+  name: string;
+  branch: string;
+  uncommittedFiles: number;
+}
+
+export interface WorktreesLoaded {
+  type: 'worktreesLoaded';
+  directoryPath: string;
+  worktrees: WorktreeSummary[];
+  cliName?: string;
+}
+
+export interface WorktreeSummary {
+  name: string;
+  branch: string;
+  owner: WorktreeOwner;
+  latestSessionId?: string;
+  state: WorktreeState;
+  sizeBytes: number;
+  uncommittedFiles: number;
+  uniqueCommits: number;
+  agentId?: number;
+  palette?: number;
+  repeat?: number;
+}
+
+export type WorktreeOwner = 'pixelAgents' | 'cli';
+
+export type WorktreeState = 'active' | 'kept' | 'parked' | 'needsDecision';
 
 export interface TerminalAvailability {
   type: 'terminalAvailability';
@@ -547,6 +810,40 @@ export interface TerminalSessionClosed {
   exitCode?: number;
 }
 
+export interface PcShellsLoaded {
+  type: 'pcShellsLoaded';
+  shells: PcShell[];
+}
+
+export interface PcShell {
+  id: number;
+  uid: string;
+  furnitureType: string;
+  directoryName?: string;
+}
+
+export interface PanelsInUse {
+  type: 'panelsInUse';
+  uids: string[];
+}
+
+export interface PcShellReady {
+  type: 'pcShellReady';
+  id: number;
+}
+
+export interface PcShellCloseQuestion {
+  type: 'pcShellCloseQuestion';
+  id: number;
+  command?: string;
+}
+
+export interface PcShellRejected {
+  type: 'pcShellRejected';
+  uid: string;
+  reason: string;
+}
+
 export interface AgentDiagnostics {
   type: 'agentDiagnostics';
   agents: Record<string, any>[];
@@ -561,6 +858,9 @@ export interface LaunchAgent {
   directoryPath?: string;
   palette?: number;
   roleId?: string;
+  worktree?: boolean;
+  worktreeName?: string;
+  worktreeFrom?: WorktreeBranch;
 }
 
 export interface FocusAgent {
@@ -571,7 +871,11 @@ export interface FocusAgent {
 export interface CloseAgent {
   type: 'closeAgent';
   id: number;
+  worktreeChoice?: WorktreeLeaveChoice;
+  confirmedFiles?: number;
 }
+
+export type WorktreeLeaveChoice = 'save' | 'keep' | 'discard';
 
 export interface SaveAgentSeats {
   type: 'saveAgentSeats';
@@ -589,11 +893,29 @@ export interface SaveLayout {
   layout: Record<string, any>;
 }
 
+export interface LayoutEditing {
+  type: 'layoutEditing';
+  dirty: boolean;
+}
+
+export interface UndoAgentLayoutEdit {
+  type: 'undoAgentLayoutEdit';
+}
+
 export interface SaveCharacterProfiles {
   type: 'saveCharacterProfiles';
   profiles: CharacterProfile[];
   saveId: string;
   items?: WardrobeItem[];
+}
+
+export interface CharactersEditing {
+  type: 'charactersEditing';
+  dirty: boolean;
+}
+
+export interface UndoAgentCharacterEdit {
+  type: 'undoAgentCharacterEdit';
 }
 
 export interface SetSoundEnabled {
@@ -636,8 +958,56 @@ export interface SetUsageBridgeEnabled {
   enabled: boolean;
 }
 
-export interface SetHooksInfoShown {
-  type: 'setHooksInfoShown';
+export interface RequestCliSignInStatus {
+  type: 'requestCliSignInStatus';
+  providerId: string;
+}
+
+export interface StartCliSignIn {
+  type: 'startCliSignIn';
+  providerId: string;
+  onHost: boolean;
+  account?: CliSignInAccount;
+}
+
+export type CliSignInAccount = 'subscription' | 'api';
+
+export interface SubmitCliSignInCode {
+  type: 'submitCliSignInCode';
+  providerId: string;
+  code: string;
+}
+
+export interface OfficeMcpConsentResponse {
+  type: 'officeMcpConsentResponse';
+  choice: OfficeMcpChoice;
+}
+
+export type OfficeMcpChoice = 'allow' | 'notNow' | 'decline';
+
+export interface SetOfficeMcpEnabled {
+  type: 'setOfficeMcpEnabled';
+  enabled: boolean;
+}
+
+export interface SetOfficeMcpReadOnly {
+  type: 'setOfficeMcpReadOnly';
+  readOnly: boolean;
+}
+
+export interface StartTutorial {
+  type: 'startTutorial';
+  palette?: number;
+  seatId?: string;
+}
+
+export interface SkipTutorialQuest {
+  type: 'skipTutorialQuest';
+  questId: string;
+}
+
+export interface QuitTutorial {
+  type: 'quitTutorial';
 }
 
 export interface SetWatchAllSessions {
@@ -698,6 +1068,15 @@ export interface SetShowHostDirectories {
   enabled: boolean;
 }
 
+export interface SetUploadDirectory {
+  type: 'setUploadDirectory';
+  path: string;
+}
+
+export interface ReplayIntro {
+  type: 'replayIntro';
+}
+
 export interface SaveDirectory {
   type: 'saveDirectory';
   name: string;
@@ -705,6 +1084,8 @@ export interface SaveDirectory {
   previousPath?: string;
   characters?: number[];
   characterOrder?: DirectoryCharacterOrder;
+  worktreeBase?: WorktreeBase;
+  worktreeBranchPrefix?: string;
 }
 
 export interface RemoveDirectory {
@@ -737,6 +1118,39 @@ export interface ResumeConversation {
   type: 'resumeConversation';
   sessionId: string;
   directoryPath: string;
+}
+
+export interface RequestWorktrees {
+  type: 'requestWorktrees';
+  directoryPath: string;
+}
+
+export interface RequestWorktreeOptions {
+  type: 'requestWorktreeOptions';
+  directoryPath: string;
+}
+
+export interface DecideWorktree {
+  type: 'decideWorktree';
+  directoryPath: string;
+  name: string;
+  choice: WorktreeChoice;
+  confirmedFiles?: number;
+  confirmedCommits?: number;
+}
+
+export type WorktreeChoice = 'save' | 'keep' | 'discard' | 'remove' | 'deleteBranch';
+
+export interface OpenPcShell {
+  type: 'openPcShell';
+  uid: string;
+  directory?: string;
+}
+
+export interface ClosePcShell {
+  type: 'closePcShell';
+  id: number;
+  confirmed?: boolean;
 }
 
 export interface RequestDiagnostics {

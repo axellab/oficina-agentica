@@ -40,6 +40,8 @@ export function toPersistedAgent(agent: AgentState): PersistedAgent | null {
     palette: agent.palette,
     repeat: agent.repeat,
     role: agent.role,
+    worktree: agent.worktree && { ...agent.worktree },
+    nickname: agent.nickname,
   };
 }
 
@@ -79,7 +81,23 @@ export function restoredAgentInit(p: PersistedAgent): Omit<AgentStateInit, 'isEx
     repeat: p.repeat ?? legacyRepeat(p.clothesHue ?? p.hueShift),
     // Read from a file a hand or an older build may have written.
     role: parseAgentRole(p.role),
+    worktree: persistedWorktree(p.worktree),
+    nickname: typeof p.nickname === 'string' && p.nickname ? p.nickname : undefined,
+    // A Worktree's folder is where its session last ran; elsewhere is
+    // unknown until a signal says (the first hook then reads it once).
+    cwd: persistedWorktree(p.worktree)?.path,
   };
+}
+
+/** A saved Worktree, when it has the shape one has (a hand-edited or
+ *  half-written file restores the agent without the marker, never with junk). */
+function persistedWorktree(raw: unknown): AgentState['worktree'] {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const { name, path: worktreePath, branch } = raw as Record<string, unknown>;
+  if (typeof name !== 'string' || typeof worktreePath !== 'string' || typeof branch !== 'string') {
+    return undefined;
+  }
+  return { name, path: worktreePath, branch };
 }
 
 /** An older save's look, in degrees, as a repeat: which colour it was can't

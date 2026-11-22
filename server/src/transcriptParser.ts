@@ -1,6 +1,6 @@
 const debug = process.env.PIXEL_AGENTS_DEBUG !== '0';
 
-import type { HookProvider } from '../../core/src/provider.js';
+import type { HookProvider, SessionWhereabouts } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { launchSpawn, readCompletionNotices } from './backgroundSpawns.js';
 import { TEXT_IDLE_DELAY_MS, TOOL_DONE_DELAY_MS } from './constants.js';
@@ -110,6 +110,16 @@ export function setTeamSwitchCallback(
   teamSwitchCallback = cb;
 }
 
+/** Called when a transcript record says its session moved (EnterWorktree /
+ *  ExitWorktree): the host follows the agent (agentMoves.ts). Like the other
+ *  callbacks here it may fire with a shadow store's id (subagentWatch.ts),
+ *  which misses the main store and changes nothing. */
+let sessionMovedCallback: ((agentId: number, where: SessionWhereabouts) => void) | null = null;
+
+export function setSessionMovedCallback(cb: typeof sessionMovedCallback): void {
+  sessionMovedCallback = cb;
+}
+
 /** Format a tool status line. Delegates to the active HookProvider's formatToolStatus.
  *  Invariant: a provider is registered before any transcript lines are parsed. */
 export function formatToolStatus(toolName: string, input: Record<string, unknown>): string {
@@ -160,6 +170,13 @@ export function processTranscriptLine(
       });
     }
 
+    // -- A session that moved (heuristic mode: with hooks flowing, every
+    // hook names the session's folder at once and leads; the records, read
+    // later, are history — replaying an old one would move the agent back
+    // where a later hook already moved it from) --
+    const moved = hookProvider?.sessionMoveFromRecord?.(record);
+    if (moved && !agent.hookDelivered) sessionMovedCallback?.(agentId, moved);
+
     // -- Context window usage (drives every agent's context gauge) --
     updateContextUsage(agentId, agent, agents, record, hookProvider);
 
@@ -181,7 +198,7 @@ export function processTranscriptLine(
         agent.isWaiting = false;
         agent.turnActive = true;
         agent.hadToolsInTurn = true;
-        agents.broadcast({ type: 'agentStatus', id: agentId, status: 'active' });
+        agents.setAgentStatus(agentId, { active: true });
         let hasNonExemptTool = false;
         for (const block of blocks) {
           if (block.type === 'tool_use' && block.id) {
@@ -519,20 +536,16 @@ export function processTranscriptLine(
       agent.hadToolsInTurn = false;
       // Skip status post when hooks already handled it
       if (!agent.hookDelivered) {
-        agents.broadcast({
-          type: 'agentStatus',
-          id: agentId,
-          status: 'waiting',
-          // turn_duration = the turn completed, so this is "Done".
-          awaitingInput: false,
-        });
+        // turn_duration = the turn completed, so this is "Done".
+        agents.setAgentStatus(agentId, { active: false, awaitingInput: false });
       }
     } else if (record.type && !agent.seenUnknownRecordTypes.has(record.type)) {
       // Log first occurrence of unrecognized record types to help diagnose issues
       // where Claude Code changes JSONL format. Known types we intentionally skip:
       // file-history-snapshot, queue-operation (non-enqueue), etc.
       const knownSkippableTypes = new Set(['file-history-snapshot', 'system', 'queue-operation']);
-      if (!knownSkippableTypes.has(record.type)) {
+      // A move record the provider read above is known, not skipped.
+      if (!knownSkippableTypes.has(record.type) && !moved) {
         agent.seenUnknownRecordTypes.add(record.type);
         if (debug) {
           console.log(

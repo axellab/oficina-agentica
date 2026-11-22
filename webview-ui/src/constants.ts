@@ -2,11 +2,18 @@ import type { RoleColor } from '../../core/src/messages.js';
 import type { ColorValue } from './components/ui/types.js';
 
 // ── Grid & Layout ────────────────────────────────────────────
-export const TILE_SIZE = 16;
-export const DEFAULT_COLS = 20;
-export const DEFAULT_ROWS = 11;
-export const MAX_COLS = 64;
-export const MAX_ROWS = 64;
+// The layout's own constants live in core (the server edits layouts too).
+export {
+  AUTO_ON_FACING_DEPTH,
+  AUTO_ON_SIDE_DEPTH,
+  DEFAULT_COLS,
+  DEFAULT_NEUTRAL_COLOR,
+  DEFAULT_ROWS,
+  MAX_COLS,
+  MAX_ROWS,
+  TILE_SIZE,
+  VISIT_LINGER_MS,
+} from '../../core/src/layout/constants.js';
 
 // ── Character Animation ─────────────────────────────────────
 export const WALK_SPEED_PX_PER_SEC = 48;
@@ -57,6 +64,10 @@ export const CHARACTER_Z_SORT_OFFSET = 0.5;
 export const OUTLINE_Z_SORT_OFFSET = 0.001;
 export const SELECTED_OUTLINE_ALPHA = 1.0;
 export const HOVERED_OUTLINE_ALPHA = 0.5;
+/** The selection outline's colour (getOutlineSprite): a character's, and a hovered piece's. */
+export const SELECTION_OUTLINE_COLOR = '#FFFFFF';
+/** A hovered piece of interactive furniture: its outline, fainter than a hovered character's. */
+export const FURNITURE_HOVER_OUTLINE_ALPHA = 0.3;
 /** Headless agents (adopted, no terminal to focus) render slightly translucent. */
 export const HEADLESS_CHARACTER_ALPHA = 0.5;
 export const GHOST_PREVIEW_SPRITE_ALPHA = 0.5;
@@ -88,6 +99,17 @@ export const GHOST_BORDER_STROKE = 'rgba(255, 255, 255, 0.06)';
 export const GHOST_VALID_TINT = '#00ff00';
 export const GHOST_INVALID_TINT = '#ff0000';
 export const SELECTION_HIGHLIGHT_COLOR = '#007fd4';
+/** Floor / wall sections: the picked ones' outline, and the one the Select tool hovers. */
+export const SECTION_PICKED_OUTLINE = '#4fb3ff';
+export const SECTION_PICKED_FILL = 'rgba(79, 179, 255, 0.10)';
+export const SECTION_HOVER_OUTLINE = 'rgba(255, 255, 255, 0.55)';
+export const SECTION_HOVER_FILL = 'rgba(255, 255, 255, 0.08)';
+/** How long selection outlines (sections, furniture) stay hidden after a colour edit, so the colour reads clean while it changes. */
+export const EDIT_OUTLINE_HIDE_MS = 700;
+/** Box selection dragged out on empty floor. */
+export const MARQUEE_FILL = 'rgba(0, 127, 212, 0.12)';
+/** Section outline thickness, in device pixels per zoom step (min 1). */
+export const SECTION_OUTLINE_PX_PER_ZOOM = 0.5;
 /** --color-danger, --color-accent, --color-shadow (index.css): canvas can't read CSS variables. */
 export const DELETE_BUTTON_BG = '#d14249';
 export const ROTATE_BUTTON_BG = '#6030ff';
@@ -99,6 +121,8 @@ export const BUTTON_SHADOW_COLOR = '#0a0a14';
 export const CANVAS_FALLBACK_TILE_COLOR = '#444';
 export const CANVAS_ERROR_TILE_COLOR = '#FF00FF';
 export const WALL_COLOR = '#3A3A5C';
+/** Rows of a wall piece's top cap (every set draws an 8-row cap above its face). */
+export const WALL_CAP_ROWS = 8;
 
 // ── Camera ───────────────────────────────────────────────────
 export const CAMERA_FOLLOW_LERP = 0.1;
@@ -128,8 +152,7 @@ export const LAYOUT_EXPORT_FILENAME = 'pixel-agents-layout.json';
 /** MIME type for the exported layout Blob. */
 export const LAYOUT_EXPORT_MIME = 'application/json';
 export const DEFAULT_FLOOR_COLOR: ColorValue = { h: 35, s: 30, b: 15, c: 0 };
-export const DEFAULT_WALL_COLOR: ColorValue = { h: 240, s: 25, b: 0, c: 0 };
-export const DEFAULT_NEUTRAL_COLOR: ColorValue = { h: 0, s: 0, b: 0, c: 0 };
+export { DEFAULT_WALL_COLOR, WALL_SET_LABELS } from '../../core/src/layout/constants.js';
 
 // ── Carpets ──────────────────────────────────────────────────
 /** Main (lowest-luminance) color applied to carpets when no per-tile override is set. */
@@ -230,8 +253,6 @@ export const WAITING_BUBBLE_DURATION_SEC = 2.0;
 export const DISMISS_BUBBLE_FAST_FADE_SEC = 0.3;
 export const INACTIVE_SEAT_TIMER_MIN_SEC = 3.0;
 export const INACTIVE_SEAT_TIMER_RANGE_SEC = 2.0;
-export const AUTO_ON_FACING_DEPTH = 3;
-export const AUTO_ON_SIDE_DEPTH = 2;
 export const CHARACTER_HIT_HALF_WIDTH = 8;
 export const CHARACTER_HIT_HEIGHT = 24;
 /** World px from a character's feet to its sprite's top edge (the tallest hair). */
@@ -244,61 +265,67 @@ export const TOOL_OVERLAY_GAP_PX = -2;
 /** Reserved character id for the Intro's greeter. Far outside both real agent
  *  ids (positive) and sub-agent ids (small negatives from -1 down). */
 export const GREETER_ID = -1_000_000_000;
-/** The character the greeter wears, by its permanent profile id: the default
- *  cast's Suit (the first in the cast if no character has that id). An id, not
- *  a name, so renaming the character doesn't change who greets. */
-export const GREETER_CHARACTER_ID = 'char-0';
-/** Stacking order for the Intro's bubble. Deliberately BELOW the modal stack
+export { GREETER_CHARACTER_ID } from '../../core/src/greeterCharacter.js';
+/** Stacking order for the Intro's dialog. Deliberately BELOW the modal stack
  *  (ui/Modal defaults to 50, ChangelogModal 51, the migration notice z-100): the
  *  Intro is diegetic furniture over the office, not a modal, so a modal opened
  *  on top of it must cover it rather than slide underneath. */
-export const INTRO_BUBBLE_Z_INDEX = 45;
+export const INTRO_DIALOG_Z_INDEX = 45;
 /** ToolOverlay stacking: status label panels (selected one on top), then the
  *  characters' speech bubbles above every label. Local to the office layer
  *  (App wraps ToolOverlay in a z-0 box), so they never rise above the UI. */
 export const OVERLAY_LABEL_Z_INDEX = 41;
 export const OVERLAY_LABEL_SELECTED_Z_INDEX = 42;
 export const OVERLAY_BUBBLE_Z_INDEX = 43;
-/** The greeter stands this many tiles in from the office's bottom-left corner
- *  (target tile (margin, rows-1-margin); nearest walkable tile if blocked). */
-export const GREETER_TILE_MARGIN = 3;
-/** World px above the greeter's anchor (feet) where the bubble's bottom sits.
- *  Kept well above the head target (INTRO_TAIL_TARGET_RISE_WORLD) so the
- *  tail squares have a visible run between bubble and head. */
-export const INTRO_BUBBLE_ANCHOR_RISE_WORLD = 44;
-/** World px right of the greeter's center where the bubble's left edge starts —
- *  just clear of the sprite so the tail points down-left at the head. */
-export const INTRO_BUBBLE_OFFSET_X_WORLD = 10;
-/** Bubble width cap (CSS px) and the margin kept from the container edges.
- *  Wide on purpose: the disclosure reads as three short paragraphs instead of
- *  a tall column (still clamped to the container on narrow panels). */
-export const INTRO_BUBBLE_MAX_WIDTH_PX = 560;
-export const INTRO_BUBBLE_EDGE_MARGIN_PX = 4;
+/** A hovered piece's Furniture label: under the characters' labels and bubbles
+ *  (a character in front of a piece wins over it). */
+export const FURNITURE_LABEL_Z_INDEX = 40;
+/** A PC's Directory selector: over the characters' labels and bubbles (the user
+ *  just asked for it), under the Intro and modals. */
+export const PC_DIRECTORY_SELECTOR_Z_INDEX = 44;
+/** CSS px between a Furniture label's bottom and the top of the piece's sprite. */
+export const FURNITURE_LABEL_GAP_PX = 2;
+/** How long a Furniture label holding a button (a shell's ×) stays after the mouse
+ *  leaves its piece: time for the pointer to cross to it, however it travels. */
+export const FURNITURE_LABEL_HOVER_GRACE_MS = 450;
+/** How the canvas tells the pointer moved onto a piece's Furniture label (still that piece). */
+export const FURNITURE_LABEL_SELECTOR = '[data-testid="furniture-label"]';
+/** The Directory selector stands this far above its PC (a label hugs it; a menu of buttons needs air). */
+export const PC_DIRECTORY_SELECTOR_GAP_PX = 8;
+/** A PC shell's card draws its furniture in this state: a shell means the PC is on. */
+export const PC_SHELL_CARD_STATE = 'on';
+/** How a Furniture label names an agent that has no Nickname, character name or Directory. */
+export const UNNAMED_AGENT_LABEL = 'An agent';
+/** The Intro's dialog box: its width cap (CSS px), the gap kept from the
+ *  office's sides and from its foot (clear of the toolbar and the radio there), and the gap between it and the menu box above. */
+export const INTRO_DIALOG_MAX_WIDTH_PX = 560;
+export const INTRO_DIALOG_EDGE_MARGIN_PX = 12;
+export const INTRO_DIALOG_BOTTOM_PX = 72;
+export const INTRO_DIALOG_MENU_GAP_PX = 10;
+/** The dialog box's height (CSS px) as the Intro's camera counts it: fixed, so
+ *  the camera never moves with what the dialog shows. */
+export const INTRO_DIALOG_CAMERA_BOX_PX = 122;
+/** ms per letter as the greeter's line types out. */
+export const INTRO_DIALOG_TYPE_MS = 22;
+/** How long the greeter's goodbye stays up once typed out, before the tour ends by itself. */
+export const INTRO_FAREWELL_LINGER_MS = 1500;
+/** How much one message of the dialog may hold: this many rows of text, at
+ *  this many CSS px per letter (the dialog's font, averaged), over the box's
+ *  width less its padding; never fewer letters than the minimum, so a very
+ *  narrow panel gets taller messages rather than one word each. */
+export const INTRO_DIALOG_ROWS = 2;
+export const INTRO_DIALOG_LETTER_PX = 8;
+export const INTRO_DIALOG_PADDING_X_PX = 32;
+export const INTRO_DIALOG_MIN_LETTERS = 60;
 /** Where the Intro's Claude Code step sends people who don't have it yet. */
 export const CLAUDE_CODE_URL = 'https://claude.com/claude-code';
 export const CLAUDE_CODE_INSTALL_COMMAND = 'npm install -g @anthropic-ai/claude-code';
-/** Speech-tail squares: placed at fraction `t` along the segment from the
- *  bubble's nearest edge point to the greeter's head, shrinking toward the
- *  speaker. Recomputed every frame so the tail stays connected no matter where
- *  edge-clamping or panning puts the bubble relative to the character. */
-export const INTRO_TAIL_STEPS = [
-  { t: 0.25, size: 12 },
-  { t: 0.55, size: 9 },
-  { t: 0.82, size: 6 },
-] as const;
-/** World px above the greeter's anchor (feet) the tail points at — the head. */
-export const INTRO_TAIL_TARGET_RISE_WORLD = 26;
-/** Camera-offset caps while centering character + bubble. The ideal composition
- *  assumes the bubble fits beside/above the character; when it can't (narrow or
- *  short viewports clamp the bubble to the screen), uncapped offsets shove the
- *  greeter to the viewport edge. Horizontal offset is capped to this fraction
- *  of the viewport; vertical offset always keeps this many world px of the
- *  character visible above the bottom edge. */
-export const INTRO_CAMERA_MAX_X_OFFSET_VIEWPORT_FRACTION = 0.25;
+/** The Intro's camera centres the spot the greeter appears on in what the
+ *  dialog box leaves of the office: this many world px above its anchor
+ *  (feet) is the point centred, and on a very short panel this many world px
+ *  of office stay in view above and below that point's share. */
+export const INTRO_CAMERA_CHARACTER_RISE_WORLD = 16;
 export const INTRO_CAMERA_MIN_CHAR_VISIBLE_WORLD = 48;
-/** Extra downward camera shift (CSS px) so the character+bubble composition
- *  sits a bit above the vertical center instead of dead-centered. */
-export const INTRO_CAMERA_DOWN_SHIFT_PX = 50;
 
 // ── Context Fuel Gauge ──────────────────────────────────────
 /** Window assumed before the runtime reports one (it always does for agents
@@ -409,6 +436,12 @@ export const TERMINAL_DRAWER_MAX_WIDTH_RATIO = 0.8;
  *  16px close/status column + card chrome ≈ 63px, plus a little air each
  *  side). */
 export const TERMINAL_SIDEBAR_WIDTH_PX = 72;
+/** Space above the desktop card bar's first card; the tutorial's checklist
+ *  sits at the same height, so its collapsed header lines up with that card. */
+export const CARD_BAR_TOP_PX = 4;
+/** How long the checklist shows "Tutorial complete!" before it fades, and the fade. */
+export const TUTORIAL_COMPLETE_LINGER_MS = 4000;
+export const TUTORIAL_COMPLETE_FADE_MS = 600;
 /** Grab width of the drag handle on the panel's left edge. */
 export const TERMINAL_DRAWER_RESIZE_HANDLE_PX = 6;
 /** How long a launch (or resume) this client sent waits for its terminal:
@@ -429,6 +462,14 @@ export const TERMINAL_HIDE_RIBBON_REST_RATIO = 0.75;
 export const MUGSHOT_CROP_TOP_ROW = 0;
 export const MUGSHOT_CROP_LEFT_COL = -1;
 export const MUGSHOT_CROP_SIDE_PX = 20;
+/** The speaker over the dialog box's top left: its mug shot's zoom (CSS px per
+ *  sprite pixel, whole) and the room it takes above the box (the mug shot's
+ *  height, MUGSHOT_CROP_SIDE_PX x the zoom, plus the 2 px border it stands on),
+ *  kept clear of the menu and counted by the camera. */
+export const INTRO_SPEAKER_MUG_ZOOM = 2;
+export const INTRO_SPEAKER_HEIGHT_PX = MUGSHOT_CROP_SIDE_PX * INTRO_SPEAKER_MUG_ZOOM + 2;
+/** The side of a Worktrees list row's square trash button: a 16 px icon in its 2 px border, with room. */
+export const WORKTREE_ROW_BUTTON_PX = 24;
 /** Integer sprite-pixel zoom. 2 = each sprite pixel is 2 px. */
 export const MUGSHOT_RENDER_ZOOM = 2;
 /** A Directory's default characters, inline in the launch drawer: mug shots
@@ -682,6 +723,8 @@ export const MOBILE_TRACKPAD_NUDGE_MS = 90;
 /** The Paste pill's prompt where script can't read the clipboard (plain-http
  *  origins): the user pastes into the native field instead. */
 export const MOBILE_PASTE_PROMPT = 'Paste into the terminal:';
+/** How long a failed file send stays written over the terminal pane. */
+export const TERMINAL_FILE_STATUS_MS = 5000;
 /** visualViewport.height within this many px of innerHeight = nothing to
  *  clamp (the two disagree by sub-pixel rounding on some devices). */
 export const VISUAL_VIEWPORT_FULL_EPSILON_PX = 1;
@@ -692,7 +735,7 @@ export const KEYBOARD_MIN_HEIGHT_PX = 150;
 
 // ── Characters view ─────────────────────────────────────────
 /** Stacking order for the Characters view: over the whole office UI and every
- *  modal (ui/Modal 50, ChangelogModal 51, the hooks notice 52), since it is
+ *  modal (ui/Modal 50, ChangelogModal 51), since it is
  *  opened from them and takes the screen while it is up. */
 export const CHARACTERS_VIEW_Z_INDEX = 60;
 /** How long a status line stays up (it also clears on the next press). */
@@ -738,12 +781,6 @@ export const CHARACTER_PAINT_FALLBACK = '#000000';
  *  this many steps. */
 export const CAST_OFFICE_SYNC_MS = 150;
 export const CAST_HISTORY = { mergeMs: 500, limit: 100 } as const;
-/** A repeated character's clothes colours, in order (characters/repeatClothes.ts):
- *  the nth repeat wears the nth, as a hue in degrees — red, blue, green, yellow,
- *  purple, cyan, pink, then orange, lime, indigo, teal, magenta; past the end it cycles. */
-export const REPEAT_CLOTHES_HUES = [0, 220, 120, 55, 275, 185, 320, 28, 90, 245, 160, 340] as const;
-/** Saturation (0-100) a repeat's clothes are colorized at, keeping each piece's shading. */
-export const REPEAT_CLOTHES_SATURATION = 70;
 
 // ── Pixel icons ─────────────────────────────────────────────
 /** Screen pixels per icon pixel (whole number, so the icon stays crisp). */
@@ -783,8 +820,8 @@ export const CONVERSATION_SEARCH_DEBOUNCE_MS = 200;
 export const CONVERSATION_SEARCH_PREFETCH_PX = 120;
 /** localStorage key: the Directory paths this viewer expanded in the conversation list. */
 export const CONVERSATION_EXPANDED_KEY = 'pixel-agents.conversationExpandedDirectories';
-/** localStorage key: whether this viewer shut the desktop conversation sidebar. */
-export const CONVERSATION_SIDEBAR_SHUT_KEY = 'pixel-agents.conversationSidebarShut';
+/** localStorage key: whether this viewer opened the desktop conversation sidebar (shut until then). */
+export const CONVERSATION_SIDEBAR_OPEN_KEY = 'pixel-agents.conversationSidebarOpen';
 /** How long a Directory's section takes to unfold or fold in the conversation list. */
 export const CONVERSATION_UNFOLD_MS = 180;
 /** An agent card's height: its mug shot plus 1px padding and 2px border each
@@ -897,3 +934,21 @@ export const MUSIC_VERSION_GAP_PX = 6;
 export const VERSION_LABEL_BOTTOM_PX = 10;
 /** The update notice / changelog tooltip, this far above the label's spot. */
 export const VERSION_NOTICE_ABOVE_PX = 34;
+
+// ── Buildout ────────────────────────────────────────────────
+/** An agent's layout edit builds in within this long (s), however large:
+ *  the last change starts by BUILDOUT_MAX_SEC minus a removal's dissolve. */
+export const BUILDOUT_MAX_SEC = 2;
+/** The gap between two changes appearing, for an edit small enough not to need squeezing (s). */
+export const BUILDOUT_STEP_SEC = 0.12;
+/** How long the builder works at the spot once it gets there, beyond the build's own length (s). */
+export const BUILDOUT_WORK_TAIL_SEC = 1;
+
+// ── Message show ────────────────────────────────────────────
+/** How long a sender stands by each recipient with the gist in its bubble
+ *  (also how long the gist shows in place, without the walk). */
+export const MESSAGE_SHOW_LINGER_MS = 4000;
+/** The gist bubble's widest (CSS px): longer gists wrap. */
+export const MESSAGE_BUBBLE_MAX_WIDTH_PX = 220;
+/** The gist's text size (CSS px). */
+export const MESSAGE_BUBBLE_FONT_SIZE_PX = 20;

@@ -13,7 +13,14 @@ import {
   sessionStartClear,
   sessionStartStartup,
 } from '../../helpers/hooks';
-import { advanceIntroToConsentStep, finishIntro } from '../../helpers/intro';
+import {
+  advanceIntroToChoices,
+  backInIntro,
+  chooseInIntro,
+  finishIntro,
+  introChoice,
+  readIntro,
+} from '../../helpers/intro';
 import { expectContextGauge, expectOverlayCount, expectOverlayVisible } from '../../helpers/office';
 import type { RecordedServerMessage } from '../../helpers/standalone';
 import { getClaudeProjectDir } from '../../helpers/team';
@@ -79,15 +86,22 @@ test.describe('Standalone / hooks', () => {
       session_id: sessionId,
       hook_event_name: 'PostToolUse',
     });
-    const postToolMessages = await standalone.drainMessages();
-    expect(
-      postToolMessages.some(
-        (message) =>
-          message.type === 'agentToolDone' &&
-          message.toolId === toolStart?.toolId &&
-          message.id === toolStart?.id,
-      ),
-    ).toBe(true);
+    // Polled: the hook's HTTP reply and the broadcast travel on different
+    // connections, and nothing on the page changes for this event (the bubble
+    // stays), so there is no visible outcome to wait on first as the other
+    // steps do. Reading the recorder once lost that race on Windows runners.
+    const postToolMessages: RecordedServerMessage[] = [];
+    await expect
+      .poll(async () => {
+        postToolMessages.push(...(await standalone.drainMessages()));
+        return postToolMessages.some(
+          (message) =>
+            message.type === 'agentToolDone' &&
+            message.toolId === toolStart?.toolId &&
+            message.id === toolStart?.id,
+        );
+      })
+      .toBe(true);
     await expectOverlayVisible(page, 'Needs approval');
 
     await sendHookEvent(standalone.hookServerConfig, {
@@ -168,7 +182,8 @@ test.describe('Standalone / context after /clear', () => {
  * the token boundary and the checkbox route.
  */
 test.describe('Standalone / hooks consent', () => {
-  test.use({ seedHooksConsent: false });
+  // The mock CLI answers the Intro's sign-in check (signed in), whatever this machine has installed.
+  test.use({ seedHooksConsent: false, standaloneOptions: { mockClaude: true } });
 
   function readConsentFrom(tmpHome: string): boolean {
     try {
@@ -185,23 +200,30 @@ test.describe('Standalone / hooks consent', () => {
   }
 
   // The operator's route: the printed tokened URL loads a privileged session,
-  // the Intro rides the handshake, and Install (on its consent step) writes
-  // the hooks.
-  test('the tokened page shows the Intro and Install writes the hooks @area:standalone', async ({
+  // the Intro rides the handshake, and ticking Live updates writes the hooks.
+  test('the tokened page shows the Intro and Live updates writes the hooks @area:standalone', async ({
     page,
     standalone,
   }) => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 30_000 });
-    await advanceIntroToConsentStep(dialog);
-    // The disclosure travels with the request — the browser renders the
+    await advanceIntroToChoices(dialog);
+    // The terms travel with the request, behind Read more — the browser renders the
     // server's exact terms.
-    await expect(dialog).toContainText('~/.claude/settings.json');
-    await expect(dialog).toContainText('Instant Detection (Hooks)');
+    await dialog
+      .getByTestId('intro-choice-hooks')
+      .getByRole('button', { name: 'Read more' })
+      .click();
+    // In a modal of their own, over the Intro; Escape closes it.
+    const terms = page.getByTestId('intro-choice-terms');
+    await expect(terms).toContainText('~/.claude/settings.json');
+    await expect(terms).toContainText('Instant Detection (Hooks)');
+    await page.keyboard.press('Escape');
+    await expect(terms).toHaveCount(0);
 
     expect(fs.existsSync(path.join(standalone.tmpHome, '.claude', 'settings.json'))).toBe(false);
 
-    await dialog.getByRole('button', { name: 'Install Hooks' }).click();
+    await chooseInIntro(dialog, { hooks: true });
 
     await expect.poll(() => readConsentFrom(standalone.tmpHome), { timeout: 15_000 }).toBe(true);
     await expect.poll(() => ourHookEventCount(standalone.tmpHome), { timeout: 15_000 }).toBe(12);
@@ -258,8 +280,8 @@ test.describe('Standalone / hooks consent', () => {
   });
 
   /**
-   * The Settings-checkbox route, for a user who dismissed the dialog: Not Now
-   * writes nothing, the checkbox shows the ACTUAL install state (not the
+   * The Settings-checkbox route, for a user who left Live updates off: that
+   * writes nothing to ~/.claude, the checkbox shows the ACTUAL install state (not the
    * hooksEnabled preference, which still defaults true), and clicking it is
    * the consent grant.
    */
@@ -269,16 +291,20 @@ test.describe('Standalone / hooks consent', () => {
   }) => {
     const settingsPath = path.join(standalone.tmpHome, '.claude', 'settings.json');
 
-    // First-run Intro is up; decline with Not Now — which writes NOTHING —
-    // and finish the tour.
+    // First-run Intro is up; leave everything off (past its warning) — which
+    // writes nothing to ~/.claude — and finish the tour.
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 30_000 });
-    await advanceIntroToConsentStep(dialog);
-    await dialog.getByRole('button', { name: 'Not Now' }).click();
+    await advanceIntroToChoices(dialog);
+    // Everything off: it warns first.
+    await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(dialog.getByTestId('intro-choices-warning')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Continue Anyway' }).click();
+    await expect(dialog).toContainText("You're all set!");
     await finishIntro(dialog);
     await page.waitForTimeout(1_000);
 
-    // Nothing installed, no consent — but the preference defaults true.
+    // Nothing installed, no consent.
     expect(fs.existsSync(settingsPath)).toBe(false);
     expect(readConsentFrom(standalone.tmpHome)).toBe(false);
 
@@ -332,3 +358,89 @@ async function openSpectator(page: Page): Promise<Page> {
     .toBeGreaterThan(0);
   return spectator;
 }
+
+/** The Pixel Office MCP answer recorded in config.json (absent = unanswered). */
+function readOfficeMcpConsent(tmpHome: string): string {
+  try {
+    const raw = fs.readFileSync(path.join(tmpHome, '.pixel-agents', 'config.json'), 'utf8');
+    return (JSON.parse(raw) as { officeMcpConsent?: string }).officeMcpConsent ?? 'unanswered';
+  } catch {
+    return 'unanswered';
+  }
+}
+
+/**
+ * The Intro's choices step also asks: may agents launched here use the Pixel
+ * Agents Office MCP? Continue sends every box's answer at once, and Back
+ * revises them as absolute states (docs/adr/0001).
+ */
+test.describe('Standalone / Pixel Office MCP consent', () => {
+  // The mock CLI answers the Intro's sign-in check (signed in), whatever this machine has installed.
+  test.use({ seedHooksConsent: false, standaloneOptions: { mockClaude: true } });
+
+  test('the choices step asks both, and Back revises the answer @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    await advanceIntroToChoices(dialog);
+    await expect(introChoice(dialog, 'hooks')).toBeVisible();
+    await expect(introChoice(dialog, 'mcp')).toBeVisible();
+
+    // The MCP alone: granted, the hooks declined.
+    await chooseInIntro(dialog, { mcp: true });
+    await expect.poll(() => readOfficeMcpConsent(standalone.tmpHome)).toBe('granted');
+
+    // Back keeps the boxes: swap them. The MCP declined, the hooks installed.
+    await readIntro(dialog);
+    await backInIntro(dialog, introChoice(dialog, 'mcp'));
+    await expect(introChoice(dialog, 'mcp')).toHaveAttribute('aria-pressed', 'true');
+    await introChoice(dialog, 'mcp').click();
+    await chooseInIntro(dialog, { hooks: true });
+    await expect.poll(() => readOfficeMcpConsent(standalone.tmpHome)).toBe('declined');
+    // The same Continue installs the hooks.
+    const settings = path.join(standalone.tmpHome, '.claude', 'settings.json');
+    await expect
+      .poll(
+        () =>
+          fs.existsSync(settings) && fs.readFileSync(settings, 'utf8').includes('claude-hook.js'),
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+    await finishIntro(dialog);
+  });
+});
+
+test.describe('Standalone / Pixel Office MCP step alone', () => {
+  // Hooks answered long ago (the Intro done), the MCP never asked.
+  test.use({ standaloneOptions: { seedConfig: { officeMcpConsent: undefined } } });
+
+  test('an office that finished the Intro earlier sees the step alone; Settings follows it @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    await expect(introChoice(dialog, 'mcp')).toBeVisible();
+    await expect(dialog).not.toContainText('Welcome to Pixel Agents!');
+    await expect(dialog).not.toContainText('settings.json');
+
+    await finishIntro(dialog, { mcp: true });
+    await expect.poll(() => readOfficeMcpConsent(standalone.tmpHome)).toBe('granted');
+
+    // Settings shows the switch on, with the read-only switch beside it.
+    const settingsModal = await openSettingsModal(page);
+    const mcpRow = settingsModal.locator('button', { hasText: /^Pixel Office MCP/ }).first();
+    await expect(mcpRow).toBeVisible();
+    await expect(
+      settingsModal.locator('button', { hasText: 'Pixel Office MCP Read-only' }),
+    ).toBeVisible();
+    // Off applies at once (no confirm).
+    await mcpRow.click();
+    await expect.poll(() => readOfficeMcpConsent(standalone.tmpHome)).toBe('declined');
+    await expect(
+      settingsModal.locator('button', { hasText: 'Pixel Office MCP Read-only' }),
+    ).toHaveCount(0);
+  });
+});

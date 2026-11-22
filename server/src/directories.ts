@@ -19,15 +19,19 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import type { StateAdapter } from '../../core/src/adapter.js';
 import type { Directory } from '../../core/src/messages.js';
 import {
   readConfig,
   type UserDirectory,
   withDirectoryCharacters,
+  withDirectoryWorktrees,
   writeConfig,
 } from './configPersistence.js';
 import { DIRECTORY_WRITE_FAILED_REASON } from './constants.js';
 import { directoryNameFor } from './hostDirectory.js';
+import { invalidateAttributionDirectories } from './worktreeAttribution.js';
+import { branchPrefixProblem, hasOriginRemote, isRepo } from './worktreeGit.js';
 
 /** What a host contributes to the union. `source` is the union's business, so
  *  a host only says what and where. */
@@ -103,10 +107,12 @@ export function buildDirectoryUnion(
 ): Directory[] {
   const byPath = new Map<string, Directory>();
   for (const host of hostDirectories) {
+    // A host row has no settings of its own: its Worktrees take the defaults.
     byPath.set(normalizeDirectoryPath(host.path), {
       name: host.name,
       path: host.path,
       source: 'host',
+      ...repoFacts(host.path),
     });
   }
   // User entries are applied second, so they overwrite a host entry at the same
@@ -123,7 +129,16 @@ export function buildDirectoryUnion(
 
 /** A stored user-defined Directory as the office sees it. */
 function userDirectory(user: UserDirectory): Directory {
-  return { ...user, source: 'user' };
+  return { ...user, source: 'user', ...repoFacts(user.path) };
+}
+
+/** What the office needs to know about a Directory's repo: whether it is
+ *  one, and whether it has an origin (stated only when it has). */
+function repoFacts(directoryPath: string): Pick<Directory, 'isRepo' | 'hasOrigin'> {
+  const repo = isRepo(directoryPath);
+  return repo && hasOriginRemote(directoryPath)
+    ? { isRepo: true, hasOrigin: true }
+    : { isRepo: repo };
 }
 
 /** The union for this host, read fresh from the shared config. */
@@ -131,44 +146,119 @@ export function listDirectories(hostDirectories: HostDirectoryEntry[]): Director
   return buildDirectoryUnion(readConfig().directories, hostDirectories);
 }
 
+/** The adapter setting behind Settings → Show host Directories (off by default). */
+export const KEY_SHOW_HOST_DIRECTORIES = 'pixel-agents.showHostDirectories';
+
 /**
- * Add or edit a user-defined Directory. `previousPath` identifies the entry
- * being edited; without it this is an add. Nothing is persisted when the path
- * fails validation.
+ * The host Directories the office lists: all of them while Show host
+ * Directories is on, none while it is off (the default). Only the LIST is
+ * gated -- a launch still names its agent from every host Directory -- but
+ * what the office is offered (its drawer, a PC's Directory selector) and what
+ * a PC shell may open in are this list alike.
  */
-export function saveUserDirectory(input: {
+export function shownHostDirectories(
+  adapter: Pick<StateAdapter, 'getSetting'> | undefined,
+  hostDirectories: HostDirectoryEntry[],
+): HostDirectoryEntry[] {
+  return adapter?.getSetting(KEY_SHOW_HOST_DIRECTORIES, false) ? hostDirectories : [];
+}
+
+/** Where this host's Directories are, by name: the union without the `.git`
+ *  probe each `isRepo` costs, for the scanners' worktree attribution. */
+export function listDirectoryLocations(
+  hostDirectories: HostDirectoryEntry[],
+): Array<{ name: string; path: string }> {
+  const byPath = new Map<string, { name: string; path: string }>();
+  for (const host of hostDirectories) {
+    byPath.set(normalizeDirectoryPath(host.path), { name: host.name, path: host.path });
+  }
+  for (const user of readConfig().directories) {
+    byPath.set(normalizeDirectoryPath(user.path), { name: user.name, path: user.path });
+  }
+  return [...byPath.values()];
+}
+
+/** A user-defined Directory as it is asked for: by the Directory modal, or an agent. */
+export interface UserDirectoryInput {
   name: string;
   path: string;
+  /** The path of the entry being edited; without it this is an add. */
   previousPath?: string;
   /** Default characters, as sent (validated here). */
   characters?: unknown;
   characterOrder?: unknown;
-}): DirectoryStoreResult {
+  /** Worktree settings, as sent (validated here). */
+  worktreeBase?: unknown;
+  worktreeBranchPrefix?: unknown;
+}
+
+/**
+ * `directories` with the user-defined Directory `input` asks for added or
+ * edited, and that entry as it would be stored. Nothing is written: the path
+ * must exist, the branch prefix be one git takes, an empty name becomes the
+ * folder's.
+ */
+export function withUserDirectory(
+  directories: readonly UserDirectory[],
+  input: UserDirectoryInput,
+):
+  | { ok: true; directories: UserDirectory[]; directory: UserDirectory }
+  | { ok: false; reason: string } {
   const validation = validateDirectoryPath(input.path);
   if (!validation.ok) {
     return validation;
   }
+  const prefixProblem =
+    typeof input.worktreeBranchPrefix === 'string'
+      ? branchPrefixProblem(input.worktreeBranchPrefix.trim())
+      : null;
+  if (prefixProblem) {
+    return { ok: false, reason: prefixProblem };
+  }
   const resolvedPath = validation.path;
   const name = input.name.trim() || directoryNameFor(resolvedPath);
 
-  const cfg = readConfig();
   const newKey = normalizeDirectoryPath(resolvedPath);
   const previousKey =
     input.previousPath === undefined ? null : normalizeDirectoryPath(input.previousPath);
 
   // Drop the entry being edited AND any entry already at the target path, so an
   // edit that re-points onto an existing Directory merges rather than duplicates.
-  cfg.directories = cfg.directories.filter((entry) => {
+  const rest = directories.filter((entry) => {
     const key = normalizeDirectoryPath(entry.path);
     return key !== newKey && key !== previousKey;
   });
-  const stored = withDirectoryCharacters({ name, path: resolvedPath }, input);
-  cfg.directories.push(stored);
+  const stored = withDirectoryWorktrees(
+    withDirectoryCharacters({ name, path: resolvedPath }, input),
+    input,
+  );
+  return { ok: true, directories: [...rest, stored], directory: stored };
+}
 
+/**
+ * Add or edit a user-defined Directory. `previousPath` identifies the entry
+ * being edited; without it this is an add. Nothing is persisted when the path
+ * fails validation.
+ */
+export function saveUserDirectory(input: UserDirectoryInput): DirectoryStoreResult {
+  const cfg = readConfig();
+  const next = withUserDirectory(cfg.directories, input);
+  if (!next.ok) {
+    return next;
+  }
+  cfg.directories = next.directories;
   if (!writeConfig(cfg)) {
     return { ok: false, reason: DIRECTORY_WRITE_FAILED_REASON };
   }
-  return { ok: true, directory: stored };
+  return { ok: true, directory: next.directory };
+}
+
+/** Replace the user-defined Directories in ONE config write (an agent's batch
+ *  of Directory edits). Returns whether the write succeeded. */
+export function writeUserDirectories(directories: readonly UserDirectory[]): boolean {
+  const cfg = readConfig();
+  cfg.directories = [...directories];
+  return writeConfig(cfg);
 }
 
 /**
@@ -183,6 +273,40 @@ export function removeUserDirectory(rawPath: string): DirectoryRemoveResult {
     return { ok: false, reason: DIRECTORY_WRITE_FAILED_REASON };
   }
   return { ok: true };
+}
+
+/** The user-defined Directories (config.json) with their default characters (palette
+ *  indices, highest priority first; none = empty): what OfficeFacts.userDirectories gives. */
+export function userDirectoryDefaults(): Array<{
+  name: string;
+  path: string;
+  characters: readonly number[];
+}> {
+  return readConfig().directories.map((d) => ({
+    name: d.name,
+    path: d.path,
+    characters: d.characters ?? [],
+  }));
+}
+
+/**
+ * Set user-defined Directories' default characters (palette indices), each
+ * keeping its pick order and every other setting, in ONE config write. A path
+ * that names no user-defined Directory is skipped (a host Directory has no
+ * defaults of its own). Returns whether the write succeeded.
+ */
+export function setDirectoryCharacters(
+  writes: ReadonlyArray<{ path: string; characters: readonly number[] }>,
+): boolean {
+  const cfg = readConfig();
+  const wanted = new Map(writes.map((w) => [normalizeDirectoryPath(w.path), w.characters]));
+  cfg.directories = cfg.directories.map((entry) => {
+    const characters = wanted.get(normalizeDirectoryPath(entry.path));
+    return characters
+      ? withDirectoryCharacters(entry, { characters, characterOrder: entry.characterOrder })
+      : entry;
+  });
+  return writeConfig(cfg);
 }
 
 /**
@@ -246,6 +370,8 @@ export function handleDirectoryClientMessage(
         previousPath: typeof msg.previousPath === 'string' ? msg.previousPath : undefined,
         characters: msg.characters,
         characterOrder: msg.characterOrder,
+        worktreeBase: msg.worktreeBase,
+        worktreeBranchPrefix: msg.worktreeBranchPrefix,
       });
       if (!result.ok) {
         deps.reply({ type: 'directoryRejected', path: submittedPath, reason: result.reason });
@@ -288,6 +414,7 @@ export function handleDirectoryClientMessage(
 }
 
 function broadcastDirectories(deps: DirectoryMessageDeps): void {
+  invalidateAttributionDirectories();
   deps.broadcast({
     type: 'directoriesLoaded',
     directories: listDirectories(deps.hostDirectories()),

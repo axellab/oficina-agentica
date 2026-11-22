@@ -9,6 +9,14 @@ import './characters.phone.css';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import { FRAME_COUNT, SHEET_H, SHEET_W } from '../../../../core/src/characters/sheet.js';
+import {
+  type ColorKey,
+  type TabKey,
+  tabPiece,
+  TABS,
+  wornPieces,
+} from '../../../../core/src/characters/slots.js';
 import { Button } from '../../components/ui/Button.js';
 import { Modal } from '../../components/ui/Modal.js';
 import { PixelIcon } from '../../components/ui/PixelIcon.js';
@@ -24,8 +32,7 @@ import {
 import { type BoxSize, useBoxSize } from '../../hooks/useBoxSize.js';
 import { useDevicePixelRatio } from '../../hooks/useDevicePixelRatio.js';
 import { castStore, useCast } from '../castStore.js';
-import { FRAME_COUNT, SHEET_H, SHEET_W } from '../sheet.js';
-import { type ColorKey, type TabKey, tabPiece, TABS, wornPieces } from '../slots.js';
+import { AgentCharacterUndo } from './AgentCharacterUndo.js';
 import { FRAME_H, useCanvasSnapping } from './pixelCanvas.js';
 import { HistoryButtons, PhoneDock, RosterPane } from './Roster.js';
 import { SaveButton } from './SaveButton.js';
@@ -295,6 +302,7 @@ export function CharactersView({ phone, onClose }: CharactersViewProps) {
             <>
               <Stage scales={scales} />
               <Wardrobe />
+              <AgentCharacterUndo />
               <SaveButton />
               <PhoneDock />
             </>
@@ -303,6 +311,7 @@ export function CharactersView({ phone, onClose }: CharactersViewProps) {
               <div className="chv-backdrop bg-black/50" onClick={requestClose} />
               <div className="chv-panel" ref={desk.panel}>
                 <header className="chv-head">
+                  <AgentCharacterUndo />
                   <div className="chv-hist" role="group" aria-label="History">
                     <HistoryButtons />
                   </div>

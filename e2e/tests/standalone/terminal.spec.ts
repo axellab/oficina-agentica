@@ -1,4 +1,6 @@
 import type { Page } from '@playwright/test';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import { expect, test } from '../../fixtures/standalone';
 import { preToolUseBash, sendHookEvent, sessionStartStartup } from '../../helpers/hooks';
@@ -358,6 +360,103 @@ test.describe('Standalone / terminal', () => {
         page.evaluate(() => (window as unknown as { __clip: string[] }).__clip.at(-1) ?? null),
       )
       .toBe(head + tail);
+  });
+
+  test('a file dropped on the terminal is saved on the host and its path pasted in; one already on the host is not copied @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    await arrangeNextClaudeInvocation(
+      standalone.tmpHome,
+      claudeScenario('terminal file drop').holdOpenFor(60_000).build(),
+    );
+    await clickAddAgent(page);
+    const terminal = page.locator('.xterm').first();
+    await expect(terminal).toContainText('mock claude session', { timeout: 15_000 });
+
+    // A file dragged from the desktop: the drag shows the pane as a drop
+    // target, the drop sends the file.
+    const pane = terminal.locator('..');
+    const dragged = await page.evaluateHandle(() => {
+      const data = new DataTransfer();
+      data.items.add(new File(['dropped contents'], 'my drop.txt', { type: 'text/plain' }));
+      return data;
+    });
+    await pane.dispatchEvent('dragover', { dataTransfer: dragged });
+    await expect(page.locator('.terminal-drop-target')).toBeVisible();
+    await pane.dispatchEvent('drop', { dataTransfer: dragged });
+    await expect(page.locator('.terminal-drop-target')).toHaveCount(0);
+
+    // Saved in our own uploads folder (no upload folder is set) under a name
+    // that needs no quoting, and that path typed into the terminal (the PTY echoes it,
+    // wrapped wherever the row ends).
+    const uploads = path.join(standalone.tmpHome, '.pixel-agents', 'uploads');
+    const saved = path.join(uploads, 'my-drop.txt');
+    await expect
+      .poll(async () => (await terminal.innerText()).replace(/\s/g, ''), { timeout: 10_000 })
+      .toContain(saved.replace(/\s/g, ''));
+    expect(fs.readFileSync(saved, 'utf-8')).toBe('dropped contents');
+
+    // A file that is already on this machine (this page is on localhost, the
+    // server's own): the terminal gets the file's own path and no copy lands
+    // in the uploads folder.
+    const desktop = path.join(standalone.tmpHome, 'Desktop');
+    fs.mkdirSync(desktop, { recursive: true });
+    const original = path.join(desktop, 'already-here.txt');
+    fs.writeFileSync(original, 'on this disk');
+    const lastModified = Math.floor(fs.statSync(original).mtimeMs);
+    const local = await page.evaluateHandle((modified) => {
+      const data = new DataTransfer();
+      data.items.add(new File(['on this disk'], 'already-here.txt', { lastModified: modified }));
+      return data;
+    }, lastModified);
+    await pane.dispatchEvent('drop', { dataTransfer: local });
+    await expect
+      .poll(async () => (await terminal.innerText()).replace(/\s/g, ''), { timeout: 10_000 })
+      .toContain(original.replace(/\s/g, ''));
+    expect(fs.readdirSync(uploads)).toEqual(['my-drop.txt']);
+  });
+
+  test('a screenshot pasted into the terminal is saved on the host and its path pasted in; pasted text stays text @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    await arrangeNextClaudeInvocation(
+      standalone.tmpHome,
+      claudeScenario('terminal file paste').holdOpenFor(60_000).build(),
+    );
+    await clickAddAgent(page);
+    const terminal = page.locator('.xterm').first();
+    await expect(terminal).toContainText('mock claude session', { timeout: 15_000 });
+    const input = terminal.locator('textarea');
+
+    // What Ctrl+V raises with a copied screenshot on the clipboard: a paste
+    // holding one file and no text.
+    // (Built in the page: Playwright's dispatchEvent gives a paste no clipboard.)
+    await input.evaluate((el) => {
+      const data = new DataTransfer();
+      data.items.add(new File(['png bytes'], 'image.png', { type: 'image/png' }));
+      el.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
+      );
+    });
+    const uploads = path.join(standalone.tmpHome, '.pixel-agents', 'uploads');
+    const saved = path.join(uploads, 'image.png');
+    await expect
+      .poll(async () => (await terminal.innerText()).replace(/\s/g, ''), { timeout: 10_000 })
+      .toContain(saved.replace(/\s/g, ''));
+    expect(fs.readFileSync(saved, 'utf-8')).toBe('png bytes');
+
+    // A paste of text is still the terminal's own: typed in, nothing saved.
+    await input.evaluate((el) => {
+      const data = new DataTransfer();
+      data.setData('text/plain', 'just-some-words');
+      el.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
+      );
+    });
+    await expect(terminal).toContainText('just-some-words', { timeout: 10_000 });
+    expect(fs.readdirSync(uploads)).toEqual(['image.png']);
   });
 });
 

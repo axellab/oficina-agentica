@@ -12,6 +12,7 @@ import {
   type TerminalShell,
 } from '../../adapters/vscode/launchCommandLine.js';
 import { claudeProvider } from '../src/providers/hook/claude/claude.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 const SHELLS: LaunchShell[] = ['posix', 'fish', 'powershell', 'cmd'];
 const SESSION_ID = '0b6e2c1a-5d3f-4c8e-9a7b-1f2e3d4c5b6a';
@@ -301,7 +302,7 @@ describe('a real shell hands the program every word', () => {
   });
 
   afterAll(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeTempDir(dir);
   });
 
   for (const shell of REAL_SHELLS) {

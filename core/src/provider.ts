@@ -70,6 +70,23 @@ export type AgentEvent =
     }
   | { kind: 'sessionEnd'; reason?: string };
 
+/**
+ * Where a session runs now, as one signal tells it: a hook payload (every
+ * event names its working folder and transcript) or a transcript record that
+ * says the session moved (Claude: EnterWorktree / ExitWorktree write
+ * `relocated` and `worktree-state`). The runtime follows the agent when this
+ * differs from where it was (server/src/agentMoves.ts).
+ */
+export interface SessionWhereabouts {
+  /** The folder the session runs in now. */
+  cwd?: string;
+  /** Where the CLI says the transcript is now. A hint only: it is followed
+   *  when that file exists (Claude's `-p` sessions name a file never made). */
+  transcriptPath?: string;
+  /** The branch checked out there, when the signal names it. */
+  branch?: string;
+}
+
 // ── Account usage (plan rate limits) ──────────────────────────
 
 /** The account's plan limits as one report states them (windows on the wire
@@ -98,6 +115,9 @@ export interface ReportedContext {
  * the body into a ReportedUsage. Install is always an explicit user choice.
  */
 export interface UsageBridge {
+  /** One line on what it shows: the Intro's checkbox text. Absent = a
+   *  generic line naming the CLI (the server's `usageBridgeStatus`). */
+  readonly summary?: string;
   /** What installing writes, what data moves, how to undo it — shown before
    *  the user confirms (paragraphs split on blank lines). */
   readonly disclosure: string;
@@ -119,7 +139,100 @@ export interface UsageBridge {
   normalizeContext(raw: unknown): ReportedContext | null;
 }
 
+// ── CLI sign-in ───────────────────────────────────────────────
+
+/** A provider's sign-in, as the office drives it: read whether the CLI is signed in, and run one sign-in at a time. */
+export interface CliSignIn {
+  /** Whether the CLI is signed in on this machine, asked of the CLI itself (`signedIn` false when it cannot say).
+   *  `planLimits` false = the account signed in has no plan limits to report (a pay-per-use API account), so the
+   *  usage bars have nothing to show; absent = it has, or the CLI does not say. */
+  status(): Promise<CliSignInState>;
+  /** Start a sign-in. `openBrowser` lets the CLI open a browser on this machine, where signing in finishes with no
+   *  code; without it nothing is opened here and the office opens `url` wherever it is shown. */
+  begin(options: { openBrowser: boolean; account: 'subscription' | 'api' }): CliSignInAttempt;
+}
+
+export interface CliSignInState {
+  signedIn: boolean;
+  planLimits?: boolean;
+}
+
+/** One sign-in under way. */
+export interface CliSignInAttempt {
+  /** The page to sign in on, once the CLI named it; rejects when the attempt ends before it did. */
+  readonly url: Promise<string>;
+  /** Hand over the code the page ended on. */
+  submitCode(code: string): void;
+  /** Settles when the attempt ends: signed in, or why not, in words for the user. Never rejects. */
+  readonly done: Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** End it now. `done` then settles as not signed in. */
+  cancel(): void;
+}
+
 // ── Hook-based Provider (CLIs with hooks APIs) ────────────────
+
+/**
+ * How a CLI packages instructions it loads for one session as a skill. The
+ * office names the skill (`plugin` is the namespace, `id` the skill) and
+ * writes its words; the folder layout, the file format and how the skill is
+ * invoked are the CLI's.
+ */
+export interface SkillPackaging {
+  /** The message that makes a session follow the skill (Claude: its slash
+   *  command, `/<plugin>:<id>`). */
+  command(plugin: string, id: string): string;
+  /** How the CLI names the skill to the agent running it (Claude:
+   *  `<plugin>:<id>`). */
+  skillName(plugin: string, id: string): string;
+  /** Write the skill under `dir` in the CLI's own layout, over any files of
+   *  the same names already there (others are left alone), and return the
+   *  folder a launch names in `pluginDirs`. Throws when it can't be written. */
+  write(
+    dir: string,
+    skill: {
+      plugin: string;
+      pluginDescription: string;
+      id: string;
+      description: string;
+      title: string;
+      instructions: string;
+    },
+  ): string;
+}
+
+/**
+ * How a CLI keeps a repo's git worktrees and files their sessions. The office
+ * puts the Worktrees it creates in the same folder, so the CLI files their
+ * sessions with the repo's own, and reads the CLI's own worktrees from there.
+ * Shared code knows neither the folder, nor how a session dir is named, nor
+ * the CLI's lock and settings: it asks this, through
+ * server/src/worktreeLocation.ts, which picks the one provider whose
+ * convention the office follows (where a folder's session dirs are is still
+ * the provider's `getSessionDirs`).
+ */
+export interface WorktreeConvention {
+  /** The worktrees folder under a repo root, as path segments (Claude:
+   *  `.claude`, `worktrees`). */
+  readonly folder: readonly string[];
+  /** The name of the session dir of the folder at `folderPath`, whether or
+   *  not either exists. */
+  sessionDirName(folderPath: string): string;
+  /** The worktree whose sessions the session dir named `dirName` holds, when
+   *  it is a worktree of the repo whose own session dir is named
+   *  `repoDirName`: the worktree folder's name as the dir name spells it
+   *  (which may have lost characters), else null. */
+  worktreeOfSessionDir(dirName: string, repoDirName: string): string | null;
+  /** The process a git worktree lock of this CLI's names, read from the
+   *  lock's reason (Claude: `claude session <name> (pid N …)`), or null when
+   *  the reason names none. Whether that process still runs is the caller's
+   *  check. Undefined = this CLI locks no worktrees. */
+  lockHolder?(lockReason: string): number | null;
+  /** Folders (relative to the repo root) a new Worktree of `repoPath` links to
+   *  the main checkout instead of copying, as this CLI's own settings list them
+   *  (Claude: `worktree.symlinkDirectories`, user and project scope).
+   *  Undefined = this CLI has no such setting. */
+  symlinkDirectories?(repoPath: string): string[];
+}
 
 export interface HookProvider {
   readonly kind: 'hook';
@@ -137,6 +250,9 @@ export interface HookProvider {
   normalizeHookEvent(raw: Record<string, unknown>): {
     sessionId: string;
     event: AgentEvent;
+    /** Where the session runs as of this event (every event, not only
+     *  sessionStart): how the runtime notices an agent that moved. */
+    where?: SessionWhereabouts;
   } | null;
 
   /** Install hook scripts that POST to our server. */
@@ -145,11 +261,22 @@ export interface HookProvider {
   uninstallHooks(): Promise<void>;
   /** Check if hooks are currently installed. */
   areHooksInstalled(): Promise<boolean>;
-  /** First-run consent copy for THIS provider's hook install: the headline titles the ask, the disclosure is its body
-   *  (what is written, what data moves, how to undo; paragraphs split on blank lines). Required, not optional — a
-   *  provider that installs anything must state its terms, and the gate ships these verbatim so no client copy can
-   *  drift. */
-  consentDisclosure(): { headline: string; disclosure: string };
+  /** First-run consent copy for THIS provider's hook install: the headline labels the ask, the summary is its one line
+   *  beside the Intro's checkbox, the disclosure its full terms behind "Read more" (what is written, what data moves,
+   *  how to undo). The method, the headline and the disclosure are required — a provider that installs anything must
+   *  state its terms, and the gate ships them verbatim so no client copy can drift; the summary is optional (absent =
+   *  the headline stands in for it). */
+  consentDisclosure(): { headline: string; summary?: string; disclosure: string };
+  /** Whether the provider's CLI is installed on this machine (the Intro's "get Claude Code" step shows only when it
+   *  isn't). Absent = assumed installed. */
+  isCliInstalled?(): boolean;
+  /** Signing the CLI in to its account, where the provider can run that for the office (the Intro's sign-in step,
+   *  which holds the choices back until it is done). Absent = the office never asks and counts the CLI signed in. */
+  readonly cliSignIn?: CliSignIn;
+  /** The keys that say yes to the CLI's own "do you trust this folder?" question when `screen` (a terminal's visible
+   *  text) shows it, else null. Only read where the operator started the office saying its folders are trusted
+   *  (standalone's --trust-directories): the office then answers for the agents it launches. Absent = never answered. */
+  trustPromptKeys?(screen: string): readonly ('up' | 'down' | 'enter')[] | null;
 
   /** Format tool status for display (e.g., "Read" -> "Reading foo.ts") */
   formatToolStatus(toolName: string, input?: unknown): string;
@@ -186,6 +313,33 @@ export interface HookProvider {
   readonly sessionFilePattern?: string;
   /** Parse one line of a transcript file into an AgentEvent. */
   parseTranscriptLine?(line: string): AgentEvent | null;
+  /** The session's new whereabouts when a transcript record says it moved
+   *  (Claude: `relocated`, `worktree-state`), else null. What the runtime
+   *  follows an agent by without hooks. Undefined = no such records. */
+  sessionMoveFromRecord?(record: unknown): SessionWhereabouts | null;
+  /** How this CLI loads a set of instructions for one session (Claude: a
+   *  plugin folder holding a skill). Undefined = it has no such thing: the
+   *  session is sent to the instructions another way (the tutorial's brief
+   *  comes from its MCP tool). */
+  readonly skills?: SkillPackaging;
+  /** The permission mode that lets safe actions through without a prompt and
+   *  still asks before risky ones (Claude: `auto`), one of `permissionModes`.
+   *  Undefined = the CLI's default mode is used where this one is wanted (the
+   *  tutorial's Guide, which never launches with prompts skipped). */
+  readonly autoPermissionMode?: string;
+  /** This CLI's name for its most capable model, as its launch takes it
+   *  (Claude: the alias `opus`). Undefined = the user's default model. */
+  readonly mostCapableModel?: string;
+  /** The terminal input modes this CLI's TUI runs with: whether it turns
+   *  bracketed paste on, and whether its cursor keys are in application mode.
+   *  For a surface that types into an agent's terminal without being able to
+   *  read it (VS Code). Undefined = plain: neither. */
+  readonly terminalInputModes?: { bracketedPaste: boolean; applicationCursorKeys: boolean };
+  /** The contents of the file a launch's `mcpConfig` names, in this CLI's own
+   *  format, for one MCP server reached over HTTP with a bearer token (Claude:
+   *  the `--mcp-config` JSON). Undefined = this CLI takes no such file, and its
+   *  agents are offered no MCP. */
+  mcpConfigFile?(server: { name: string; url: string; token: string }): string;
   /** Build CLI launch command for +Agent button. `resume`: continue the
    *  existing session `sessionId` (its transcript) instead of starting one. Only
    *  a provider with `conversationTitle` is asked to resume (the conversation
@@ -197,6 +351,11 @@ export interface HookProvider {
     opts?: {
       bypassPermissions?: boolean;
       resume?: boolean;
+      /** A file holding the MCP servers this launch gets (the Pixel Office MCP's
+       *  per-agent config). A path, never the config itself: it carries a token,
+       *  and a command line is readable by every process on the machine. Its
+       *  contents are this provider's own (`mcpConfigFile`). */
+      mcpConfig?: string;
       /** The model to run (the CLI's own model names and aliases). */
       model?: string;
       /** A file holding instructions to add to the CLI's own system prompt for
@@ -204,6 +363,19 @@ export interface HookProvider {
        *  prompt on a command line is quoted differently by every shell a
        *  surface types it into. A CLI with no such option ignores it. */
       appendSystemPromptFile?: string;
+      /** One of `permissionModes`, other than `bypassPermissionMode` (that one
+       *  is `bypassPermissions`). */
+      permissionMode?: string;
+      /** The session's first message, passed as the CLI's starting prompt (an
+       *  argv entry: never typed into the terminal, never a shell string). */
+      prompt?: string;
+      /** Tools of an MCP server this launch may call without a permission
+       *  prompt (the tutorial agent's read-only Pixel Office MCP tools). The
+       *  provider spells them its CLI's way; every other tool still asks. */
+      preapprovedMcpTools?: { server: string; tools: readonly string[] };
+      /** Plugin folders this session alone loads (the tutorial's onboarding
+       *  skill); nothing is installed. */
+      pluginDirs?: readonly string[];
     },
   ): {
     command: string;
@@ -219,11 +391,22 @@ export interface HookProvider {
    *  Settings the user exported (models, API config) are not markers.
    *  Undefined = this CLI marks nothing. */
   isInheritedSessionEnv?(name: string): boolean;
+  /** The permission modes a launch may ask for (the CLI's own names), the
+   *  default included. Undefined = this CLI takes no permission mode. */
+  readonly permissionModes?: readonly string[];
+  /** The one of `permissionModes` that skips every permission prompt: allowed
+   *  only while the office's skip-permissions setting is on, and launched as
+   *  `bypassPermissions` rather than as a mode. */
+  readonly bypassPermissionMode?: string;
   /** A session transcript's title as the CLI shows it (a user rename wins over
    *  the generated one), or undefined when it has none. Read by the sidebar's
    *  recent conversations; undefined = this provider names no conversations
    *  (and is never asked to resume one). */
   conversationTitle?(transcriptPath: string): string | undefined;
+  /** How this CLI keeps a repo's git worktrees and files their sessions:
+   *  the folder, the session dirs' naming, its lock and its symlink setting.
+   *  Undefined = this CLI has no worktrees of its own. */
+  readonly worktrees?: WorktreeConvention;
 
   /** Optional account-usage reporting (the office's usage bars). */
   readonly usageBridge?: UsageBridge;

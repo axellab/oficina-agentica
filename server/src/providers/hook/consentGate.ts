@@ -34,13 +34,28 @@ export interface ConsentGateState {
  */
 export function hooksConsentRequest(
   state: ConsentGateState,
-  provider: Pick<HookProvider, 'id' | 'consentDisclosure'>,
+  provider: Pick<HookProvider, 'id' | 'consentDisclosure' | 'isCliInstalled'>,
 ): HooksConsentRequest | null {
   if (state.installed || state.consentAnswered || !state.hooksEnabled || !state.privileged) {
     return null;
   }
-  const { headline, disclosure } = provider.consentDisclosure();
-  return { type: 'hooksConsentRequest', providerId: provider.id, headline, disclosure };
+  return replayedConsentRequest(provider);
+}
+
+/** The same ask, unconditionally: Settings → Replay the Intro (`replayIntro`, privileged only), where the user asks
+ *  to be asked again. Every answer is an absolute state (below), so re-asking whatever is on disk is safe. */
+export function replayedConsentRequest(
+  provider: Pick<HookProvider, 'id' | 'consentDisclosure' | 'isCliInstalled'>,
+): HooksConsentRequest {
+  const { headline, summary = headline, disclosure } = provider.consentDisclosure();
+  return {
+    type: 'hooksConsentRequest',
+    providerId: provider.id,
+    headline,
+    summary,
+    disclosure,
+    cliInstalled: provider.isCliInstalled?.() ?? true,
+  };
 }
 
 /** What the server should DO about an answer. The Intro lets the user walk BACK from the closing step and re-answer,

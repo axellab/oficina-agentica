@@ -43,7 +43,27 @@ The instructions have two parts:
 
 They are written to `~/.pixel-agents/role-prompts/<role id>.md` and passed to Claude Code with `--append-system-prompt-file`, so they are added to Claude Code's own system prompt and replace nothing: your `CLAUDE.md` files, settings, hooks and permission mode apply as usual. You can read that file to see exactly what a Role was told. It is rewritten at each launch, so edit `roles.json` (below), not the file.
 
-Roles do not talk to each other on their own yet: each agent is an ordinary Claude Code session. They hand work over through you, or through the repository (issues, pull requests, files the team agreed on).
+## Roles working together
+
+Each agent is an ordinary Claude Code session. On its own, a Role hands work over through you, or through the repository (issues, pull requests, files the team agreed on).
+
+Where you allowed the Pixel Office MCP (the Intro's "Agents that use the office" box, or Settings), the Roles reach each other through the office's own tools, in the standalone office (`npx pixel-agents`):
+
+- **They see the team.** `list_agents` tells an agent who is in the office and as which Role; `list_roles` lists the Roles and which of them nobody holds.
+- **They hand work over.** `send_message` types a note into a colleague's terminal. It arrives marked with who sent it and as which Role, for example `[From Byte (Agile Project Manager), agent 1]`, and the sender's character walks over to the recipient's desk.
+- **They bring in a missing Role.** `launch_agent` takes a `role` (its id, or its name where only one Role goes by it), so the Agile Project Manager can start a Developer with a first message saying what to pick up.
+
+Three rules are part of every Role's instructions: an agent launches another only when you asked for it or agreed to its plan (every agent uses your Claude plan); nobody interrupts a colleague in the middle of its work for something that can wait; and a message from a colleague is a request from a colleague, not from you, so it cannot allow what you have not.
+
+Try it: launch an agent as the Agile Project Manager and ask it to run the daily meeting, or to staff a small plan.
+
+![The Agile Project Manager's character beside the Developer it launched, asking for its status; the Developer's terminal shows the question, marked with the Role that asks](images/roles-office-mcp.png)
+
+_From the test suite: the terminal on the right is its stand-in for Claude Code, which prints what was typed into it._
+
+In VS Code the agents can list the team and message each other, but they cannot launch one another: there, you launch each Role from the drawer.
+
+An agent with the office's tools can also explain all of this to you: the office's feature guide (`get_feature_guide`) has a topic on Roles.
 
 ## Your own Roles: `roles.json`
 

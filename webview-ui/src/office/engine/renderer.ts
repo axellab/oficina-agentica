@@ -21,6 +21,7 @@ import {
   DELETE_BUTTON_BG,
   DELETE_BUTTON_HOVER_BG,
   FALLBACK_FLOOR_COLOR,
+  FURNITURE_HOVER_OUTLINE_ALPHA,
   GHOST_BORDER_HOVER_FILL,
   GHOST_BORDER_HOVER_STROKE,
   GHOST_BORDER_STROKE,
@@ -31,12 +32,18 @@ import {
   GRID_LINE_COLOR,
   HEADLESS_CHARACTER_ALPHA,
   HOVERED_OUTLINE_ALPHA,
+  MARQUEE_FILL,
   OUTLINE_Z_SORT_OFFSET,
   ROTATE_BUTTON_BG,
   ROTATE_BUTTON_HOVER_BG,
   SEAT_AVAILABLE_COLOR,
   SEAT_BUSY_COLOR,
   SEAT_OWN_COLOR,
+  SECTION_HOVER_FILL,
+  SECTION_HOVER_OUTLINE,
+  SECTION_OUTLINE_PX_PER_ZOOM,
+  SECTION_PICKED_FILL,
+  SECTION_PICKED_OUTLINE,
   SELECTED_OUTLINE_ALPHA,
   SELECTION_DASH_PATTERN,
   SELECTION_HIGHLIGHT_COLOR,
@@ -45,6 +52,7 @@ import {
 } from '../../constants.js';
 import type { SelectionButton } from '../editor/editorState.js';
 import { getColorizedFloorSprite, hasFloorSprites, WALL_COLOR } from '../floorTiles.js';
+import { layoutToFurnitureInstances } from '../layout/layoutSerializer.js';
 import { mapOffset } from '../projection.js';
 import {
   getCarpetJunctionSprite,
@@ -59,6 +67,7 @@ import type {
   CarpetTile,
   Character,
   FurnitureInstance,
+  OfficeLayout,
   Pet,
   Seat,
   SpriteData,
@@ -66,8 +75,9 @@ import type {
 } from '../types.js';
 import { CharacterState, TILE_SIZE, TileType } from '../types.js';
 import { getWallInstances, hasWallSprites, wallColorToHex } from '../wallTiles.js';
+import type { BuildoutRender } from './buildout.js';
 import { getCharacterSprite } from './characters.js';
-import { renderMatrixEffect } from './matrixEffect.js';
+import { renderMatrixEffect, renderMatrixSprite } from './matrixEffect.js';
 import { getPetSpriteData } from './petEntity.js';
 import type {
   ButtonBounds,
@@ -337,12 +347,102 @@ export function renderTileGrid(
 
       // Floor tile: get colorized sprite
       const colorIdx = r * layoutCols + c;
-      const color = tileColors?.[colorIdx] ?? { h: 0, s: 0, b: 0, c: 0 };
+      const color = tileColors?.[colorIdx] ?? UNCOLORED;
       const sprite = getColorizedFloorSprite(tile, color);
       const cached = getCachedSprite(sprite, zoom);
       ctx.drawImage(cached, offsetX + c * s, offsetY + r * s);
     }
   }
+}
+
+/** A sprite dissolving in matrix rain (a Buildout's removal), z-sorted with the scene. */
+export interface DissolvingSprite {
+  instance: FurnitureInstance;
+  timer: number;
+  seeds: readonly number[];
+}
+
+/** A tile with no colour of its own (the floor art as drawn). */
+const UNCOLORED: ColorValue = { h: 0, s: 0, b: 0, c: 0 };
+
+/** Draw a Buildout's floor tiles erased to void, dissolving (above the floor layer). */
+function renderFloorDissolves(
+  ctx: CanvasRenderingContext2D,
+  buildout: BuildoutRender,
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+): void {
+  if (!hasFloorSprites()) return;
+  const s = TILE_SIZE * zoom;
+  const { before } = buildout;
+  for (const d of buildout.dissolving) {
+    if (d.kind !== 'floor') continue;
+    const i = d.row * before.cols + d.col;
+    const sprite = getColorizedFloorSprite(before.tiles[i], before.tileColors?.[i] ?? UNCOLORED);
+    renderMatrixSprite(ctx, sprite, offsetX + d.col * s, offsetY + d.row * s, zoom, {
+      kind: 'despawn',
+      timer: d.timer,
+      seeds: d.seeds,
+    });
+  }
+}
+
+interface BeforeSprites {
+  /** The old walls by "col,row" (made the first time one dissolves). */
+  walls: Map<string, FurnitureInstance> | null;
+  /** The old furniture by uid. */
+  furniture: Map<string, FurnitureInstance>;
+}
+
+/** The old layout as drawn, made once per Buildout: z order as the whole layout
+ *  gives it (a monitor in front of its desk), mirrored sprites flipped for the rain. */
+const beforeSprites = new WeakMap<OfficeLayout, BeforeSprites>();
+
+function spritesOf(buildout: BuildoutRender): BeforeSprites {
+  const { before, beforeTileMap } = buildout;
+  let cached = beforeSprites.get(before);
+  if (!cached) {
+    const furniture = new Map<string, FurnitureInstance>();
+    for (const f of layoutToFurnitureInstances(before.furniture)) {
+      if (!f.uid) continue;
+      furniture.set(
+        f.uid,
+        f.mirrored ? { ...f, mirrored: false, sprite: f.sprite.map((r) => [...r].reverse()) } : f,
+      );
+    }
+    cached = { walls: null, furniture };
+    beforeSprites.set(before, cached);
+  }
+  if (!cached.walls && hasWallSprites() && buildout.dissolving.some((d) => d.kind === 'wall')) {
+    cached.walls = new Map();
+    for (const w of getWallInstances(
+      beforeTileMap,
+      before.tileColors,
+      before.cols,
+      before.wallSets,
+    )) {
+      // A wall instance stands on its tile: x = col * TILE_SIZE, zY = (row + 1) * TILE_SIZE.
+      cached.walls.set(`${w.x / TILE_SIZE},${w.zY / TILE_SIZE - 1}`, w);
+    }
+  }
+  return cached;
+}
+
+/** A Buildout's removed walls and furniture as sprites to dissolve. */
+function buildoutSceneDissolves(buildout: BuildoutRender): DissolvingSprite[] {
+  const out: DissolvingSprite[] = [];
+  const sprites = spritesOf(buildout);
+  for (const d of buildout.dissolving) {
+    const instance =
+      d.kind === 'wall'
+        ? sprites.walls?.get(`${d.col},${d.row}`)
+        : d.kind === 'furniture'
+          ? sprites.furniture.get(d.item.uid)
+          : undefined;
+    if (instance) out.push({ instance, timer: d.timer, seeds: d.seeds });
+  }
+  return out;
 }
 
 interface ZDrawable {
@@ -358,17 +458,52 @@ export function renderScene(
   offsetX: number,
   offsetY: number,
   zoom: number,
-  selectedAgentId: number | null,
-  hoveredAgentId: number | null,
+  selection: Pick<SelectionRenderState, 'selectedAgentId' | 'hoveredAgentId' | 'hoveredPieceUid'>,
   pets: Pet[] = [],
+  dissolving: DissolvingSprite[] = [],
 ): void {
+  const { selectedAgentId, hoveredAgentId } = selection;
+  const hoveredPieceUid = selection.hoveredPieceUid ?? null;
   const drawables: ZDrawable[] = [];
+
+  // A Buildout's removed walls and furniture, dissolving in matrix rain where they stood
+  for (const d of dissolving) {
+    const { instance, timer, seeds } = d;
+    const sprite = instance.sprite; // mirrored ones come flipped (spritesOf)
+    const fx = offsetX + instance.x * zoom;
+    const fy = offsetY + instance.y * zoom;
+    drawables.push({
+      zY: instance.zY,
+      draw: (c) => renderMatrixSprite(c, sprite, fx, fy, zoom, { kind: 'despawn', timer, seeds }),
+    });
+  }
 
   // Furniture
   for (const f of furniture) {
     const cached = getCachedSprite(f.sprite, zoom);
     const fx = offsetX + f.x * zoom;
     const fy = offsetY + f.y * zoom;
+    // A hovered piece: a character's selection outline, faint, sorted just before it.
+    if (hoveredPieceUid !== null && f.uid === hoveredPieceUid) {
+      const outline = getCachedSprite(getOutlineSprite(f.sprite), zoom);
+      const mirrored = f.mirrored === true;
+      drawables.push({
+        zY: f.zY - OUTLINE_Z_SORT_OFFSET,
+        draw: (c) => {
+          c.save();
+          c.globalAlpha = FURNITURE_HOVER_OUTLINE_ALPHA;
+          if (mirrored) {
+            // The outline is the sprite's, a sprite pixel bigger all round: flip it the same way.
+            c.translate(fx + cached.width + zoom, fy - zoom);
+            c.scale(-1, 1);
+            c.drawImage(outline, 0, 0);
+          } else {
+            c.drawImage(outline, fx - zoom, fy - zoom);
+          }
+          c.restore();
+        },
+      });
+    }
     if (f.mirrored) {
       drawables.push({
         zY: f.zY,
@@ -624,6 +759,46 @@ function renderGhostBorder(
   ctx.restore();
 }
 
+/**
+ * Outline a set of tiles along its border (the edges between a tile in the
+ * set and one outside it), over a faint fill. Drawn as filled strips inside
+ * the tiles, so every edge lands on whole device pixels.
+ */
+function renderTileSetOutline(
+  ctx: CanvasRenderingContext2D,
+  tiles: readonly number[],
+  cols: number,
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+  stroke: string,
+  fill: string,
+): void {
+  if (tiles.length === 0) return;
+  const s = TILE_SIZE * zoom;
+  const w = Math.max(1, Math.round(zoom * SECTION_OUTLINE_PX_PER_ZOOM));
+  const inSet = new Set(tiles);
+  ctx.save();
+  ctx.fillStyle = fill;
+  for (const idx of tiles) {
+    const c = idx % cols;
+    const r = (idx - c) / cols;
+    ctx.fillRect(offsetX + c * s, offsetY + r * s, s, s);
+  }
+  ctx.fillStyle = stroke;
+  for (const idx of tiles) {
+    const c = idx % cols;
+    const r = (idx - c) / cols;
+    const x = offsetX + c * s;
+    const y = offsetY + r * s;
+    if (r === 0 || !inSet.has(idx - cols)) ctx.fillRect(x, y, s, w);
+    if (!inSet.has(idx + cols)) ctx.fillRect(x, y + s - w, s, w);
+    if (c === 0 || !inSet.has(idx - 1)) ctx.fillRect(x, y, w, s);
+    if (c === cols - 1 || !inSet.has(idx + 1)) ctx.fillRect(x + s - w, y, w, s);
+  }
+  ctx.restore();
+}
+
 /** @internal */
 export function renderGhostPreview(
   ctx: CanvasRenderingContext2D,
@@ -829,44 +1004,70 @@ export interface EditorRenderState {
   ghostBorderHoverCol: number;
   /** Hovered ghost border tile row (-1 to rows) */
   ghostBorderHoverRow: number;
+  /** A box selection being dragged out, in tiles. */
+  marquee: { col: number; row: number; w: number; h: number } | null;
+  /** The other items of a Shift+click selection (highlighted, no buttons). */
+  extraSelections: Array<{ col: number; row: number; w: number; h: number }>;
+  /**
+   * The box round every selected item, when there are several: the buttons
+   * centre above it instead of sitting on the leading item.
+   */
+  selectionBox: { col: number; row: number; w: number; h: number } | null;
+  /** Tiles of the sections the Select tool has picked (outlined). */
+  sectionTiles: readonly number[];
+  /** Tiles of the section the Select tool hovers, not yet picked (faintly outlined). */
+  sectionHoverTiles: readonly number[];
 }
 
 export interface SelectionRenderState {
   selectedAgentId: number | null;
   hoveredAgentId: number | null;
+  /** The hovered piece of interactive furniture (outlined faintly), or null. None
+   *  while the layout editor is open: opening it clears the hover (OfficeCanvas). */
+  hoveredPieceUid?: string | null;
   hoveredTile: { col: number; row: number } | null;
   seats: Map<string, Seat>;
   characters: Map<number, Character>;
 }
 
+/** Everything one frame draws: the canvas and camera, what the office shows
+ *  (layout, tile map, furniture, characters, pets), and the overlays. */
+export interface FrameInput {
+  canvasWidth: number;
+  canvasHeight: number;
+  zoom: number;
+  panX: number;
+  panY: number;
+  /** The layout as shown (during a Buildout, as built so far): its size, tile
+   *  colours, wall sets, carpets and Areas. */
+  layout: OfficeLayout;
+  /** The shown layout's tile map. */
+  tileMap: TileTypeVal[][];
+  furniture: FurnitureInstance[];
+  characters: Character[];
+  pets?: Pet[];
+  selection?: SelectionRenderState;
+  editor?: EditorRenderState;
+  showAreas?: boolean;
+  activeAreaLabel?: string | null;
+  /** The Buildout playing, if any (its dissolving removals). */
+  buildout?: BuildoutRender | null;
+}
+
 export function renderFrame(
   ctx: CanvasRenderingContext2D,
-  canvasWidth: number,
-  canvasHeight: number,
-  tileMap: TileTypeVal[][],
-  furniture: FurnitureInstance[],
-  characters: Character[],
-  zoom: number,
-  panX: number,
-  panY: number,
-  selection?: SelectionRenderState,
-  editor?: EditorRenderState,
-  tileColors?: Array<ColorValue | null>,
-  layoutCols?: number,
-  layoutRows?: number,
-  carpetTiles?: Array<CarpetTile | null>,
-  areas?: AreaDefinition[],
-  areaTiles?: Array<string | null>,
-  showAreas?: boolean,
-  activeAreaLabel?: string | null,
-  pets?: Pet[],
+  frame: FrameInput,
 ): { offsetX: number; offsetY: number } {
+  const { canvasWidth, canvasHeight, zoom, panX, panY, layout, tileMap, furniture, characters } =
+    frame;
+  const { selection, editor, showAreas, activeAreaLabel, pets, buildout } = frame;
+  const { tileColors, carpetTiles, areas, areaTiles, wallSets } = layout;
+  const layoutCols = layout.cols;
   // Clear
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-  // Use layout dimensions (fallback to tileMap size)
-  const cols = layoutCols ?? (tileMap.length > 0 ? tileMap[0].length : 0);
-  const rows = layoutRows ?? tileMap.length;
+  const cols = layout.cols;
+  const rows = layout.rows;
 
   // Center map in viewport + pan offset (integer device pixels). Shared with
   // the DOM overlays so a label lands exactly on the sprite it belongs to.
@@ -878,6 +1079,11 @@ export function renderFrame(
   // Carpet layer (above floor, below seat indicators / furniture / characters)
   if (carpetTiles && carpetTiles.length > 0) {
     renderCarpetLayer(ctx, carpetTiles, cols, rows, offsetX, offsetY, zoom);
+  }
+
+  // A Buildout's erased floor, dissolving (above the floor it left, below everything else)
+  if (buildout && buildout.dissolving.length > 0) {
+    renderFloorDissolves(ctx, buildout, offsetX, offsetY, zoom);
   }
 
   // Area overlay (translucent color wash) — above carpets, below seat indicators
@@ -900,12 +1106,12 @@ export function renderFrame(
   }
 
   // Build wall instances for z-sorting with furniture and characters
-  const wallInstances = hasWallSprites() ? getWallInstances(tileMap, tileColors, layoutCols) : [];
+  const wallInstances = hasWallSprites()
+    ? getWallInstances(tileMap, tileColors, layoutCols, wallSets)
+    : [];
   const allFurniture = wallInstances.length > 0 ? [...wallInstances, ...furniture] : furniture;
 
   // Draw walls + furniture + characters (z-sorted)
-  const selectedId = selection?.selectedAgentId ?? null;
-  const hoveredId = selection?.hoveredAgentId ?? null;
   renderScene(
     ctx,
     allFurniture,
@@ -913,9 +1119,9 @@ export function renderFrame(
     offsetX,
     offsetY,
     zoom,
-    selectedId,
-    hoveredId,
+    selection ?? { selectedAgentId: null, hoveredAgentId: null },
     pets ?? [],
+    buildout && buildout.dissolving.length > 0 ? buildoutSceneDissolves(buildout) : [],
   );
 
   // Character speech bubbles render in ToolOverlay (DOM, above the labels).
@@ -946,6 +1152,26 @@ export function renderFrame(
         editor.ghostBorderHoverRow,
       );
     }
+    renderTileSetOutline(
+      ctx,
+      editor.sectionHoverTiles,
+      cols,
+      offsetX,
+      offsetY,
+      zoom,
+      SECTION_HOVER_OUTLINE,
+      SECTION_HOVER_FILL,
+    );
+    renderTileSetOutline(
+      ctx,
+      editor.sectionTiles,
+      cols,
+      offsetX,
+      offsetY,
+      zoom,
+      SECTION_PICKED_OUTLINE,
+      SECTION_PICKED_FILL,
+    );
     for (const ghost of editor.ghosts) {
       renderGhostPreview(
         ctx,
@@ -958,6 +1184,18 @@ export function renderFrame(
         zoom,
         ghost.mirrored,
       );
+    }
+    if (editor.marquee) {
+      const s = TILE_SIZE * zoom;
+      const { col, row, w, h } = editor.marquee;
+      ctx.save();
+      ctx.fillStyle = MARQUEE_FILL;
+      ctx.fillRect(offsetX + col * s, offsetY + row * s, w * s, h * s);
+      ctx.restore();
+      renderSelectionHighlight(ctx, col, row, w, h, offsetX, offsetY, zoom);
+    }
+    for (const extra of editor.extraSelections) {
+      renderSelectionHighlight(ctx, extra.col, extra.row, extra.w, extra.h, offsetX, offsetY, zoom);
     }
     if (editor.hasSelection) {
       renderSelectionHighlight(
@@ -973,10 +1211,14 @@ export function renderFrame(
       const buttons = renderSelectionButtons(
         ctx,
         {
-          col: editor.selectedCol,
-          row: editor.selectedRow,
-          w: editor.selectedW,
-          h: editor.selectedH,
+          ...(editor.selectionBox
+            ? { ...editor.selectionBox, centered: true }
+            : {
+                col: editor.selectedCol,
+                row: editor.selectedRow,
+                w: editor.selectedW,
+                h: editor.selectedH,
+              }),
           offsetX,
           offsetY,
           zoom,

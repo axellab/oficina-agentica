@@ -17,6 +17,7 @@ import {
   setHooksEnabled,
   writeConfig,
 } from '../src/configPersistence.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 describe('configPersistence: areas', () => {
   let tempHome: string;
@@ -34,7 +35,7 @@ describe('configPersistence: areas', () => {
     } else {
       process.env.HOME = originalHome;
     }
-    fs.rmSync(tempHome, { recursive: true, force: true });
+    removeTempDir(tempHome);
   });
 
   // ── parseAreaMappings ────────────────────────────────────────
@@ -201,20 +202,12 @@ describe('configPersistence: areas', () => {
       recordHooksDecline('other');
       setHooksEnabled('claude', false); // a persisted "off" must not survive uninstall,
       setHooksEnabled('other', false); // or the next install never prompts
-      const cfg = readConfig();
-      cfg.vscode.hooksInfoShown = true;
-      cfg.standalone.hooksInfoShown = true;
-      writeConfig(cfg);
-
       resetHooksConfig();
 
       expect(getHooksConsent('claude')).toBe('unanswered');
       expect(getHooksConsent('other')).toBe('unanswered');
       expect(getHooksEnabled('claude')).toBe(true);
       expect(getHooksEnabled('other')).toBe(true);
-      const reset = readConfig();
-      expect(reset.vscode.hooksInfoShown).toBe(false);
-      expect(reset.standalone.hooksInfoShown).toBe(false);
     });
   });
 

@@ -2,6 +2,14 @@ import type * as vscode from 'vscode';
 
 import type { AgentRole } from '../../core/src/messages.js';
 import type { BackgroundSpawns } from './backgroundSpawns.js';
+import type { AgentVisit } from './visits.js';
+
+/** An agent's turn: running (`active`), ended (`done`), or ended on a
+ *  question to its user (`waiting for input`). */
+export type AgentTurnStatus = 'active' | 'done' | 'waiting for input';
+
+/** A turn report, as the runtime's signals give it (hooks and transcript heuristics alike). */
+export type AgentStatusReport = { active: true } | { active: false; awaitingInput: boolean };
 
 export interface AgentState {
   id: number;
@@ -27,10 +35,26 @@ export interface AgentState {
    *  yet 'waiting'), so a connecting client is told too: a turn between two
    *  tools has no live tool to say so. Unset for an agent with no turn seen. */
   turnActive?: boolean;
+  /** Its turn as every office was last told it (`agentStatus`): the ONE
+   *  record of it, kept by AgentStateStore.setAgentStatus and nowhere else.
+   *  An agent nothing has reported on yet (just launched, restored, adopted)
+   *  reads 'waiting for input'. The permission bubble is `permissionSent`. */
+  turnStatus: AgentTurnStatus;
   permissionSent: boolean;
   hadToolsInTurn: boolean;
   /** Directory name — the agent's origin label (only set for multi-root workspaces) */
   directoryName?: string;
+  /** The Worktree the agent runs in (a checkout of its Directory's repo on a
+   *  branch of its own, server/src/worktreeCreate.ts). The agent is still an agent
+   *  of its Directory: `directoryName` stays the Directory's. */
+  worktree?: { name: string; path: string; branch: string };
+  /** The Nickname it was launched with (Pixel Office MCP): a label shown after
+   *  its Directory, never a Teammate's name (`agentName`). */
+  nickname?: string;
+  /** The folder the session was last seen running in (a hook's cwd, a
+   *  transcript's relocation record); how a move is noticed. Unknown until
+   *  a signal says. Transient, never persisted. */
+  cwd?: string;
   /** Timestamp of last JSONL data received (ms since epoch) */
   lastDataAt: number;
   /** Total JSONL lines processed for this agent */
@@ -107,4 +131,6 @@ export interface AgentState {
    *  launched have one: an adopted session, a Teammate and a Sub-agent were
    *  started by someone else, with no Role's instructions. */
   role?: AgentRole;
+  /** The Visit its character is on, if any (server/src/visits.ts). Never persisted. */
+  visit?: AgentVisit;
 }

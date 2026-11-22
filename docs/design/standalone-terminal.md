@@ -230,6 +230,22 @@ token in transit, to the LAN over plain HTTP. The explicit allowlist keeps the b
 applying it to `/ws` too means no privileged path is weaker than another. A tokened `/ws` connection
 under an unlisted `Host` stays read-only and the server logs the `--allowed-host` hint.
 
+### `--trust-directories`
+
+Claude Code asks "do you trust this folder?" the first time a session opens in a folder, with "No,
+exit" selected. On a remote server set up for one person's own work, with nobody at a keyboard,
+that question meets a new user before their first agent has said a word. Started with
+`--trust-directories`, the office answers it for every agent it launches: `terminal/trustPrompt.ts`
+reads the new session's screen (`readScreen`) for `TRUST_PROMPT_WATCH_MS` after the launch, and
+when the provider recognizes its question (`HookProvider.trustPromptKeys`; Claude's wants both
+menu rows on screen and the pointer on one of them) it presses them through the same `typeInto` a
+Message uses, one key per read: a move, then the screen is read again, and Enter goes only to a
+screen whose pointer is on yes. The CLI drops keys for a moment after the question appears, so
+"down, enter" sent together lost the move and confirmed "No, exit", ending the session. Off by default and never a setting in the office: the question is the
+CLI's safeguard against a folder whose own config runs code, so answering it is the decision of
+whoever starts the server, made once, on the command line. The office writes nothing to Claude's
+config for it; the CLI records the answer itself.
+
 ### Other properties
 
 - The standalone token is persisted in `~/.pixel-agents/standalone-token` (mode `0o600`; the
@@ -376,6 +392,21 @@ RemotePtySessions ── Unix socket ──────▶ startPtyHost()
   Alt+C / Option+C with a selection, or the pill's "Copy as text" — because the heuristic
   can't tell a soft wrap from indented structure under a long row (YAML, code). Writes go
   through `terminal/clipboard.ts` (Clipboard API, or a copy event on plain-http origins).
+- Files: a file dropped on a terminal pane or pasted into it (desktop: Ctrl+V / Cmd+V with a
+  copied screenshot or files copied in the file manager on the clipboard; a paste is one of
+  files unless the clipboard also holds a document's text, plain and marked up,
+  `pasteCarriesFiles`) or picked through the input area
+  pill's "Attach file" (phone) is uploaded with `POST /api/terminal/:agentId/files`
+  (raw body, the terminal socket's token + Host gate, only for an agent with a PTY),
+  saved in the host's upload directory (a setting; by default `~/.pixel-agents/uploads`,
+  our own folder, swept at start, daily and after each upload: files sent more than 7 days
+  ago go, and the oldest once it holds more than 2 GB — a folder the user chose is never
+  swept) and its path pasted into the terminal, as a native terminal does with a
+  dropped file. `server/src/terminal/fileUploads.ts` owns the folder, the name and the
+  per-OS quoting. A browser on the host itself (a loopback hostname) first asks
+  `POST …/files/locate`: the server looks for the file by name, size and modification
+  time straight under the home directory, its Desktop, Downloads and Documents and the
+  upload directory and the user's Directories (`localFile.ts`; no deeper, no disk search) and, when it finds it, the file's own path is pasted with no copy.
 - Distribution: esbuild externals, `package.json` `optionalDependencies` + `files`.
 - Server unit tests: session manager lifecycle, WS auth, message framing.
 

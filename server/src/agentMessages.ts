@@ -1,4 +1,4 @@
-import type { AgentRole } from '../../core/src/messages.js';
+import type { AgentRole, AgentWorktree, AgentWorktreeChanged } from '../../core/src/messages.js';
 import type { AgentState } from './types.js';
 
 /**
@@ -21,6 +21,9 @@ export function agentCreatedMessage(id: number, agent: AgentState): Record<strin
     repeat: agent.repeat,
     seatId: agent.seatId,
     role: agent.role,
+    // The office shows name and branch; the folder stays server-side.
+    worktree: officeWorktree(agent),
+    nickname: agent.nickname,
   };
 }
 
@@ -36,4 +39,48 @@ export function existingAgentRoles(
     if (agent.role) roles[id] = agent.role;
   }
   return roles;
+}
+
+/** An agent's Worktree as the office sees it: name and branch (the folder
+ *  stays server-side). */
+function officeWorktree(agent: AgentState): AgentWorktree | undefined {
+  return agent.worktree && { name: agent.worktree.name, branch: agent.worktree.branch };
+}
+
+/** `agentWorktreeChanged`: the agent moved, and now runs in this Worktree
+ *  (or in none). */
+export function agentWorktreeChangedMessage(id: number, agent: AgentState): AgentWorktreeChanged {
+  const worktree = officeWorktree(agent);
+  return { type: 'agentWorktreeChanged', id, ...(worktree ? { worktree } : {}) };
+}
+
+/**
+ * `existingAgents.worktrees`: the Worktree of every agent that runs in one,
+ * keyed by id, so a reload or reconnect keeps each card's marker and branch.
+ * One builder for both surfaces, like agentCreatedMessage.
+ */
+export function existingAgentWorktrees(
+  agents: Iterable<[number, AgentState]>,
+): Record<number, AgentWorktree> {
+  const out: Record<number, AgentWorktree> = {};
+  for (const [id, agent] of agents) {
+    const worktree = officeWorktree(agent);
+    if (worktree) out[id] = worktree;
+  }
+  return out;
+}
+
+/**
+ * `existingAgents.nicknames`: the Nickname of every agent launched with one,
+ * keyed by id, so a reload or reconnect keeps it on the card and label. One
+ * builder for both surfaces, like existingAgentWorktrees.
+ */
+export function existingAgentNicknames(
+  agents: Iterable<[number, AgentState]>,
+): Record<number, string> {
+  const out: Record<number, string> = {};
+  for (const [id, agent] of agents) {
+    if (agent.nickname) out[id] = agent.nickname;
+  }
+  return out;
 }

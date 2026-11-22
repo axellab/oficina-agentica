@@ -3,19 +3,25 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { normalizeProjectPath } from '../../../../../core/src/normalizeProjectPath.js';
-import type { AgentEvent, HookProvider } from '../../../../../core/src/provider.js';
+import type {
+  AgentEvent,
+  HookProvider,
+  SessionWhereabouts,
+} from '../../../../../core/src/provider.js';
 import {
   BASH_COMMAND_DISPLAY_MAX_LENGTH,
   TASK_DESCRIPTION_DISPLAY_MAX_LENGTH,
 } from '../../../constants.js';
+import { executableOnPath } from '../../../executableOnPath.js';
 import {
   areHooksInstalled as installerAreHooksInstalled,
   installHooks as installerInstallHooks,
   uninstallHooks as installerUninstallHooks,
 } from './claudeHookInstaller.js';
+import { claudeSignIn } from './claudeSignIn.js';
 import { claudeTeamProvider } from './claudeTeamProvider.js';
 import { claudeUsageBridge } from './claudeUsageBridge.js';
-import { CONSENT_DISCLOSURE, CONSENT_INSTALL_HEADLINE } from './consentCopy.js';
+import { CONSENT_DISCLOSURE, CONSENT_INSTALL_HEADLINE, CONSENT_SUMMARY } from './consentCopy.js';
 import {
   CLAUDE_LARGE_CONTEXT_WINDOW,
   CLAUDE_SMALL_CONTEXT_MODEL_PATTERN,
@@ -25,6 +31,9 @@ import {
 } from './constants.js';
 import { conversationTitle } from './conversationTitle.js';
 import { isInheritedClaudeSessionEnv } from './sessionEnv.js';
+import { claudeSkillPackaging } from './skillPackaging.js';
+import { claudeTrustPromptKeys } from './trustPrompt.js';
+import { claudeWorktreeConvention } from './worktreeConvention.js';
 
 // ── formatToolStatus: moved from src/transcriptParser.ts ──
 
@@ -122,25 +131,59 @@ function sessionDirOf(workspacePath: string): string {
   return projectDir;
 }
 
+/** Claude Code's `--permission-mode` choices. */
+const CLAUDE_PERMISSION_MODES = [
+  'default',
+  'acceptEdits',
+  'plan',
+  'auto',
+  'dontAsk',
+  'bypassPermissions',
+] as const;
+
 function buildLaunchCommand(
   sessionId: string,
   cwd: string,
   opts?: {
     bypassPermissions?: boolean;
     resume?: boolean;
+    mcpConfig?: string;
     model?: string;
     appendSystemPromptFile?: string;
+    permissionMode?: string;
+    prompt?: string;
+    preapprovedMcpTools?: { server: string; tools: readonly string[] };
+    pluginDirs?: readonly string[];
   },
 ): { command: string; args: string[]; env?: Record<string, string> } {
   // A resumed session keeps its id and appends to its old transcript.
   const args = [opts?.resume ? '--resume' : '--session-id', sessionId];
   if (opts?.bypassPermissions) args.push('--dangerously-skip-permissions');
+  else if (opts?.permissionMode) args.push('--permission-mode', opts.permissionMode);
   if (opts?.model) args.push('--model', opts.model);
   // Added to Claude Code's own system prompt, never replacing it. Given again
   // on a resume: the flag applies to the process, not to the saved session.
   if (opts?.appendSystemPromptFile) {
     args.push('--append-system-prompt-file', opts.appendSystemPromptFile);
   }
+  // Added to whatever MCP servers the user configured, never replacing them
+  // (no --strict-mcp-config): the file names only the Pixel Office MCP.
+  if (opts?.mcpConfig) args.push('--mcp-config', opts.mcpConfig);
+  // Loaded for this session only (`--plugin-dir`, one path per flag).
+  for (const dir of opts?.pluginDirs ?? []) args.push('--plugin-dir', dir);
+  // Claude names an MCP tool mcp__<server>__<tool>; the flag takes one value
+  // per tool (its documented form), last before `--` so nothing else is read
+  // as a tool.
+  const preapproved = opts?.preapprovedMcpTools;
+  if (preapproved && preapproved.tools.length > 0) {
+    args.push(
+      '--allowedTools',
+      ...preapproved.tools.map((tool) => `mcp__${preapproved.server}__${tool}`),
+    );
+  }
+  // The starting prompt last, after `--`: --mcp-config takes several values
+  // and would swallow it, and a prompt starting with `-` would read as a flag.
+  if (opts?.prompt) args.push('--', opts.prompt);
   return { command: 'claude', args, env: { PWD: cwd } };
 }
 
@@ -162,6 +205,22 @@ function getAllSessionRoots(): string[] {
 // the real tool id arrives later via JSONL polling.
 
 function normalizeHookEvent(
+  raw: Record<string, unknown>,
+): { sessionId: string; event: AgentEvent; where?: SessionWhereabouts } | null {
+  const normalized = normalizeEvent(raw);
+  if (!normalized) return null;
+  // Every Claude hook payload names the folder the session runs in and its
+  // transcript, and both follow an EnterWorktree / ExitWorktree at once
+  // (recorded live, server/__tests__/fixtures/enter-worktree/).
+  const where: SessionWhereabouts = {};
+  if (typeof raw.cwd === 'string' && raw.cwd) where.cwd = raw.cwd;
+  if (typeof raw.transcript_path === 'string' && raw.transcript_path) {
+    where.transcriptPath = raw.transcript_path;
+  }
+  return where.cwd || where.transcriptPath ? { ...normalized, where } : normalized;
+}
+
+function normalizeEvent(
   raw: Record<string, unknown>,
 ): { sessionId: string; event: AgentEvent } | null {
   const eventName = raw.hook_event_name;
@@ -289,6 +348,34 @@ function normalizeHookEvent(
   }
 }
 
+// ── A session that moves (EnterWorktree / ExitWorktree) ──
+
+/**
+ * The session's new whereabouts when a transcript record says it moved.
+ * Claude writes `{type: 'relocated', relocatedCwd}` when a session enters or
+ * leaves a worktree mid-session, and `{type: 'worktree-state', worktreeSession:
+ * {worktreePath, worktreeBranch, …} | null}` beside it (each repeated on later
+ * turns; null on leaving, where `relocated` names the folder it returned to).
+ */
+function sessionMoveFromRecord(record: unknown): SessionWhereabouts | null {
+  if (typeof record !== 'object' || record === null) return null;
+  const r = record as Record<string, unknown>;
+  if (r.type === 'relocated' && typeof r.relocatedCwd === 'string' && r.relocatedCwd) {
+    return { cwd: r.relocatedCwd };
+  }
+  if (r.type === 'worktree-state' && typeof r.worktreeSession === 'object' && r.worktreeSession) {
+    const ws = r.worktreeSession as Record<string, unknown>;
+    if (typeof ws.worktreePath !== 'string' || !ws.worktreePath) return null;
+    return {
+      cwd: ws.worktreePath,
+      ...(typeof ws.worktreeBranch === 'string' && ws.worktreeBranch
+        ? { branch: ws.worktreeBranch }
+        : {}),
+    };
+  }
+  return null;
+}
+
 // ── Installer wrappers: adapt sync signatures to async interface ──
 
 /** Async so an installer throw (e.g. unparseable settings.json) always reaches
@@ -308,8 +395,17 @@ function areHooksInstalled(): Promise<boolean> {
 /** This provider's first-run consent terms. The strings live in
  *  consentCopy.ts (Claude-specific facts: the event count, the settings
  *  path); the shared consent gate ships them verbatim to the Intro. */
-function consentDisclosure(): { headline: string; disclosure: string } {
-  return { headline: CONSENT_INSTALL_HEADLINE, disclosure: CONSENT_DISCLOSURE };
+function consentDisclosure(): { headline: string; summary: string; disclosure: string } {
+  return {
+    headline: CONSENT_INSTALL_HEADLINE,
+    summary: CONSENT_SUMMARY,
+    disclosure: CONSENT_DISCLOSURE,
+  };
+}
+
+/** Whether `claude` resolves on PATH, as the office's launches spawn it. */
+function isCliInstalled(): boolean {
+  return executableOnPath('claude');
 }
 
 // ── Context windows ──
@@ -332,6 +428,21 @@ export function contextWindowForModel(model: string | undefined): number | undef
 
 // ── The provider ──
 
+/** The `--mcp-config` file for one HTTP MCP server: Claude Code's `mcpServers`
+ *  JSON, the token as the server's Authorization header. */
+function mcpConfigFile(server: { name: string; url: string; token: string }): string {
+  const config = {
+    mcpServers: {
+      [server.name]: {
+        type: 'http',
+        url: server.url,
+        headers: { Authorization: `Bearer ${server.token}` },
+      },
+    },
+  };
+  return JSON.stringify(config, null, 2);
+}
+
 export const claudeProvider: HookProvider = {
   kind: 'hook',
   id: 'claude',
@@ -344,6 +455,9 @@ export const claudeProvider: HookProvider = {
   uninstallHooks,
   areHooksInstalled,
   consentDisclosure,
+  isCliInstalled,
+  cliSignIn: claudeSignIn,
+  trustPromptKeys: claudeTrustPromptKeys,
 
   formatToolStatus,
   permissionExemptTools: new Set(['Task', 'Agent', 'AskUserQuestion']),
@@ -355,9 +469,21 @@ export const claudeProvider: HookProvider = {
   getSessionDirs,
   getAllSessionRoots,
   sessionFilePattern: '*.jsonl',
+  sessionMoveFromRecord,
   buildLaunchCommand,
+  mcpConfigFile,
+  // Claude Code's TUI turns bracketed paste on and leaves the cursor keys normal.
+  terminalInputModes: { bracketedPaste: true, applicationCursorKeys: false },
   isInheritedSessionEnv: isInheritedClaudeSessionEnv,
+  permissionModes: CLAUDE_PERMISSION_MODES,
+  bypassPermissionMode: 'bypassPermissions',
+  // Auto mode: safe actions go through, risky ones still ask.
+  autoPermissionMode: 'auto',
+  // The CLI's alias for its newest Opus.
+  mostCapableModel: 'opus',
+  skills: claudeSkillPackaging,
   conversationTitle,
+  worktrees: claudeWorktreeConvention,
 
   team: claudeTeamProvider,
   usageBridge: claudeUsageBridge,

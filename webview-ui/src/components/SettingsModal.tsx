@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { officeRadio } from '../music/musicEngine.js';
 import { useOfficeRadio } from '../music/useOfficeRadio.js';
 import { isSoundEnabled, setSoundEnabled } from '../notificationSound.js';
+import { useOfficeMcp } from '../officeMcp/useOfficeMcp.js';
 import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
 import { useUsageBridge } from '../usage/useUsageBridge.js';
@@ -42,10 +43,19 @@ interface SettingsModalProps {
   /** Whether the launch drawer lists the host's own Directories. */
   showHostDirectories: boolean;
   onToggleShowHostDirectories: () => void;
+  /** Where the host saves files sent to a terminal; null hides the field (no
+   *  terminal here to send files to). */
+  uploadDirectory: { path: string } | null;
   /** Browser-native layout export (standalone only; VS Code uses the host save dialog). */
   onExportLayout: () => void;
   /** Browser-native layout import from a chosen file (standalone only). */
   onImportLayout: (file: File) => void;
+  /** Settings → Play the Tutorial: opens the tutorial's ask (absent: no
+   *  tutorial on this server, or one is running). */
+  onPlayTutorial?: () => void;
+  /** Settings → Replay the Intro: the first-run tour again, its choices
+   *  starting from what is on now (absent: not offered here). */
+  onReplayIntro?: () => void;
 }
 
 export function SettingsModal({
@@ -69,8 +79,11 @@ export function SettingsModal({
   onToggleBypassPermissions,
   showHostDirectories,
   onToggleShowHostDirectories,
+  uploadDirectory,
   onExportLayout,
   onImportLayout,
+  onPlayTutorial,
+  onReplayIntro,
 }: SettingsModalProps) {
   // The office radio's player is a per-browser setting the radio keeps itself.
   const radio = useOfficeRadio();
@@ -84,6 +97,13 @@ export function SettingsModal({
   // has no usage bridge.
   const [confirmUsageBars, setConfirmUsageBars] = useState(false);
   const { status: usageBridge, pending: usagePending, setEnabled: setUsageBars } = useUsageBridge();
+  // The Pixel Office MCP: shown only where the server offers it (its status
+  // arrived). Turning it on confirms with the server's disclosure, as the
+  // Intro step does; off and read-only apply at once to running agents. No
+  // optimistic tick: the rows follow the officeMcpStatus every office gets.
+  const [confirmOfficeMcp, setConfirmOfficeMcp] = useState(false);
+  const officeMcp = useOfficeMcp();
+  const officeMcpOn = officeMcp.status?.consent === 'granted';
 
   return (
     <>
@@ -111,6 +131,26 @@ export function SettingsModal({
         >
           Export Layout
         </MenuItem>
+        {onPlayTutorial && (
+          <MenuItem
+            onClick={() => {
+              onPlayTutorial();
+              onClose();
+            }}
+          >
+            Play the Tutorial
+          </MenuItem>
+        )}
+        {onReplayIntro && (
+          <MenuItem
+            onClick={() => {
+              onReplayIntro();
+              onClose();
+            }}
+          >
+            Replay the Intro
+          </MenuItem>
+        )}
         <MenuItem
           onClick={() => {
             if (isBrowserRuntime) {
@@ -223,7 +263,7 @@ export function SettingsModal({
           <>
             <Checkbox
               label="Usage Bars"
-              title={`Your ${usageBridge.providerName} plan's weekly and 5-hour usage, top-left`}
+              title={`Your ${usageBridge.providerName} plan's usage left, top-left`}
               checked={usageBridge.installed}
               onChange={() => {
                 if (usagePending) return;
@@ -233,6 +273,27 @@ export function SettingsModal({
             />
             {usageBridge.error && (
               <div className="px-10 pb-4 text-xs text-status-error">{usageBridge.error}</div>
+            )}
+          </>
+        )}
+        {officeMcp.status && (
+          <>
+            <Checkbox
+              label="Pixel Office MCP"
+              title="Let agents launched here see and act on the office (the Pixel Agents Office MCP)"
+              checked={officeMcpOn}
+              onChange={() => {
+                if (officeMcpOn) officeMcp.setEnabled(false);
+                else setConfirmOfficeMcp(true);
+              }}
+            />
+            {officeMcpOn && (
+              <Checkbox
+                label="Pixel Office MCP Read-only"
+                title="Agents may list and read the office, but not change it, launch, close or message"
+                checked={officeMcp.status.readOnly}
+                onChange={() => officeMcp.setReadOnly(!officeMcp.status?.readOnly)}
+              />
             )}
           </>
         )}
@@ -273,8 +334,39 @@ export function SettingsModal({
           checked={showHostDirectories}
           onChange={onToggleShowHostDirectories}
         />
+        {uploadDirectory && <UploadDirectoryField stored={uploadDirectory} />}
         <Checkbox label="Debug View" checked={isDebugMode} onChange={onToggleDebugMode} />
       </Modal>
+      {officeMcp.status && (
+        <Modal
+          isOpen={confirmOfficeMcp}
+          onClose={() => setConfirmOfficeMcp(false)}
+          title={officeMcp.status.headline}
+          zIndex={60}
+        >
+          <div className="flex flex-col gap-8 px-10 pb-8 text-sm leading-snug max-w-md">
+            {officeMcp.status.disclosure.split('\n\n').map((paragraph) => (
+              <p key={paragraph} className="m-0">
+                {paragraph}
+              </p>
+            ))}
+            <div className="flex justify-end gap-8 pt-4">
+              <Button variant="ghost" onClick={() => setConfirmOfficeMcp(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="accent"
+                onClick={() => {
+                  setConfirmOfficeMcp(false);
+                  officeMcp.setEnabled(true);
+                }}
+              >
+                Allow
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {usageBridge && (
         <Modal
           isOpen={confirmUsageBars}
@@ -306,5 +398,53 @@ export function SettingsModal({
         </Modal>
       )}
     </>
+  );
+}
+
+/**
+ * Where files sent to a terminal (dropped on it, or attached from the phone)
+ * are saved on the host. The browser has no directory picker for another
+ * machine's disk, so the path is typed: absolute or under `~`; emptied, it
+ * goes back to Pixel Agents' own folder on the host, where files are deleted
+ * after a week (a folder typed here is never cleaned). The server answers every save
+ * with the folder that now stands, which is what the field then shows — a
+ * refused path snaps back.
+ */
+function UploadDirectoryField({ stored }: { stored: { path: string } }) {
+  const [draft, setDraft] = useState(stored.path);
+  useEffect(() => setDraft(stored.path), [stored]);
+  const save = () => transport.send({ type: 'setUploadDirectory', path: draft.trim() });
+  return (
+    <div className="flex flex-col gap-2 py-4 px-10">
+      <label htmlFor="upload-directory" className="text-xs text-text-muted">
+        Save Sent Files To
+      </label>
+      <div className="flex items-center gap-4">
+        <input
+          id="upload-directory"
+          type="text"
+          value={draft}
+          placeholder="Pixel Agents' own folder"
+          title="Files dropped on a terminal are saved here. Empty = Pixel Agents' own folder, where files are deleted after 7 days. A folder you choose is never cleaned."
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') save();
+          }}
+          className="flex-1 min-w-0 text-xs py-2 px-4 bg-bg border-2 border-border rounded-none text-text"
+        />
+        <Button
+          variant="default"
+          size="sm"
+          onClick={save}
+          disabled={draft.trim() === stored.path}
+          className="shrink-0"
+        >
+          Save
+        </Button>
+      </div>
+    </div>
   );
 }

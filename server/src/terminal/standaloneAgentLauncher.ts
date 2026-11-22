@@ -7,7 +7,8 @@
  * server/) and takes twelve positional dependencies, so unifying the two would
  * mean rewriting the whole VS Code lifecycle -- out of scope here and a certain
  * conflict with the sibling branches. What IS shared is the thing that matters:
- * both call provider.buildLaunchCommand(), so the launched command is identical.
+ * both call provider.buildLaunchCommand(), so the launched command is identical,
+ * and both follow a /resume typed in the terminal with resumedTranscript().
  * Unifying the hosting is deferred (docs/design/standalone-terminal.md).
  */
 
@@ -15,37 +16,57 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import type { Directory } from '../../../core/src/messages.js';
+import { isPcShellId } from '../../../core/src/pcShells.js';
 import type { HookProvider } from '../../../core/src/provider.js';
 import type { PersistedAgent } from '../../../core/src/schemas.js';
 import { restoredAgentInit } from '../agentPersistence.js';
 import type { AgentRuntime } from '../agentRuntime.js';
 import { createAgentState } from '../agentState.js';
 import type { AgentStateStore } from '../agentStateStore.js';
-import { JSONL_POLL_INTERVAL_MS } from '../constants.js';
+import {
+  JSONL_POLL_INTERVAL_MS,
+  OFFICE_MCP_SERVER_NAME,
+  RESUME_FALLBACK_POLLS,
+} from '../constants.js';
 import { clearContextUsage } from '../contextUsage.js';
-import { directoryAt } from '../directories.js';
-import { startFileWatching } from '../fileWatcher.js';
-import { directoryNameFor, hostDirectory } from '../hostDirectory.js';
+import { transcriptSuffix } from '../directorySuggestions.js';
+import { reassignAgentToFile, startFileWatching } from '../fileWatcher.js';
+import { directoryNameFor } from '../hostDirectory.js';
+import type { AgentMcpAccess } from '../mcp/officeMcp.js';
 import { assignPaletteIfNeeded } from '../paletteAssigner.js';
+import { resumedTranscript } from '../resumedTranscript.js';
 import { prepareRoleLaunch } from '../roles/roleCatalog.js';
 import type { AgentState } from '../types.js';
+import { retireWorktreesLeftBy } from '../worktreeLeave.js';
+import type { CheckedLaunchAsks } from './launchAsks.js';
 import { inheritedEnv, terminalEnv } from './terminalEnv.js';
 import type { TerminalSession, TerminalSessions } from './terminalSessions.js';
+import { answerTrustPrompt, trustsDirectories } from './trustPrompt.js';
 
 export interface LaunchStandaloneAgentDeps {
   store: AgentStateStore;
   runtime: AgentRuntime;
   ptyManager: TerminalSessions;
   provider: HookProvider;
+  /** The Pixel Office MCP's per-agent access (absent = agents get no MCP). */
+  mcp?: AgentMcpAccess;
 }
 
 export interface LaunchStandaloneAgentOptions {
-  /** Path of the Directory to launch into. Defaults to the server's cwd, which
-   *  is also the Directory standalone contributes as its host entry. */
-  directoryPath?: string;
-  /** Read from the host's persisted permission posture by the caller; never a
-   *  per-launch choice made in the office. */
-  bypassPermissions?: boolean;
+  /** The Directory launched into, as the launch request named it (resolved by
+   *  the caller): the agent's name, its default characters and, through the
+   *  name, its Area seating. Absent = a launch into no Directory, named after
+   *  its folder. Never derived here from the folder the process runs in. */
+  directory?: Directory;
+  /** The folder the process runs in. Defaults to the Directory's path, else
+   *  the server's cwd (also the Directory standalone contributes as its host
+   *  entry). It need not be the Directory's path. */
+  cwd?: string;
+  /** What the launch asks for, checked (launchAsks.ts): its permission
+   *  posture (the host's, or the bypass mode that posture allows), Nickname,
+   *  model, first message and seat. Absent = none asked, permissions not skipped. */
+  asks?: CheckedLaunchAsks;
   /** The character picked from the roster (a palette index). Out of range or
    *  absent, the Directory's default characters apply, else a random pick. */
   palette?: number;
@@ -56,6 +77,17 @@ export interface LaunchStandaloneAgentOptions {
   /** The Role to launch as (a catalog id, roles/roleCatalog.ts). Absent or
    *  naming no Role of this host, the agent launches without one. */
   roleId?: unknown;
+  /** The Worktree `cwd` is, when the launch made one: its agent wears the
+   *  marker and branch (still named after `directory`). */
+  worktree?: AgentState['worktree'];
+  /** The new session's id, when the caller already chose it (a Worktree
+   *  records the session it was made for). Absent = a fresh UUID. */
+  sessionId?: string;
+  /** Pixel Office MCP tools it may call without a prompt (the tutorial
+   *  agent's read-only ones); only with the MCP given. */
+  preapprovedMcpTools?: readonly string[];
+  /** A plugin folder this session alone loads (the tutorial's onboarding skill). */
+  pluginDir?: string;
   cols?: number;
   rows?: number;
 }
@@ -75,18 +107,11 @@ export function launchStandaloneAgent(
     return null;
   }
 
-  const cwd = options.directoryPath ?? process.cwd();
-  const sessionId = options.resume?.sessionId ?? crypto.randomUUID();
+  const directory = options.directory;
+  const cwd = options.cwd ?? directory?.path ?? process.cwd();
+  const sessionId = options.resume?.sessionId ?? options.sessionId ?? crypto.randomUUID();
 
-  // The Role's instructions are written before the command that names them.
-  const roleLaunch = prepareRoleLaunch(options.roleId);
-  const launch = provider.buildLaunchCommand?.(sessionId, cwd, {
-    bypassPermissions: options.bypassPermissions,
-    resume: options.resume !== undefined,
-    model: roleLaunch?.model,
-    appendSystemPromptFile: roleLaunch?.appendSystemPromptFile,
-  });
-  if (!launch) {
+  if (!provider.buildLaunchCommand) {
     console.error('[Pixel Agents] Terminal: provider.buildLaunchCommand is not implemented');
     return null;
   }
@@ -98,13 +123,35 @@ export function launchStandaloneAgent(
   }
   // A resumed session's transcript is wherever the CLI filed it (under the
   // Directory's resolved path, when it was reached through a symlink).
-  const jsonlFile = options.resume?.transcript ?? path.join(dirs[0], `${sessionId}.jsonl`);
+  const jsonlFile =
+    options.resume?.transcript ??
+    path.join(dirs[0], `${sessionId}${transcriptSuffix(provider.sessionFilePattern)}`);
   const projectDir = path.dirname(jsonlFile);
 
   const id = store.nextAgentId.current++;
 
-  // The Directory launched into, if the cwd is one: its name and its default characters.
-  const directory = directoryAt(cwd, [hostDirectory()]);
+  // The Pixel Office MCP, when the user consented: a config file holding a
+  // token minted for this agent alone (the path on the command line, never
+  // the token). Launches and resumes alike.
+  const mcpConfig = deps.mcp?.configFor(id);
+  // The Role's instructions are written before the command that names them.
+  const roleLaunch = prepareRoleLaunch(options.roleId);
+  const launch = provider.buildLaunchCommand(sessionId, cwd, {
+    bypassPermissions: options.asks?.bypassPermissions,
+    resume: options.resume !== undefined,
+    mcpConfig,
+    permissionMode: options.asks?.permissionMode,
+    // A model the launch asks for by name wins over its Role's usual one.
+    model: options.asks?.model ?? roleLaunch?.model,
+    appendSystemPromptFile: roleLaunch?.appendSystemPromptFile,
+    prompt: options.asks?.firstMessage,
+    preapprovedMcpTools:
+      mcpConfig && options.preapprovedMcpTools
+        ? { server: OFFICE_MCP_SERVER_NAME, tools: options.preapprovedMcpTools }
+        : undefined,
+    pluginDirs: options.pluginDir ? [options.pluginDir] : undefined,
+  });
+
   const agent = createAgentState({
     id,
     sessionId,
@@ -118,11 +165,15 @@ export function launchStandaloneAgent(
     // Directory it was launched into, as the user named it — so an entry called
     // "Side Project" labels its agents that, not "side-project", and the Areas
     // it was assigned in the modal actually match. Falls back to the basename
-    // for a cwd that is no Directory at all.
+    // for a launch into no Directory at all.
     directoryName: directory?.name ?? directoryNameFor(cwd),
     providerId: provider.id,
-    seatId: options.resume?.seatId,
+    seatId: options.asks?.seatId ?? options.resume?.seatId,
     role: roleLaunch?.role,
+    worktree: options.worktree,
+    nickname: options.asks?.nickname,
+    // Where its session runs: a hook naming this folder is no move.
+    cwd,
   });
   if (options.resume) {
     // Its history is the past: replaying it would resurrect finished tools.
@@ -152,13 +203,23 @@ export function launchStandaloneAgent(
       rows: options.rows,
     });
   } catch (err) {
-    // Roll the id back so a failed spawn doesn't burn an agent id.
+    // Roll the id back so a failed spawn doesn't burn an agent id, and take
+    // back the token no agent will ever use.
+    deps.mcp?.revoke(id);
     store.nextAgentId.current--;
     console.error(`[Pixel Agents] Terminal: spawn failed: ${String(err)}`);
     return null;
   }
 
   admitTerminalAgent(deps, agent, session);
+  // --trust-directories: the CLI's trust question, should this folder raise it, is answered for the user.
+  if (trustsDirectories()) {
+    void answerTrustPrompt(session, provider, () => ptyManager.get(id) === session).then(
+      (answered) => {
+        if (answered) console.log(`[Pixel Agents] Terminal: trusted ${cwd} for agent ${id}`);
+      },
+    );
+  }
   // A fresh session starts with an empty context: a full gauge from the spawn on.
   // A resumed one keeps its gauge, read from its transcript.
   if (!options.resume) clearContextUsage(id, store);
@@ -189,6 +250,8 @@ export function reattachTerminalAgents(deps: LaunchStandaloneAgentDeps): number[
 
   for (const session of ptyManager.survivors()) {
     const id = session.agentId;
+    // A PC shell's terminal, not an agent's: its own id space, never an agent id.
+    if (isPcShellId(id)) continue;
     // Never hand a new launch an id a live terminal still holds.
     if (id >= store.nextAgentId.current) store.nextAgentId.current = id + 1;
     if (store.has(id)) continue;
@@ -281,6 +344,10 @@ function admitTerminalAgent(
       runtime.unregisterAgent(agent.sessionId);
       runtime.closeAgent(id);
     }
+    // Its process is gone (however it left: the card's x, /exit, the
+    // terminal ending): the leave rules apply once no other agent runs in
+    // its Worktree. In the background — closing never waits on git.
+    void retireWorktreesLeftBy(store, agent);
   });
 
   startJsonlPoll(deps, id, agent);
@@ -290,23 +357,50 @@ function admitTerminalAgent(
  * Wait for the session's JSONL to appear, then start watching it.
  *
  * Hooks (the default) already route by sessionId, so this is what backfills tool
- * content and keeps hooks-off standalone working at all. Unlike the VS Code
- * path this does NOT implement /resume reassignment: a launch either names a
- * fresh --session-id or --resume's an existing one, so the transcript is
- * known up front either way.
+ * content and keeps hooks-off working at all. A launch names its transcript up
+ * front (a fresh --session-id, or the --resume'd one), but the user can still
+ * `/resume` another conversation in the terminal before the first one writes
+ * anything: past `RESUME_FALLBACK_POLLS` with the expected file still missing,
+ * the agent is moved to the newest transcript in its project dir that appeared
+ * after the launch and no other agent reads.
  */
 function startJsonlPoll(deps: LaunchStandaloneAgentDeps, id: number, agent: AgentState): void {
   const { store, runtime } = deps;
+  const launchedAt = Date.now();
   let pollCount = 0;
 
   const timer = setInterval(() => {
     pollCount++;
     try {
       if (!fs.existsSync(agent.jsonlFile)) {
-        if (pollCount === 10) {
+        if (pollCount === RESUME_FALLBACK_POLLS) {
           console.warn(
             `[Pixel Agents] Terminal: Agent ${id} - JSONL not found after 10s. Expected: ${agent.jsonlFile}`,
           );
+        } else if (pollCount > RESUME_FALLBACK_POLLS && store.has(id)) {
+          const resumed = resumedTranscript(
+            store,
+            agent.projectDir,
+            launchedAt,
+            deps.provider.sessionFilePattern,
+          );
+          if (resumed) {
+            clearInterval(timer);
+            runtime.jsonlPollTimers.delete(id);
+            console.log(
+              `[Pixel Agents] Terminal: Agent ${id} - /resume detected, reassigning to ${path.basename(resumed)}`,
+            );
+            reassignAgentToFile(
+              id,
+              resumed,
+              store,
+              runtime.fileWatchers,
+              runtime.pollingTimers,
+              runtime.waitingTimers,
+              runtime.permissionTimers,
+              () => store.persist(),
+            );
+          }
         }
         return;
       }

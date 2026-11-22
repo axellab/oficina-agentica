@@ -11,7 +11,7 @@
 // Depending on layoutLoaded always arriving last stranded restored agents on any
 // surface that sends layout first (e.g. the VS Code no-assets path), issue #334.
 
-import type { AgentRole } from '../../../../core/src/messages.js';
+import type { AgentRole, AgentWorktree } from '../../../../core/src/messages.js';
 
 /** Per-agent seat metadata carried by the existingAgents message. */
 export interface ExistingAgentMeta {
@@ -29,6 +29,10 @@ export interface PendingAgent {
   directoryName?: string;
   isHeadless?: boolean;
   role?: AgentRole;
+  /** The Worktree it runs in (its card's marker, its label's branch). */
+  worktree?: AgentWorktree;
+  /** The Nickname it was launched with. */
+  nickname?: string;
 }
 
 /** Minimal structural view of OfficeState this reconciler needs. */
@@ -44,11 +48,15 @@ export interface ExistingAgentsOffice {
   ) => void;
   setHeadless: (id: number, headless: boolean) => void;
   /** Apply the Role from the latest server snapshot, including absence. */
-  setAgentRole: (id: number, role: AgentRole | undefined) => void;
+  setAgentRole?: (id: number, role: AgentRole | undefined) => void;
   /** Start an agent at rest: not working, resting in its chair if it has one. */
   restAgent: (id: number) => void;
   /** Give an agent the office already shows the server's look and seat. */
   syncAgent: (id: number, palette?: number, repeat?: number, seatId?: string) => void;
+  /** Give an agent (and its sub-agents) the Worktree it runs in, or none. */
+  setAgentWorktree?: (id: number, worktree: AgentWorktree | undefined) => void;
+  /** Give an agent its Nickname, or none. */
+  setAgentNickname?: (id: number, nickname: string | undefined) => void;
 }
 
 /**
@@ -59,7 +67,9 @@ export interface ExistingAgentsOffice {
 export function restoreAgent(os: ExistingAgentsOffice, p: PendingAgent): void {
   os.addAgent(p.id, p.palette, p.repeat, p.seatId, true, p.directoryName);
   if (p.isHeadless) os.setHeadless(p.id, true);
-  os.setAgentRole(p.id, p.role);
+  os.setAgentRole?.(p.id, p.role);
+  if (p.worktree) os.setAgentWorktree?.(p.id, p.worktree);
+  if (p.nickname) os.setAgentNickname?.(p.id, p.nickname);
   os.restAgent(p.id);
 }
 
@@ -79,6 +89,8 @@ export function reconcileExistingAgents(
   layoutReady: boolean,
   pending: PendingAgent[],
   headlessAgents: Record<number, boolean> = {},
+  worktrees: Record<number, AgentWorktree> = {},
+  nicknames: Record<number, string> = {},
   roles: Record<number, AgentRole | undefined> = {},
 ): boolean {
   let addedDirectly = false;
@@ -91,6 +103,8 @@ export function reconcileExistingAgents(
       seatId: m?.seatId,
       directoryName: directoryNames[id],
       isHeadless: headlessAgents[id] === true,
+      ...(worktrees[id] ? { worktree: worktrees[id] } : {}),
+      ...(nicknames[id] ? { nickname: nicknames[id] } : {}),
     };
     const role = roles[id];
     if (role) p.role = role;
@@ -103,7 +117,9 @@ export function reconcileExistingAgents(
         // office's own look, seat and Role reshuffled other viewers and could
         // leave stale Role metadata after the server cleared it.
         os.syncAgent(p.id, p.palette, p.repeat, p.seatId);
-        os.setAgentRole(p.id, p.role);
+        os.setAgentRole?.(p.id, p.role);
+        os.setAgentWorktree?.(p.id, p.worktree);
+        os.setAgentNickname?.(p.id, p.nickname);
       }
     } else {
       pending.push(p);

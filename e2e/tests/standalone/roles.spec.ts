@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 
 import { expect, test } from '../../fixtures/standalone';
+import { initGitRepo } from '../../helpers/git';
 import { preToolUseBash } from '../../helpers/hooks';
 import {
   arrangeNextClaudeInvocation,
@@ -11,7 +12,12 @@ import {
   waitForClaudeHookSetup,
 } from '../../helpers/mock-claude';
 import { expectOverlayCount, expectOverlayVisibleWithTexts } from '../../helpers/office';
-import { openLaunchDrawer, setSettings } from '../../helpers/webview';
+import {
+  addDirectory,
+  confirmNewWorktree,
+  openLaunchDrawer,
+  setSettings,
+} from '../../helpers/webview';
 
 /**
  * Roles: the launch drawer offers the parts of a delivery team, and an agent
@@ -195,5 +201,166 @@ test.describe('Standalone / roles', () => {
     expect(instructions).toContain('Every change ships with its docs.');
     expect(instructions).toContain('- Rust Developer: ');
     expect(instructions).toContain('- Technical Writer (you): Keeps the docs true.');
+  });
+
+  test('a launch into a new worktree is as the picked Role too @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    await setSettings(page, { alwaysShowLabels: true });
+    await waitForClaudeHookSetup(standalone.tmpHome);
+
+    const repo = path.join(standalone.workspaceDir, 'repo');
+    initGitRepo(repo);
+    await addDirectory(page, { name: 'Repo', path: repo });
+
+    await arrangeNextClaudeInvocation(
+      standalone.tmpHome,
+      claudeScenario('role worktree launch')
+        .at(1_000)
+        .emitHook(preToolUseBash('{{sessionId}}', 'npm test') as Record<string, unknown>)
+        .holdOpenFor(60_000)
+        .build(),
+    );
+
+    // The Role first, then the row's worktree button: the pick waits through
+    // the modal that asks for the Worktree's name.
+    const drawer = await openLaunchDrawer(page);
+    await pickRole(drawer, 'Developer');
+    await drawer.getByRole('button', { name: 'Repo', exact: true }).hover();
+    await page.getByRole('button', { name: 'New worktree in Repo' }).click();
+    const worktree = await confirmNewWorktree(page);
+
+    // One agent, wearing both: the Role above its activity, the Worktree's
+    // mark beside its Directory.
+    await expectOverlayCount(page, 1);
+    await expectOverlayVisibleWithTexts(page, ['Developer', 'Running: npm test', 'Repo']);
+    await expect(page.getByTestId('agent-role')).toHaveAttribute('data-role-id', 'developer');
+    await expect(page.locator('[data-testid="agent-overlay-worktree"]')).toBeVisible();
+
+    // Its card too: the Role's name and the branch in its title, and the mark.
+    await expect(page.locator(`[title$=" · Developer · worktree ${worktree}"]`)).toBeVisible();
+    await expect(page.locator('[data-testid="card-worktree"]')).toBeVisible();
+
+    // The coding agent runs in the Worktree, started with the Role's instructions.
+    const promptFile = path.join(
+      standalone.tmpHome,
+      '.pixel-agents',
+      'role-prompts',
+      'developer.md',
+    );
+    await expect
+      .poll(() => invocations(standalone.mockLogFile))
+      .toContain(`--append-system-prompt-file ${promptFile}`);
+    expect(fs.existsSync(path.join(repo, '.claude', 'worktrees', worktree))).toBe(true);
+  });
+});
+
+/**
+ * The Roles reaching each other through the Pixel Office MCP: the agent that
+ * coordinates launches a colleague as its Role and asks it for its status.
+ *
+ * The agent's side of the wire is the mock claude's (e2e/README.md "Mocking
+ * model & rules"): its scenario calls the tools the way Claude Code's MCP
+ * client would, with the endpoint and token of the `--mcp-config` file the
+ * office launched it with. The test only clicks and reads the page, plus the
+ * command line the colleague was started with.
+ */
+test.describe('Standalone / roles over the Pixel Office MCP', () => {
+  test.skip(process.platform === 'win32', 'PTY spawn of the .cmd mock shim is untested on Windows');
+  test.use({
+    standaloneOptions: {
+      mockClaude: true,
+      // The user allowed the Pixel Office MCP in the Intro: every launch gets it.
+      seedConfig: { officeMcpConsent: 'granted' },
+      // The mock reads its terminal like Claude Code's TUI and shows what is typed.
+      hostEnv: { PIXEL_AGENTS_MOCK_STDIN: 'record' },
+    },
+  });
+
+  test('the Agile Project Manager launches a Developer as its Role and asks for its status, saying who asks @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    test.setTimeout(120_000);
+    const firstMessage = 'Pick up story 1';
+    const text = 'Daily: what is done, what is next, what is blocked?';
+    await setSettings(page, { alwaysShowLabels: true });
+    await waitForClaudeHookSetup(standalone.tmpHome);
+
+    // The manager: once running, it launches the Role the plan needs with a
+    // first message, reads the newcomer's screen and asks it for its status.
+    await arrangeNextClaudeInvocation(
+      standalone.tmpHome,
+      claudeScenario('role manager')
+        .at(1_000)
+        .callOfficeMcp(
+          'launch_agent',
+          { directory: standalone.workspaceDir, role: 'Developer', first_message: firstMessage },
+          { saveAs: 'launched' },
+        )
+        // The Developer's screen settles (banner, prompt) before it is read.
+        .at(1_000)
+        .callOfficeMcp(
+          'read_agent_terminal',
+          { agent_id: '{{mcp.launched.agent_id}}' },
+          { saveAs: 'screen', waitMs: 2_000 },
+        )
+        .at(1_000)
+        .callOfficeMcp(
+          'send_message',
+          {
+            to: ['{{mcp.launched.agent_id}}'],
+            text,
+            gist: 'Daily: status?',
+            screen_tokens: { '{{mcp.launched.agent_id}}': '{{mcp.screen.screen_token}}' },
+          },
+          { saveAs: 'sent', waitMs: 3_000 },
+        )
+        .holdOpenFor(90_000)
+        .build(),
+    );
+    // The Developer it launches: it only shows its prompt and what is typed.
+    await arrangeNextClaudeInvocation(
+      standalone.tmpHome,
+      claudeScenario('role developer').holdOpenFor(90_000).build(),
+    );
+
+    const drawer = await openLaunchDrawer(page);
+    await pickRole(drawer, 'Agile Project Manager');
+    const directoryName = path.basename(standalone.workspaceDir);
+    await drawer.getByRole('button', { name: directoryName, exact: true }).click();
+
+    // Both are in the office, each marked with its Role: on its card and over
+    // its character.
+    await expect(page.getByTitle('Agent 1 · Agile Project Manager', { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+    const developerCard = page.getByTitle('Agent 2 · Developer', { exact: true });
+    await expect(developerCard).toBeVisible({ timeout: 30_000 });
+    await expectOverlayCount(page, 2);
+    await expectOverlayVisibleWithTexts(page, ['Agile Project Manager', directoryName]);
+    await expectOverlayVisibleWithTexts(page, ['Developer', directoryName]);
+
+    // The Developer was started as its Role (the instructions file on its
+    // command line) with the manager's first message.
+    const promptFile = path.join(
+      standalone.tmpHome,
+      '.pixel-agents',
+      'role-prompts',
+      'developer.md',
+    );
+    await expect
+      .poll(() => invocations(standalone.mockLogFile))
+      .toContain(`--append-system-prompt-file ${promptFile}`);
+    await developerCard.click();
+    const developerTerminal = page.locator('.xterm:visible');
+    await expect(developerTerminal).toContainText(`> ${firstMessage}`, { timeout: 15_000 });
+
+    // The manager's question reached the Developer's terminal, tagged with
+    // which Role is asking.
+    await expect(developerTerminal).toContainText(`(Agile Project Manager), agent 1] ${text}`, {
+      timeout: 30_000,
+    });
   });
 });

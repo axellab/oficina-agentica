@@ -6,7 +6,7 @@ import {
   parseCharacterOrder,
   parseDirectoryCharacters,
 } from '../../core/src/directoryCharacters.js';
-import type { DirectoryCharacterOrder } from '../../core/src/messages.js';
+import type { DirectoryCharacterOrder, WorktreeBase } from '../../core/src/messages.js';
 import { CONFIG_FILE_NAME, PIXEL_AGENTS_DIR } from './constants.js';
 
 export interface AdapterSettings {
@@ -15,7 +15,6 @@ export interface AdapterSettings {
   alwaysShowLabels: boolean;
   ghostHeadlessAgents: boolean;
   watchAllSessions: boolean;
-  hooksInfoShown: boolean;
   showAreas: boolean;
   areaMappings: Record<string, string[]>;
   /** Permission posture for every launch on this host (the CLI's skip-permissions flag). */
@@ -23,6 +22,9 @@ export interface AdapterSettings {
   /** Whether the host's own Directories (VS Code's workspace folders, standalone's
    *  start directory) are listed in the launch drawer. Off by default. */
   showHostDirectories: boolean;
+  /** Where files sent to a terminal are saved (absolute, or `~/…`). Empty =
+   *  the default, our own uploads folder (terminal/fileUploads.ts). */
+  uploadDirectory: string;
 }
 
 /** All keys in AdapterSettings. Used by adapters to map `pixel-agents.foo` → `foo`.
@@ -35,11 +37,11 @@ export const ADAPTER_SETTING_KEYS = [
   'alwaysShowLabels',
   'ghostHeadlessAgents',
   'watchAllSessions',
-  'hooksInfoShown',
   'showAreas',
   'areaMappings',
   'bypassPermissions',
   'showHostDirectories',
+  'uploadDirectory',
 ] as const;
 
 export type AdapterSettingKey = (typeof ADAPTER_SETTING_KEYS)[number];
@@ -63,6 +65,10 @@ export interface UserDirectory {
   characters?: number[];
   /** Absent = 'priority'. */
   characterOrder?: DirectoryCharacterOrder;
+  /** What its new Worktrees start from. Absent = 'head'. */
+  worktreeBase?: WorktreeBase;
+  /** Put before a new Worktree's name to make its branch. Absent = none. */
+  worktreeBranchPrefix?: string;
 }
 
 export interface PixelAgentsConfig {
@@ -84,7 +90,17 @@ export interface PixelAgentsConfig {
    *  Machine-wide like the profiles themselves, so every office's roster
    *  agrees. See recentCharacters.ts. */
   recentCharacters: number[];
+  /** The Pixel Office MCP consent: may agents this office launches use it?
+   *  Absent = unanswered (launches get nothing, the Intro asks). Machine-wide,
+   *  like hooks consent: it is per human, not per surface. */
+  officeMcpConsent?: OfficeMcpConsentAnswer;
+  /** Pixel Office MCP read-only: agents may list and read, nothing else.
+   *  Absent = false. */
+  officeMcpReadOnly?: boolean;
 }
+
+/** A recorded Pixel Office MCP answer (absent = unanswered). */
+export type OfficeMcpConsentAnswer = 'granted' | 'declined';
 
 const DEFAULT_ADAPTER_SETTINGS: AdapterSettings = {
   soundEnabled: true,
@@ -92,11 +108,11 @@ const DEFAULT_ADAPTER_SETTINGS: AdapterSettings = {
   alwaysShowLabels: false,
   ghostHeadlessAgents: false,
   watchAllSessions: false,
-  hooksInfoShown: false,
   showAreas: false,
   areaMappings: {},
   bypassPermissions: false,
   showHostDirectories: false,
+  uploadDirectory: '',
 };
 
 function getConfigFilePath(): string {
@@ -166,7 +182,9 @@ export function parseUserDirectories(raw: unknown): UserDirectory[] {
     if (typeof name !== 'string' || typeof dirPath !== 'string' || dirPath.length === 0) {
       continue;
     }
-    out.push(withDirectoryCharacters({ name, path: dirPath }, entry));
+    out.push(
+      withDirectoryWorktrees(withDirectoryCharacters({ name, path: dirPath }, entry), entry),
+    );
   }
   return out;
 }
@@ -180,14 +198,38 @@ export function withDirectoryCharacters(
   entry: UserDirectory,
   raw: { characters?: unknown; characterOrder?: unknown },
 ): UserDirectory {
+  // Every other field of the entry (its Worktree settings) is kept as it is.
+  const rest: UserDirectory = { ...entry };
+  delete rest.characters;
+  delete rest.characterOrder;
   const characters = parseDirectoryCharacters(raw.characters);
-  if (characters.length === 0) return { name: entry.name, path: entry.path };
+  if (characters.length === 0) return rest;
   const order = parseCharacterOrder(raw.characterOrder);
   return {
-    name: entry.name,
-    path: entry.path,
+    ...rest,
     characters,
     ...(order === 'random' ? { characterOrder: order } : {}),
+  };
+}
+
+/**
+ * `entry` with the Worktree settings in `raw` (a loose object), stored only
+ * when they differ from the defaults: base `head`, no branch prefix. The
+ * prefix is trimmed; whether git accepts it is the saver's check.
+ */
+export function withDirectoryWorktrees(
+  entry: UserDirectory,
+  raw: { worktreeBase?: unknown; worktreeBranchPrefix?: unknown },
+): UserDirectory {
+  const rest: UserDirectory = { ...entry };
+  delete rest.worktreeBase;
+  delete rest.worktreeBranchPrefix;
+  const prefix =
+    typeof raw.worktreeBranchPrefix === 'string' ? raw.worktreeBranchPrefix.trim() : '';
+  return {
+    ...rest,
+    ...(raw.worktreeBase === 'fresh' ? { worktreeBase: 'fresh' as const } : {}),
+    ...(prefix.length > 0 ? { worktreeBranchPrefix: prefix } : {}),
   };
 }
 
@@ -215,10 +257,6 @@ function parseAdapterSettings(raw: unknown): AdapterSettings {
       typeof obj.watchAllSessions === 'boolean'
         ? obj.watchAllSessions
         : DEFAULT_ADAPTER_SETTINGS.watchAllSessions,
-    hooksInfoShown:
-      typeof obj.hooksInfoShown === 'boolean'
-        ? obj.hooksInfoShown
-        : DEFAULT_ADAPTER_SETTINGS.hooksInfoShown,
     showAreas:
       typeof obj.showAreas === 'boolean' ? obj.showAreas : DEFAULT_ADAPTER_SETTINGS.showAreas,
     areaMappings: parseAreaMappings(obj.areaMappings),
@@ -230,6 +268,10 @@ function parseAdapterSettings(raw: unknown): AdapterSettings {
       typeof obj.showHostDirectories === 'boolean'
         ? obj.showHostDirectories
         : DEFAULT_ADAPTER_SETTINGS.showHostDirectories,
+    uploadDirectory:
+      typeof obj.uploadDirectory === 'string'
+        ? obj.uploadDirectory
+        : DEFAULT_ADAPTER_SETTINGS.uploadDirectory,
   };
 }
 
@@ -265,6 +307,10 @@ export function readConfig(): PixelAgentsConfig {
       recentCharacters: Array.isArray(parsed.recentCharacters)
         ? parsed.recentCharacters.filter((v): v is number => Number.isInteger(v) && v >= 0)
         : [],
+      ...(parsed.officeMcpConsent === 'granted' || parsed.officeMcpConsent === 'declined'
+        ? { officeMcpConsent: parsed.officeMcpConsent }
+        : {}),
+      ...(parsed.officeMcpReadOnly === true ? { officeMcpReadOnly: true } : {}),
     };
   } catch (err) {
     console.error('[Pixel Agents] Failed to read config file:', err);
@@ -357,17 +403,47 @@ export function clearHooksEnabled(providerId: string): void {
   }
 }
 
+// ── Pixel Office MCP consent + read-only ────────────────────
+// docs/adr/0001's rules, simpler: nothing is installed, so an answer is only
+// its record. Each answer is ONE readConfig→writeConfig cycle.
+
+/** The recorded Pixel Office MCP answer, or 'unanswered'. */
+export function getOfficeMcpConsent(): OfficeMcpConsentAnswer | 'unanswered' {
+  return readConfig().officeMcpConsent ?? 'unanswered';
+}
+
+/** Record an answer (the Intro's, or the Settings switch's). Returns whether
+ *  the record now says so. */
+export function setOfficeMcpConsent(answer: OfficeMcpConsentAnswer | 'unanswered'): boolean {
+  const cfg = readConfig();
+  if ((cfg.officeMcpConsent ?? 'unanswered') === answer) return true;
+  if (answer === 'unanswered') delete cfg.officeMcpConsent;
+  else cfg.officeMcpConsent = answer;
+  return writeConfig(cfg);
+}
+
+/** Whether the Pixel Office MCP is read-only (absent = false). */
+export function getOfficeMcpReadOnly(): boolean {
+  return readConfig().officeMcpReadOnly === true;
+}
+
+/** Turn read-only on or off; off deletes the key (the default). */
+export function setOfficeMcpReadOnly(readOnly: boolean): boolean {
+  const cfg = readConfig();
+  if ((cfg.officeMcpReadOnly === true) === readOnly) return true;
+  if (readOnly) cfg.officeMcpReadOnly = true;
+  else delete cfg.officeMcpReadOnly;
+  return writeConfig(cfg);
+}
+
 /** Called on extension uninstall: return every hooks-related choice to factory state — all providers' consent and
- *  preferences cleared, hooksInfoShown back to default in both namespaces. Those choices belonged to an installation
+ *  preferences cleared. Those choices belonged to an installation
  *  that no longer exists, so a future install starts from the first-run experience rather than inheriting a stale
  *  hooks-off that would skip the ask forever. */
 export function resetHooksConfig(): void {
   const cfg = readConfig();
   cfg.hooksConsent = {};
   cfg.hooksEnabled = {};
-  for (const ns of ['vscode', 'standalone'] as const) {
-    cfg[ns].hooksInfoShown = DEFAULT_ADAPTER_SETTINGS.hooksInfoShown;
-  }
   writeConfig(cfg);
 }
 

@@ -25,6 +25,7 @@ import { migrateVsCodeState } from '../../adapters/vscode/migrateVsCodeState.js'
 import { getHooksEnabled } from '../src/configPersistence.js';
 import { FileStateAdapter } from '../src/fileStateAdapter.js';
 import { readLayoutFromFile, writeLayoutToFile } from '../src/layoutPersistence.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 /** Lightweight in-memory Memento for workspaceState/globalState simulation. */
 function createMemento(seed: Record<string, unknown> = {}): {
@@ -69,7 +70,7 @@ describe('migrateVsCodeState', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tempHome, { recursive: true, force: true });
+    removeTempDir(tempHome);
   });
 
   it('migrates every legacy globalState setting — and DISCARDS the hooks preference', () => {
@@ -94,8 +95,7 @@ describe('migrateVsCodeState', () => {
     // without ever being told what they add — they get the Intro instead. The
     // provider map keeps its default...
     expect(getHooksEnabled('claude')).toBe(true);
-    expect(adapter.getSetting('pixel-agents.hooksInfoShown', false)).toBe(true);
-    // ...while the stale key is still cleared — left behind it would count as
+    // ...while the stale keys (it and the retired hooksInfoShown) are still cleared — left behind it would count as
     // unmigrated forever and warn on every launch.
     expect(globalStore).toEqual({});
     expect(showWarningMessage).not.toHaveBeenCalled();

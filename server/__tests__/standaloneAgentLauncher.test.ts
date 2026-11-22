@@ -6,12 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HookProvider } from '../../core/src/provider.js';
 import { AgentRuntime } from '../src/agentRuntime.js';
 import { AgentStateStore } from '../src/agentStateStore.js';
-import { JSONL_POLL_INTERVAL_MS } from '../src/constants.js';
+import { JSONL_POLL_INTERVAL_MS, RESUME_FALLBACK_POLLS } from '../src/constants.js';
 import { claudeProvider } from '../src/providers/hook/claude/claude.js';
+import { resumedTranscript } from '../src/resumedTranscript.js';
 import type { IPty, PtyModule, PtySpawnOptions } from '../src/terminal/ptyModule.js';
 import { PtySessionManager } from '../src/terminal/ptySessionManager.js';
 import { launchStandaloneAgent } from '../src/terminal/standaloneAgentLauncher.js';
 import { sessionMarkersUnset } from '../src/terminal/terminalEnv.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 /**
  * launchStandaloneAgent is the standalone counterpart of the VS Code adapter's
@@ -100,7 +102,7 @@ describe('launchStandaloneAgent', () => {
     vi.useRealTimers();
     runtime.dispose();
     store.dispose();
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    removeTempDir(tempDir);
   });
 
   // ── Successful launch ────────────────────────────────────────
@@ -112,7 +114,7 @@ describe('launchStandaloneAgent', () => {
     fs.writeFileSync(transcript, '{"type":"user"}\n{"type":"assistant"}\n');
 
     const id = launch(harness, {
-      directoryPath: tempDir,
+      cwd: tempDir,
       palette: 3,
       resume: { sessionId, transcript, seatId: 'chair-7' },
     });
@@ -124,6 +126,8 @@ describe('launchStandaloneAgent', () => {
     expect(agent?.seatId).toBe('chair-7');
     expect(agent?.palette).toBe(3);
     expect(harness.spawnArgs[0].args).toEqual(['--resume', sessionId]);
+    // It knows where its session runs: its first hook is no move.
+    expect(agent?.cwd).toBe(tempDir);
   });
 
   // ── Roles ────────────────────────────────────────────────────
@@ -191,7 +195,7 @@ describe('launchStandaloneAgent', () => {
 
   it('a fresh launch reports an empty context (a full gauge) at once; a resume does not', () => {
     const harness = workingPtyManager();
-    const id = launch(harness, { directoryPath: tempDir });
+    const id = launch(harness, { cwd: tempDir });
     expect(broadcasts).toContainEqual(
       expect.objectContaining({ type: 'agentContextUsage', id, contextTokens: 0 }),
     );
@@ -201,7 +205,7 @@ describe('launchStandaloneAgent', () => {
     const sessionId = '0b8a701c-400d-41ea-801f-40de5e070a8d';
     const transcript = path.join(projectDir, `${sessionId}.jsonl`);
     fs.writeFileSync(transcript, '{"type":"user"}\n');
-    launch(harness, { directoryPath: tempDir, resume: { sessionId, transcript } });
+    launch(harness, { cwd: tempDir, resume: { sessionId, transcript } });
     expect(broadcasts.some((m) => m.type === 'agentContextUsage')).toBe(false);
   });
 
@@ -210,7 +214,7 @@ describe('launchStandaloneAgent', () => {
     const cwd = path.join(tempDir, 'workspace');
     fs.mkdirSync(cwd);
 
-    const id = launch(harness, { directoryPath: cwd });
+    const id = launch(harness, { cwd });
 
     expect(id).toBe(1);
     const agent = store.get(1);
@@ -285,6 +289,37 @@ describe('launchStandaloneAgent', () => {
     ).toEqual({ CLAUDECODE: null, CLAUDE_CODE_SESSION_ID: null });
   });
 
+  it('takes its Directory from the launch request, not from the folder it runs in', () => {
+    const harness = workingPtyManager();
+    const directoryPath = path.join(tempDir, 'side-project');
+    const elsewhere = path.join(tempDir, 'somewhere-else');
+    fs.mkdirSync(directoryPath);
+    fs.mkdirSync(elsewhere);
+
+    const id = launch(harness, {
+      directory: { name: 'Side Project', path: directoryPath, source: 'user', characters: [4] },
+      cwd: elsewhere,
+    });
+
+    // Named after the Directory (the Area-mapping key), wearing its default
+    // character, while the process runs in the other folder.
+    expect(store.get(id!)?.directoryName).toBe('Side Project');
+    expect(store.get(id!)?.palette).toBe(4);
+    expect(harness.spawnArgs[0].options.cwd).toBe(elsewhere);
+  });
+
+  it('runs in its Directory when no folder is given; with no Directory it is named after its folder', () => {
+    const harness = workingPtyManager();
+    const directoryPath = path.join(tempDir, 'side-project');
+    fs.mkdirSync(directoryPath);
+
+    launch(harness, { directory: { name: 'Side Project', path: directoryPath, source: 'user' } });
+    expect(harness.spawnArgs[0].options.cwd).toBe(directoryPath);
+
+    const id = launch(harness, { cwd: directoryPath });
+    expect(store.get(id!)?.directoryName).toBe('side-project');
+  });
+
   it('wears the character picked from the roster even when it is taken, the copy in red clothes', () => {
     const harness = workingPtyManager();
 
@@ -308,7 +343,7 @@ describe('launchStandaloneAgent', () => {
   it('passes bypassPermissions through to the launch command', () => {
     const harness = workingPtyManager();
 
-    launch(harness, { bypassPermissions: true });
+    launch(harness, { asks: { bypassPermissions: true } });
 
     expect(harness.spawnArgs[0].args).toContain('--dangerously-skip-permissions');
   });
@@ -433,5 +468,59 @@ describe('launchStandaloneAgent', () => {
 
     expect(runtime.jsonlPollTimers.has(id)).toBe(false);
     expect(runtime.pollingTimers.has(id)).toBe(false);
+  });
+
+  it('a /resume typed in the terminal: past the threshold, the agent moves to the newest new transcript', () => {
+    vi.useFakeTimers();
+    const harness = workingPtyManager();
+    const id = launch(harness)!;
+    const expected = store.get(id)!.jsonlFile;
+    const stamp = (file: string, secondsFromNow: number) => {
+      const t = Date.now() / 1000 + secondsFromNow;
+      fs.utimesSync(file, t, t);
+    };
+    // Older than the launch: never a candidate.
+    const old = path.join(projectDir, 'old-session.jsonl');
+    fs.writeFileSync(old, '');
+    stamp(old, -60);
+
+    // Before the threshold a new transcript is left alone.
+    const resumed = path.join(projectDir, 'resumed-session.jsonl');
+    fs.writeFileSync(resumed, '');
+    stamp(resumed, 5);
+    vi.advanceTimersByTime(JSONL_POLL_INTERVAL_MS * RESUME_FALLBACK_POLLS);
+    expect(store.get(id)!.jsonlFile).toBe(expected);
+    expect(runtime.jsonlPollTimers.has(id)).toBe(true);
+
+    vi.advanceTimersByTime(JSONL_POLL_INTERVAL_MS);
+    expect(store.get(id)!.jsonlFile).toBe(resumed);
+    expect(runtime.jsonlPollTimers.has(id)).toBe(false);
+  });
+
+  it('resumedTranscript skips a transcript another agent reads', () => {
+    const harness = workingPtyManager();
+    const id = launch(harness)!;
+    const taken = path.join(projectDir, 'taken.jsonl');
+    fs.writeFileSync(taken, '');
+    store.get(id)!.jsonlFile = taken;
+    expect(resumedTranscript(store, projectDir, 0, '*.jsonl')).toBeNull();
+  });
+
+  it("resumedTranscript takes files only: a session's folder beside the transcripts is never one", () => {
+    // The CLI keeps a `<sessionId>/` folder (sub-agents, tool results) beside
+    // transcripts; one whose name ends like a transcript is still a folder.
+    const folder = path.join(projectDir, 'folder.jsonl');
+    fs.mkdirSync(folder);
+    expect(resumedTranscript(store, projectDir, 0, '*.jsonl')).toBeNull();
+
+    const transcript = path.join(projectDir, 'resumed.jsonl');
+    fs.writeFileSync(transcript, '');
+    expect(resumedTranscript(store, projectDir, 0, '*.jsonl')).toBe(transcript);
+  });
+
+  it('resumedTranscript finds nothing for a provider that declares no transcript pattern', () => {
+    fs.writeFileSync(path.join(projectDir, 'resumed.jsonl'), '');
+    fs.writeFileSync(path.join(projectDir, 'notes.txt'), '');
+    expect(resumedTranscript(store, projectDir, 0, undefined)).toBeNull();
   });
 });
