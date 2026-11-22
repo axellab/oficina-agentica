@@ -56,15 +56,19 @@ function launchShell(): LaunchShell {
   const profiles = config.get<Record<string, { path?: string | string[] }>>(`profiles.${platform}`);
   const profilePath = profileName ? profiles?.[profileName]?.path : undefined;
   const executable = Array.isArray(profilePath) ? profilePath[0] : profilePath;
-  const shell = path.basename(executable || profileName || '').toLowerCase();
+  const shell = path
+    .basename(executable || profileName || '')
+    .toLowerCase()
+    .replace(/\.exe$/, '');
 
   if (
-    /^(pwsh|powershell)(\.exe)?$/.test(shell) ||
+    /^(pwsh|powershell)$/.test(shell) ||
     (platform === 'windows' && (!shell || shell.includes('powershell')))
   ) {
     return 'powershell';
   }
-  if (/^cmd(\.exe)?$/.test(shell) || shell.includes('command prompt')) return 'cmd';
+  if (shell === 'cmd' || shell.includes('command prompt')) return 'cmd';
+  if (['bash', 'sh', 'zsh', 'fish', 'wsl'].includes(shell)) return 'posix';
   return 'posix';
 }
 
@@ -73,7 +77,7 @@ function shellWord(word: string, shell: LaunchShell): string {
   if (/^[\w@%+=:,./-]+$/.test(word)) return word;
   if (shell === 'powershell') return `'${word.replace(/'/g, "''")}'`;
   if (shell === 'posix') return `'${word.replace(/'/g, "'\\''")}'`;
-  return `"${word}"`;
+  return `"${word.replace(/"/g, '""')}"`;
 }
 
 /** What a launch asks for, beyond the runtime it registers with. */

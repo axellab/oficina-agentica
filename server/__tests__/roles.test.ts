@@ -419,11 +419,13 @@ describe('the host catalog', () => {
 
     it('leaves an unchanged file alone and rewrites it when the Role changed', () => {
       const file = prepareRoleLaunch('developer')!.appendSystemPromptFile;
-      const past = new Date(Date.now() - 60_000);
+      // A whole second, read back rounded: a file time goes through seconds
+      // as a float, and comes back a fraction of a millisecond off.
+      const past = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
       fs.utimesSync(file, past, past);
 
       prepareRoleLaunch('developer');
-      expect(fs.statSync(file).mtimeMs).toBe(past.getTime());
+      expect(Math.round(fs.statSync(file).mtimeMs)).toBe(past.getTime());
 
       writeRolesFile({ roles: [{ id: 'developer', prompt: 'Write Rust only.' }] });
       prepareRoleLaunch('developer');

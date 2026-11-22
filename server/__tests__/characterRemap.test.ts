@@ -11,11 +11,7 @@ import {
   watchCharacterProfiles,
 } from '../src/characterProfilesPersistence.js';
 import { readConfig, writeConfig } from '../src/configPersistence.js';
-import {
-  conversationLook,
-  recordConversationLooks,
-  resumeRequest,
-} from '../src/conversations.js';
+import { conversationLook, recordConversationLooks, resumeRequest } from '../src/conversations.js';
 import { FileStateAdapter } from '../src/fileStateAdapter.js';
 import { setExternalCharacterCount } from '../src/paletteAssigner.js';
 import { claudeProvider } from '../src/providers/hook/claude/claude.js';
