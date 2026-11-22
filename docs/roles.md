@@ -57,6 +57,10 @@ Three rules are part of every Role's instructions: an agent launches another onl
 
 Try it: launch an agent as the Agile Project Manager and ask it to run the daily meeting, or to staff a small plan.
 
+![The Agile Project Manager's character beside the Developer it launched, asking for its status; the Developer's terminal shows the question, marked with the Role that asks](images/roles-office-mcp.png)
+
+_From the test suite: the terminal on the right is its stand-in for Claude Code, which prints what was typed into it._
+
 In VS Code the agents can list the team and message each other, but they cannot launch one another: there, you launch each Role from the drawer.
 
 ## Your own Roles: `roles.json`
