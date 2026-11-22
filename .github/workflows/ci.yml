@@ -6,6 +6,9 @@ on:
   pull_request:
     branches:
       - main
+      # Work stacked on an integration branch (upstream's next release merged
+      # ahead of time) is checked like work for main.
+      - 'integration/**'
     paths-ignore:
       - '**.md'
       - 'LICENSE'
