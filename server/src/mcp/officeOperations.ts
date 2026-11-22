@@ -3,7 +3,7 @@
  * the MCP module (route, tokens, tool table) and the runtime, split by
  * capability (OfficeCapabilities). composeOfficeMcp.ts builds them from the
  * surface's office facts — one module per capability (agentsView, layoutOps,
- * messaging, visitsOps, charactersView, directoryOps, lifecycle, pcShellOps) — and tools only ever call these, never the
+ * messaging, visitsOps, charactersView, directoryOps, lifecycle, pcShellOps, rolesView) — and tools only ever call these, never the
  * store or the runtime directly.
  *
  * A later tool that needs a new operation adds it HERE (typed in office
@@ -37,6 +37,9 @@ export interface OfficeAgent {
   id: number;
   /** The Nickname it was launched with (launch_agent), or null. */
   nickname: string | null;
+  /** The Role it was launched as (list_roles), or null: an agent launched without
+   *  one, or one the office adopted. */
+  role: { id: string; name: string } | null;
   /** The Directory it was launched into or adopted from: its name, and its path when the
    *  office knows that Directory. */
   directory: { name: string; path: string | null } | null;
@@ -232,6 +235,25 @@ export interface DirectoryOps {
   editDirectories(ops: readonly DirectoryOp[]): DirectoryEditOutcome;
 }
 
+/** One Role an agent can be launched as, as the Pixel Office MCP describes it (list_roles). */
+export interface OfficeRole {
+  /** What launch_agent's `role` names. */
+  id: string;
+  name: string;
+  /** What the Role does, in a line ('' when its roles.json entry gives none). */
+  description: string;
+  /** `builtin`, or `user`: the user's own Role, or a built-in one they changed (roles.json). */
+  source: 'builtin' | 'user';
+  /** The agents in the office launched as it. */
+  agents: number[];
+}
+
+/** Roles (list_roles): the parts agents are launched as, and who holds each. */
+export interface RoleOps {
+  /** Every Role of this host, in the order the office lists them. */
+  listRoles(): OfficeRole[];
+}
+
 /** Launching agents (launch_agent): a surface that can tell when its CLI joined. */
 export interface Launching {
   /** Launch an agent (or resume a conversation) the way the office's drawer and
@@ -320,6 +342,7 @@ export interface OfficeCapabilities {
   visits: VisitOps;
   characters: CharacterOps;
   directories: DirectoryOps;
+  roles: RoleOps;
   launch: Launching;
   close: Closing;
   shells: PcShellOps;
@@ -334,7 +357,7 @@ export type Capability = keyof OfficeCapabilities;
  *  VS Code doesn't list launch_agent / close_agent or the PC shell tools at all). */
 export type OfficeOperations = Pick<
   OfficeCapabilities,
-  'agents' | 'layout' | 'messaging' | 'visits' | 'characters' | 'directories' | 'tutorial'
+  'agents' | 'layout' | 'messaging' | 'visits' | 'characters' | 'directories' | 'roles' | 'tutorial'
 > &
   Partial<Pick<OfficeCapabilities, 'launch' | 'close' | 'shells'>>;
 
@@ -348,6 +371,8 @@ export interface OfficeLaunchRequest {
   character?: string | number;
   /** A seat id (get_layout): taken when free, else the office picks one. */
   seat?: string;
+  /** The Role to launch as: a Role's id, or its name (rolesView's resolver). */
+  role?: string;
   /** Launch into a new Worktree of the Directory: its name and the branch it
    *  starts from (absent = the Directory's own choices). */
   worktree?: { name?: string; from?: string };
@@ -357,10 +382,15 @@ export interface OfficeLaunchRequest {
   asks: Omit<LaunchAsks, 'seatId'>;
 }
 
-/** What the surface's launch gets, character and seat already checked. */
-export interface AgentLaunch extends Omit<OfficeLaunchRequest, 'character' | 'seat' | 'asks'> {
+/** What the surface's launch gets, character, seat and Role already checked. */
+export interface AgentLaunch extends Omit<
+  OfficeLaunchRequest,
+  'character' | 'seat' | 'role' | 'asks'
+> {
   /** The palette the agent wears (absent = the Directory's defaults, else random). */
   palette?: number;
+  /** The id of the Role it launches as (absent = none; a resume = the one it had). */
+  roleId?: string;
   /** Its asks, the seat (only when free) among them. */
   asks: LaunchAsks;
 }
@@ -376,6 +406,8 @@ export type OfficeLaunchResult =
       /** Its seat, when one is known yet (no office open = none yet). */
       seat: string | null;
       character: OfficeAgent['character'];
+      /** The Role it launched as, or null. */
+      role: OfficeAgent['role'];
       /** Its CLI session id. */
       session: string;
       /** Anything the launch did differently from what was asked. */

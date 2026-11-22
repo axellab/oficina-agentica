@@ -14,13 +14,15 @@ export const launchAgent = defineTool({
     'it starts working at once. `character` is a character id, exact name or palette index (list_characters ' +
     'shows them); `seat` a seat id from get_layout, taken when free (else the office picks one, and `notes` ' +
     `says so). \`nickname\` (at most ${NICKNAME_MAX_LENGTH} characters) labels it "Directory · nickname · ` +
-    'worktree" on its card and over its character; it is only a label. `worktree` launches it into a new ' +
+    'worktree" on its card and over its character; it is only a label. `role` launches it as a Role of ' +
+    "the team (a Role's id or name: list_roles shows them): it gets that Role's standing instructions " +
+    'on top of its own, and the office marks it with the Role. `worktree` launches it into a new ' +
     'Worktree of the Directory (`name`, and `from`: the branch to start from, `origin/<name>` for ' +
     "origin's). `resume_session_id` brings back a past conversation of the Directory (where it ran, " +
     'its own Worktree included). `model` and `permission_mode` go to the CLI; without a ' +
     "`permission_mode` the office's own setting applies. bypassPermissions is refused unless the user " +
     'allowed skipping permissions in Settings. Returns once the agent has joined (its CLI is running) ' +
-    `with its id, seat (null until an office seats it), character and session id; fails after about ${Math.round(LAUNCH_JOIN_TIMEOUT_MS / 1000)} s.`,
+    `with its id, seat (null until an office seats it), character, Role and session id; fails after about ${Math.round(LAUNCH_JOIN_TIMEOUT_MS / 1000)} s.`,
   input: {
     directory: z.string().min(1).describe('A Directory name, or an absolute folder path.'),
     first_message: z.string().min(1).optional().describe('Its first prompt.'),
@@ -30,6 +32,11 @@ export const launchAgent = defineTool({
       .describe('A character id, exact name or palette index.'),
     seat: z.string().min(1).optional().describe('A seat id (get_layout).'),
     nickname: z.string().optional().describe('A short label shown after its Directory.'),
+    role: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("The Role to launch it as: a Role's id or name (list_roles)."),
     worktree: z
       .object({
         name: z.string().min(1).optional().describe('The Worktree name (absent = generated).'),
@@ -60,6 +67,7 @@ export const launchAgent = defineTool({
       directory: args.directory,
       character: args.character,
       seat: args.seat,
+      role: args.role,
       worktree: args.worktree,
       resumeSessionId: args.resume_session_id,
       asks: {
@@ -74,6 +82,7 @@ export const launchAgent = defineTool({
       agent_id: result.id,
       seat: result.seat,
       character: result.character,
+      role: result.role,
       session_id: result.session,
       ...(result.notes.length > 0 ? { notes: result.notes } : {}),
     });

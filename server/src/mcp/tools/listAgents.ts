@@ -7,6 +7,7 @@ function describeAgent(agent: OfficeAgent, caller: number): Record<string, unkno
     id: agent.id,
     ...(agent.id === caller ? { you: true } : {}),
     nickname: agent.nickname,
+    role: agent.role,
     directory: agent.directory,
     working_directory: agent.workingDirectory,
     worktree: agent.worktree,
@@ -35,6 +36,7 @@ export const listAgents = defineTool({
   title: 'List agents',
   description:
     'List every agent in the Pixel Agents office (you included, marked `you: true`): id, nickname, ' +
+    'Role (the part of the team it was launched as: list_roles describes them; null for none), ' +
     'Directory and working directory, Worktree, status (active / done / waiting for input / ' +
     'permission request), current activity, sub-agents running, context left, conversation title, ' +
     'transcript path, lead and teammates, seat (with its tile and Area), whether it is at its desk ' +

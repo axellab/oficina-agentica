@@ -1,7 +1,8 @@
 /**
  * How the Pixel Office MCP names an agent to people and to other agents: the
  * tag a Message arrives with (`[From <label>, agent <id>] <text>`, so its
- * recipient knows whom to answer; keys go bare, a tag would type into the
+ * recipient knows whom to answer, with the sender's Role after the label when
+ * it has one, so it knows which part of the team is asking; keys go bare, a tag would type into the
  * prompt they answer) and the layout editor's "Undo <label>'s edit".
  */
 
@@ -22,7 +23,9 @@ export function agentLabel(
   });
 }
 
-/** The tag a Message's text is prefixed with. */
-export function messageTag(agentId: number, from: string | null): string {
-  return from ? `[From ${from}, agent ${agentId}] ` : `[From agent ${agentId}] `;
+/** The tag a Message's text is prefixed with: `[From Byte (Developer), agent 3] `,
+ *  the Role only for a sender launched as one. */
+export function messageTag(agentId: number, from: string | null, roleName?: string): string {
+  const who = from && roleName ? `${from} (${roleName})` : (from ?? roleName);
+  return who ? `[From ${who}, agent ${agentId}] ` : `[From agent ${agentId}] `;
 }
