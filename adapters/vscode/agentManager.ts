@@ -46,16 +46,34 @@ export function getProjectDirPath(cwd?: string): string {
   return projectDir;
 }
 
-/** A word of a command typed into the user's shell: as is when it holds
- *  only characters no shell treats specially (every word a launch had before
- *  Roles types exactly as it did), else double-quoted, which keeps the word
- *  whole in sh, zsh, cmd and PowerShell alike: a Role's instruction file under
- *  a home folder with a space in it, a model alias with brackets (a glob to
- *  zsh), and any Windows path, whose backslashes a POSIX shell (Git Bash)
- *  would otherwise eat as escapes. It does not stop `$` expanding: none of
- *  our words holds one. */
-function shellWord(word: string): string {
-  return /^[\w@%+=:,./-]+$/.test(word) ? word : `"${word}"`;
+type LaunchShell = 'posix' | 'powershell' | 'cmd';
+
+function launchShell(): LaunchShell {
+  const platform =
+    process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'osx' : 'linux';
+  const config = vscode.workspace.getConfiguration('terminal.integrated');
+  const profileName = config.get<string>(`defaultProfile.${platform}`);
+  const profiles = config.get<Record<string, { path?: string | string[] }>>(`profiles.${platform}`);
+  const profilePath = profileName ? profiles?.[profileName]?.path : undefined;
+  const executable = Array.isArray(profilePath) ? profilePath[0] : profilePath;
+  const shell = path.basename(executable || profileName || '').toLowerCase();
+
+  if (
+    /^(pwsh|powershell)(\.exe)?$/.test(shell) ||
+    (platform === 'windows' && (!shell || shell.includes('powershell')))
+  ) {
+    return 'powershell';
+  }
+  if (/^cmd(\.exe)?$/.test(shell) || shell.includes('command prompt')) return 'cmd';
+  return 'posix';
+}
+
+/** Quote one word for the configured terminal shell. */
+function shellWord(word: string, shell: LaunchShell): string {
+  if (/^[\w@%+=:,./-]+$/.test(word)) return word;
+  if (shell === 'powershell') return `'${word.replace(/'/g, "''")}'`;
+  if (shell === 'posix') return `'${word.replace(/'/g, "'\\''")}'`;
+  return `"${word}"`;
 }
 
 /** What a launch asks for, beyond the runtime it registers with. */
@@ -123,7 +141,10 @@ export async function launchNewTerminal(
   if (!launch) {
     throw new Error('claudeProvider.buildLaunchCommand is not implemented');
   }
-  terminal.sendText([launch.command, ...launch.args].map(shellWord).join(' '));
+  const shell = launchShell();
+  terminal.sendText(
+    [launch.command, ...launch.args].map((word) => shellWord(word, shell)).join(' '),
+  );
 
   const projectDir = getProjectDirPath(cwd);
 
