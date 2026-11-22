@@ -31,6 +31,7 @@ import { prepareRoleLaunch } from '../../server/src/roles/roleCatalog.js';
 import { sessionMarkersUnset } from '../../server/src/terminal/terminalEnv.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from '../../server/src/timerManager.js';
 import { workspaceDirectories } from './hostDirectories.js';
+import { launchCommandLine, type LaunchShell, launchShellOf } from './launchCommandLine.js';
 
 export function getProjectDirPath(cwd?: string): string {
   // Fall back to home directory when no workspace folder is open (common on Linux/macOS
@@ -46,8 +47,9 @@ export function getProjectDirPath(cwd?: string): string {
   return projectDir;
 }
 
-type LaunchShell = 'posix' | 'powershell' | 'cmd';
-
+/** The quoting rules of the shell a new terminal opens. VS Code names that
+ *  shell itself (`env.shell` follows the default terminal profile); where it
+ *  names none, the profile in the settings is read. */
 function launchShell(): LaunchShell {
   const platform =
     process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'osx' : 'linux';
@@ -55,29 +57,11 @@ function launchShell(): LaunchShell {
   const profileName = config.get<string>(`defaultProfile.${platform}`);
   const profiles = config.get<Record<string, { path?: string | string[] }>>(`profiles.${platform}`);
   const profilePath = profileName ? profiles?.[profileName]?.path : undefined;
-  const executable = Array.isArray(profilePath) ? profilePath[0] : profilePath;
-  const shell = path
-    .basename(executable || profileName || '')
-    .toLowerCase()
-    .replace(/\.exe$/, '');
-
-  if (
-    /^(pwsh|powershell)$/.test(shell) ||
-    (platform === 'windows' && (!shell || shell.includes('powershell')))
-  ) {
-    return 'powershell';
-  }
-  if (shell === 'cmd' || shell.includes('command prompt')) return 'cmd';
-  if (['bash', 'sh', 'zsh', 'fish', 'wsl'].includes(shell)) return 'posix';
-  return 'posix';
-}
-
-/** Quote one word for the configured terminal shell. */
-function shellWord(word: string, shell: LaunchShell): string {
-  if (/^[\w@%+=:,./-]+$/.test(word)) return word;
-  if (shell === 'powershell') return `'${word.replace(/'/g, "''")}'`;
-  if (shell === 'posix') return `'${word.replace(/'/g, "'\\''")}'`;
-  return `"${word.replace(/"/g, '""')}"`;
+  return launchShellOf({
+    platform: process.platform,
+    executable: vscode.env.shell || (Array.isArray(profilePath) ? profilePath[0] : profilePath),
+    profileName,
+  });
 }
 
 /** What a launch asks for, beyond the runtime it registers with. */
@@ -145,10 +129,7 @@ export async function launchNewTerminal(
   if (!launch) {
     throw new Error('claudeProvider.buildLaunchCommand is not implemented');
   }
-  const shell = launchShell();
-  terminal.sendText(
-    [launch.command, ...launch.args].map((word) => shellWord(word, shell)).join(' '),
-  );
+  terminal.sendText(launchCommandLine([launch.command, ...launch.args], launchShell()));
 
   const projectDir = getProjectDirPath(cwd);
 
