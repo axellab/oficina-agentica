@@ -44,14 +44,14 @@ function fakeOffice(existing: number[] = []): ExistingAgentsOffice & {
   headless: number[];
   synced: Array<{ id: number } & ExistingAgentMeta>;
   rested: number[];
-  roles: Array<[number, AgentRole]>;
+  roles: Array<[number, AgentRole | undefined]>;
 } {
   const ids = new Set(existing);
   const calls: AddAgentCall[] = [];
   const headless: number[] = [];
   const synced: Array<{ id: number } & ExistingAgentMeta> = [];
   const rested: number[] = [];
-  const roles: Array<[number, AgentRole]> = [];
+  const roles: Array<[number, AgentRole | undefined]> = [];
   return {
     calls,
     headless,
@@ -59,7 +59,7 @@ function fakeOffice(existing: number[] = []): ExistingAgentsOffice & {
     rested,
     roles,
     setAgentRole: (id, role) => {
-      if (role) roles.push([id, role]);
+      roles.push([id, role]);
     },
     characters: { has: (id: number) => ids.has(id) },
     addAgent: (id, palette, repeat, seatId, skipSpawnEffect, directoryName) => {
@@ -160,6 +160,14 @@ test('layout ready: an agent the office already shows takes the server look and 
   assert.deepEqual(os.synced, [{ id: 5, palette: 2, repeat: 0, seatId: 'seat-a' }]);
 });
 
+test('layout ready: an absent snapshot Role clears stale Role metadata', () => {
+  const os = fakeOffice([5]);
+
+  reconcileExistingAgents(os, [5], {}, {}, true, [], {}, { 5: undefined });
+
+  assert.deepEqual(os.roles, [[5, undefined]]);
+});
+
 test('layout ready: a mixed roster adds only the missing agent', () => {
   const os = fakeOffice([5]);
   const pending: PendingAgent[] = [];
@@ -204,13 +212,16 @@ test('layout not ready: the headless flag rides along on the buffered agent', ()
 
 const ARCHITECT: AgentRole = { id: 'architect', name: 'Architect', color: 'purple' };
 
-test('layout ready: a restored agent is given its Role, an agent without one is not', () => {
+test('layout ready: a restored agent receives its Role, including absence', () => {
   const os = fakeOffice();
   const pending: PendingAgent[] = [];
 
   reconcileExistingAgents(os, [5, 6], {}, {}, true, pending, {}, { 5: ARCHITECT });
 
-  assert.deepEqual(os.roles, [[5, ARCHITECT]]);
+  assert.deepEqual(os.roles, [
+    [5, ARCHITECT],
+    [6, undefined],
+  ]);
 });
 
 test('layout not ready: the Role rides along on the buffered agent', () => {

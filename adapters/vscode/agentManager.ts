@@ -46,16 +46,41 @@ export function getProjectDirPath(cwd?: string): string {
   return projectDir;
 }
 
-/** A word of a command typed into the user's shell: as is when it holds
- *  only characters no shell treats specially (every word a launch had before
- *  Roles types exactly as it did), else double-quoted, which keeps the word
- *  whole in sh, zsh, cmd and PowerShell alike: a Role's instruction file under
- *  a home folder with a space in it, a model alias with brackets (a glob to
- *  zsh), and any Windows path, whose backslashes a POSIX shell (Git Bash)
- *  would otherwise eat as escapes. It does not stop `$` expanding: none of
- *  our words holds one. */
-function shellWord(word: string): string {
-  return /^[\w@%+=:,./-]+$/.test(word) ? word : `"${word}"`;
+type TerminalShell = 'cmd' | 'powershell' | 'posix';
+
+function configuredTerminalShell(): TerminalShell {
+  const platform =
+    process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'osx' : 'linux';
+  const config = vscode.workspace.getConfiguration('terminal.integrated');
+  const profileName = config.get<string>(`defaultProfile.${platform}`);
+  const profiles = config.get<Record<string, unknown>>(`profiles.${platform}`);
+  const profile = profileName ? profiles?.[profileName] : undefined;
+  const shellPath =
+    typeof profile === 'string'
+      ? profile
+      : profile && typeof profile === 'object' && 'path' in profile
+        ? (profile as { path?: string | string[] }).path
+        : undefined;
+  const executable = Array.isArray(shellPath) ? shellPath[0] : shellPath;
+  const name = executable
+    ?.split(/[\\/]/)
+    .pop()
+    ?.toLowerCase()
+    .replace(/\.exe$/, '');
+  if (name === 'pwsh' || name === 'powershell') return 'powershell';
+  if (name === 'cmd') return 'cmd';
+  if (name === 'bash' || name === 'sh' || name === 'zsh' || name === 'fish' || name === 'wsl') {
+    return 'posix';
+  }
+  return process.platform === 'win32' ? 'powershell' : 'posix';
+}
+
+/** Quote a command word for the shell selected by VS Code. */
+function shellWord(word: string, shell: TerminalShell): string {
+  if (/^[\w@%+=:,./-]+$/.test(word)) return word;
+  if (shell === 'powershell') return `'${word.replace(/'/g, "''")}'`;
+  if (shell === 'posix') return `'${word.replace(/'/g, "'\\''")}'`;
+  return `"${word.replace(/"/g, '""')}"`;
 }
 
 /** What a launch asks for, beyond the runtime it registers with. */
@@ -123,7 +148,10 @@ export async function launchNewTerminal(
   if (!launch) {
     throw new Error('claudeProvider.buildLaunchCommand is not implemented');
   }
-  terminal.sendText([launch.command, ...launch.args].map(shellWord).join(' '));
+  const shell = configuredTerminalShell();
+  terminal.sendText(
+    [launch.command, ...launch.args].map((word) => shellWord(word, shell)).join(' '),
+  );
 
   const projectDir = getProjectDirPath(cwd);
 

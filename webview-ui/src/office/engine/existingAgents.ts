@@ -43,7 +43,7 @@ export interface ExistingAgentsOffice {
     directoryName?: string,
   ) => void;
   setHeadless: (id: number, headless: boolean) => void;
-  /** Name the Role an agent was launched as (undefined = leave it). */
+  /** Apply the Role from the latest server snapshot, including absence. */
   setAgentRole: (id: number, role: AgentRole | undefined) => void;
   /** Start an agent at rest: not working, resting in its chair if it has one. */
   restAgent: (id: number) => void;
@@ -100,8 +100,8 @@ export function reconcileExistingAgents(
         addedDirectly = true;
       } else {
         // Already shown (a reconnect): the snapshot is the truth. Keeping the
-        // office's own look and seat and saving them back reshuffled the
-        // office for every other viewer.
+        // office's own look, seat and Role reshuffled other viewers and could
+        // leave stale Role metadata after the server cleared it.
         os.syncAgent(p.id, p.palette, p.repeat, p.seatId);
         os.setAgentRole(p.id, p.role);
       }
