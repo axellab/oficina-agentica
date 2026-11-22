@@ -39,7 +39,9 @@ import type { AgentState } from './types.js';
  * agent, and the newest CONVERSATION_LOOKS_MAX are kept.
  */
 
-export type ConversationLook = Omit<AgentLook, 'id'> & {
+export type ConversationLook = Omit<AgentLook, 'id' | 'palette' | 'repeat'> & {
+  palette?: number;
+  repeat?: number;
   seatId?: string;
   /** The Role its agent was launched as, so a resume launches as it again. */
   roleId?: string;
@@ -60,12 +62,15 @@ function readLooks(): Looks {
     const looks: Looks = {};
     for (const [sessionId, look] of Object.entries(raw)) {
       const l = look as Partial<ConversationLook> | null;
-      if (!l || !Number.isInteger(l.palette) || !Number.isInteger(l.repeat)) continue;
+      if (!l) continue;
+      const palette = Number.isInteger(l.palette) ? l.palette : undefined;
+      const repeat = Number.isInteger(l.repeat) ? l.repeat : undefined;
+      const roleId = isRoleId(l.roleId) ? l.roleId : undefined;
+      if ((palette === undefined || repeat === undefined) && roleId === undefined) continue;
       looks[sessionId] = {
-        palette: l.palette!,
-        repeat: l.repeat!,
+        ...(palette !== undefined && repeat !== undefined ? { palette, repeat } : {}),
         seatId: typeof l.seatId === 'string' ? l.seatId : undefined,
-        roleId: isRoleId(l.roleId) ? l.roleId : undefined,
+        roleId,
         at: typeof l.at === 'number' ? l.at : 0,
       };
     }
@@ -77,17 +82,23 @@ function readLooks(): Looks {
 
 /**
  * Renumber the remembered looks after the character list changed (see characterRemap.ts):
- * a look whose character was deleted is forgotten.
+ * a deleted character's appearance is forgotten, but its Role is retained for resume.
  */
 export function remapConversationLooks(remap: (palette: number) => number | undefined): void {
   const looks = readLooks();
   let changed = false;
   for (const [sessionId, look] of Object.entries(looks)) {
+    if (look.palette === undefined) continue;
     const next = remap(look.palette);
     if (next === look.palette) continue;
     changed = true;
-    if (next === undefined) delete looks[sessionId];
-    else look.palette = next;
+    if (next === undefined) {
+      if (look.roleId === undefined) delete looks[sessionId];
+      else {
+        delete look.palette;
+        delete look.repeat;
+      }
+    } else look.palette = next;
   }
   if (!changed) return;
   try {

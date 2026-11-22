@@ -11,9 +11,14 @@ import {
   watchCharacterProfiles,
 } from '../src/characterProfilesPersistence.js';
 import { readConfig, writeConfig } from '../src/configPersistence.js';
-import { conversationLook, recordConversationLooks } from '../src/conversations.js';
+import {
+  conversationLook,
+  recordConversationLooks,
+  resumeRequest,
+} from '../src/conversations.js';
 import { FileStateAdapter } from '../src/fileStateAdapter.js';
 import { setExternalCharacterCount } from '../src/paletteAssigner.js';
+import { claudeProvider } from '../src/providers/hook/claude/claude.js';
 
 /**
  * Everything that names a character by its index (agents, their saved seats, Directory
@@ -164,6 +169,31 @@ describe('saving a list that moves characters', () => {
     expect(answer.agentLooks).toHaveLength(3);
     expect(readConfig().directories[0].characters).toEqual([1]);
     expect(readConfig().recentCharacters).toEqual([1]);
+  });
+
+  it("keeps a past conversation's Role when its character is deleted, so it can be resumed", () => {
+    const sessionId = '00000000-0000-4000-8000-000000000001';
+    const transcript = path.join(tempHome, `${sessionId}.jsonl`);
+    agent(1, 1, {
+      sessionId,
+      role: { id: 'architect', name: 'Architect', color: 'purple' },
+    });
+    fs.writeFileSync(transcript, `${JSON.stringify({ type: 'ai-title', aiTitle: 'Design' })}\n`);
+    recordConversationLooks(store, { '1': { seatId: 'chair' } });
+
+    save([ch('a')]);
+
+    const look = conversationLook(sessionId);
+    expect(look?.roleId).toBe('architect');
+    expect(look).not.toHaveProperty('palette');
+    expect(look).not.toHaveProperty('repeat');
+    store.delete(1);
+    const resume = resumeRequest(
+      store,
+      { ...claudeProvider, getSessionDirs: () => [tempHome] },
+      { sessionId, directoryPath: '/work' },
+    );
+    expect(resume?.look?.roleId).toBe('architect');
   });
 
   it('a save that replaces every character renumbers everything that named one', () => {
