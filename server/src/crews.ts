@@ -63,8 +63,9 @@ export interface CrewPlace {
 
 /** A place held for a launch that has not brought its agent yet. */
 interface HeldPlace {
-  /** Who asked for the launch: what its agent will carry. */
-  launchedBy: number | undefined;
+  /** What its launch's agent will carry: this very object, which is how the
+   *  agent that joins is told from another launch's (the same caller's too). */
+  crew: AgentCrew;
 }
 
 /** What one agent of a Crew does to another agent. */
@@ -343,13 +344,12 @@ export class Crews {
   }
 
   private hold(record: CrewRecord, launchedBy: number | undefined): CrewPlace {
-    const place: HeldPlace = { launchedBy };
+    const crew: AgentCrew =
+      launchedBy === undefined ? { id: record.id } : { id: record.id, launchedBy };
+    const place: HeldPlace = { crew };
     record.places.push(place);
     return {
-      launch: {
-        crew: launchedBy === undefined ? { id: record.id } : { id: record.id, launchedBy },
-        maxAgents: this.maxAgents,
-      },
+      launch: { crew, maxAgents: this.maxAgents },
       done: () => {
         const at = record.places.indexOf(place);
         if (at < 0) return; // Its agent took it, or it was given back already.
@@ -370,9 +370,12 @@ export class Crews {
     if (record.ended && !crew.ended) agent.crew = { ...crew, ended: true };
     record.members.add(id);
     // The place its launch held is the agent itself from here on: counted once,
-    // whatever its launch still waits for (two launches by one agent are told
-    // apart by nothing that matters to the count, so the oldest goes).
-    const held = record.places.findIndex((place) => place.launchedBy === crew.launchedBy);
+    // whatever its launch still waits for. Its OWN place, known by the object
+    // the launch handed it: two launches by one agent bring their agents in
+    // either order, and taking the other's place would leave that launch
+    // uncounted once this one is over (then a third could be one too many).
+    // An agent no launch of this server brought (a restored one) holds none.
+    const held = record.places.findIndex((place) => place.crew === crew);
     if (held >= 0) record.places.splice(held, 1);
     return true;
   }

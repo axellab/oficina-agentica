@@ -394,7 +394,9 @@ export type CloseAttempt =
    *  answer given covers them (none, or a discard of fewer files than now). */
   | { closed: false; question: AgentCloseQuestion }
   /** Not closed: there is no such agent (any more). */
-  | { closed: false; gone: true };
+  | { closed: false; gone: true }
+  /** Not closed: what allowed the close no longer does (`refusal`'s reason). */
+  | { closed: false; refused: string };
 
 /**
  * Close agent `id` the way the card's × does, for any caller (the × itself,
@@ -404,12 +406,19 @@ export type CloseAttempt =
  * answer is kept for the agent's exit, whose leave applies it
  * (`retireWhenUnused`), and the agent is closed. Anything else closes at
  * once. `close` is the surface's way to end the agent.
+ *
+ * `refusal`: why the close may no longer go on, or null. The look at the
+ * Worktree takes a while (git), and what let the caller close this agent when
+ * it asked may have ended meanwhile, so a caller held to a rule gives it here
+ * and it is asked again after the look: a refused close keeps no answer and
+ * closes no one.
  */
 export async function closeAgentAsking(
   store: AgentStateStore,
   id: number,
   answer: CloseAnswer,
   close: (id: number) => void,
+  refusal: () => string | null = () => null,
 ): Promise<CloseAttempt> {
   if (!store.has(id)) return { closed: false, gone: true };
   let asked: Awaited<ReturnType<typeof closeQuestion>> = null;
@@ -419,6 +428,10 @@ export async function closeAgentAsking(
     // Couldn't look: close anyway, and the leave rules ask after the exit.
     console.error('[Pixel Agents] Worktrees: could not check before closing:', err);
   }
+  // Before the answer is kept: one kept for a close that never happens would
+  // be applied to the agent's own exit later.
+  const refused = refusal();
+  if (refused !== null) return { closed: false, refused };
   let answered: KeptCloseAnswer | undefined;
   if (asked) {
     const decision = closeDecision(answer, asked.question.uncommittedFiles);

@@ -31,7 +31,7 @@ import type {
   MessageShow,
   OfficeCloseOutcome,
 } from './officeOperations.js';
-import { noAgentReason } from './officeOperations.js';
+import { callerLeftReason, noAgentReason } from './officeOperations.js';
 import { roleNamed, roleOf } from './rolesView.js';
 
 /** A first message as the office shows it over its sender: one line, cut to a gist's length. */
@@ -255,7 +255,19 @@ export function createClosing(
         : close;
       // Named before it leaves: its Crew's panel says who closed whom.
       const closedName = crews.nameOf(id);
-      const attempt = await closeAgentAsking(store, id, { worktreeChoice, confirmedFiles }, end);
+      // Asked again once git has looked at its Worktree: the user may have ended
+      // the Crew meanwhile, and a caller that has left closes no one.
+      const notNow = (): string | null =>
+        caller !== id && !store.has(caller)
+          ? callerLeftReason(caller)
+          : crews.reachProblem(caller, id, 'close');
+      const attempt = await closeAgentAsking(
+        store,
+        id,
+        { worktreeChoice, confirmedFiles },
+        end,
+        notNow,
+      );
       if (attempt.closed) {
         if (id !== caller) crews.note('closed', caller, [id], { toNames: [closedName] });
         const answered = attempt.answered;
@@ -270,6 +282,7 @@ export function createClosing(
             : null,
         };
       }
+      if ('refused' in attempt) return { ok: false, reason: attempt.refused };
       if ('gone' in attempt) return { ok: false, reason: noAgentReason(id) };
       const q = attempt.question;
       const files = `${q.uncommittedFiles} uncommitted file${q.uncommittedFiles === 1 ? '' : 's'}`;

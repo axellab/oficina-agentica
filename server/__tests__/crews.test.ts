@@ -13,7 +13,7 @@ import { createAgentState } from '../src/agentState.js';
 import { AgentStateStore } from '../src/agentStateStore.js';
 import { CREW_EVENTS_KEPT, CREW_MAX_AGENTS } from '../src/constants.js';
 import { type CrewPlace, Crews } from '../src/crews.js';
-import { createLaunching } from '../src/mcp/lifecycle.js';
+import { createClosing, createLaunching } from '../src/mcp/lifecycle.js';
 import { createMessaging, type DeliveryGuard } from '../src/mcp/messaging.js';
 import type { OfficeFacts } from '../src/mcp/officeFacts.js';
 import { type AgentTerminals, PLAIN_INPUT_MODES } from '../src/terminal/agentTerminals.js';
@@ -186,6 +186,26 @@ describe('Crews', () => {
     expect(crews.joinFor(starter)).toMatchObject({ ok: true });
   });
 
+  it('two launches by one agent each keep their own place, whichever brings its agent first', () => {
+    setUp(3);
+    const starter = started();
+    // Asked at the same time by the same agent: the Crew is full with both.
+    const first = crews.joinFor(starter);
+    const second = crews.joinFor(starter);
+    if (!first.ok || !second.ok) throw new Error('both fit');
+    expect(crews.joinFor(starter)).toMatchObject({ ok: false });
+
+    // The second brings its agent first, and its launch is over.
+    join(second.place);
+    // The first is still on its way: its place is not a third launch's to take.
+    expect(crews.joinFor(starter)).toMatchObject({ ok: false });
+
+    // It comes: the Crew holds its three, and no more.
+    join(first.place);
+    expect(listed()[0].members).toHaveLength(3);
+    expect(crews.joinFor(starter)).toMatchObject({ ok: false });
+  });
+
   it('a Crew whose first launch failed is forgotten, and one is listed until its last agent leaves', () => {
     setUp();
     crews.startForLaunch()!.done();
@@ -288,6 +308,39 @@ describe('Crews', () => {
     expect(crews.reachProblem(starter, starter, 'close')).toBeNull();
     // Ending twice changes nothing.
     expect(crews.end(crewId)).toBe(false);
+  });
+
+  it('a close asked while the Crew stood closes no one once the user ended it, or its caller left, meanwhile', async () => {
+    setUp();
+    const starter = started();
+    const colleague = launchedBy(starter);
+    const third = launchedBy(starter);
+    const closed: number[] = [];
+    const closing = createClosing(
+      // A close reads nothing of the office but its agents.
+      { store } as OfficeFacts,
+      (id) => closed.push(id),
+      { has: () => true },
+      crews,
+    );
+
+    // Its caller leaves while the look at the Worktree is under way.
+    const orphaned = closing.closeAgent({ id: third, caller: colleague });
+    store.delete(colleague);
+    const unanswered = await orphaned;
+    expect(unanswered).toMatchObject({ ok: false });
+    expect(!unanswered.ok && unanswered.reason).toMatch(/has left the office/);
+
+    // The user ends the Crew while the look is under way.
+    const asking = closing.closeAgent({ id: third, caller: starter });
+    crews.end(listed()[0].id);
+    const answer = await asking;
+    expect(answer).toMatchObject({ ok: false });
+    expect(!answer.ok && answer.reason).toMatch(/The user ended your Crew/);
+
+    expect(closed).toEqual([]);
+    expect(store.has(third)).toBe(true);
+    closing.dispose();
   });
 
   it('keeps what its agents did to each other, the newest only, named as they were then', () => {
@@ -458,6 +511,53 @@ describe('Crews', () => {
 
       expect(written).toEqual([]);
       expect(!delivery.delivered && delivery.reason).toMatch(/The user ended your Crew/);
+    });
+
+    it('one whose sender left while it waited its turn is not typed, into a permission prompt least of all', async () => {
+      setUp();
+      const starter = started();
+      const colleague = launchedBy(starter);
+      const { terminals, written } = terminalsOf();
+      let open!: () => void;
+      const gate = new Promise<void>((resolve) => (open = resolve));
+      const messaging = createMessaging(store, terminals, openGuard(gate), crews);
+
+      const sending = messaging.sendMessage({
+        from: starter,
+        to: [recipient(colleague)],
+        content: { keys: ['enter'] },
+      });
+      // Gone, so its Crew can no longer be read off it; and a prompt opens.
+      store.delete(starter);
+      store.get(colleague)!.permissionSent = true;
+      open();
+      const [delivery] = await sending;
+
+      expect(written).toEqual([]);
+      expect(!delivery.delivered && delivery.reason).toMatch(/has left the office/);
+    });
+
+    it('text typed before its sender left is left unsubmitted', async () => {
+      setUp();
+      const starter = started();
+      const colleague = launchedBy(starter);
+      // The sender leaves as its text lands.
+      const { terminals, written } = terminalsOf(() => {
+        store.delete(starter);
+      });
+      const messaging = createMessaging(store, terminals, openGuard(), crews);
+
+      const [delivery] = await messaging.sendMessage({
+        from: starter,
+        to: [recipient(colleague)],
+        content: { text: 'ready for review', submit: true },
+      });
+
+      // The paste, and no Enter after it.
+      expect(written).toHaveLength(1);
+      expect(!delivery.delivered && delivery.reason).toMatch(
+        /typed into agent .* but not submitted: Agent .* has left the office/,
+      );
     });
   });
 });
