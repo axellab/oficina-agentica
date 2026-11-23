@@ -16,7 +16,9 @@
  *       to its end, close what it launched and write what it measured under
  *       trial-runs/ (a summary in Markdown and JSON, every office message
  *       with its time, the agents' terminal screens and each agent's last
- *       words as its transcript has them).
+ *       words as its transcript has them). However it ends (its work done,
+ *       an error, Ctrl+C), it first takes back what it started: its agents
+ *       closed, its office stopped, the consent it was given put back.
  *
  * What it never does: answer a permission prompt (a prompt nobody answers ends
  * the run and is reported), stop an office that is already running (it stops
@@ -599,7 +601,7 @@ class TerminalMirror {
 
 // ── The run ───────────────────────────────────────────────────
 
-async function run(opts) {
+async function trial(opts, held) {
   const preset = PRESETS[opts.preset];
   if (!preset) fail(`run: --preset must be one of ${Object.keys(PRESETS).join(', ')}`);
   if (!opts.dir) fail('run: --dir <folder> is the folder the agents work in');
@@ -615,7 +617,18 @@ async function run(opts) {
     ...(typeof opts.request === 'string' ? { request: opts.request } : {}),
     ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
   };
-  const limit = (name, fallback) => (opts[name] !== undefined ? Number(opts[name]) : fallback);
+  // These bound a run nobody watches: a limit that is not a number above zero
+  // would be no limit at all (`now > NaN` is never true), so nothing starts.
+  const limit = (name, fallback) => {
+    if (opts[name] === undefined) return fallback;
+    const value = opts[name] === true ? NaN : Number(opts[name]);
+    if (!Number.isFinite(value) || value <= 0) {
+      fail(
+        `run: --${name} must be a number above zero (got ${opts[name] === true ? 'no value' : opts[name]})`,
+      );
+    }
+    return value;
+  };
   const limits = {
     maxMs: limit('max-minutes', DEFAULTS.maxMinutes) * 60_000,
     idleMs: limit('idle-seconds', DEFAULTS.idleSeconds) * 1000,
@@ -624,6 +637,9 @@ async function run(opts) {
     maxOutputTokens: limit('max-output-tokens', DEFAULTS.maxOutputTokens),
     launchMs: limit('launch-timeout-seconds', DEFAULTS.launchTimeoutSeconds) * 1000,
   };
+  const fixedPort = opts.port === undefined ? null : Number(opts.port);
+  if (fixedPort !== null && (!Number.isInteger(fixedPort) || fixedPort < 1 || fixedPort > 65535))
+    fail(`run: --port must be a port number (got ${opts.port === true ? 'no value' : opts.port})`);
   const grantMcp = opts['grant-mcp'] === true;
   const keepMcpConsent = opts['keep-mcp-consent'] === true;
 
@@ -684,9 +700,204 @@ async function run(opts) {
     return out.replace(/token=[^\s&"']+/g, 'token=<masked>');
   };
   const say = (line) => console.log(`[trial ${seconds(t()).padStart(8)}] ${mask(line)}`);
+  /** JSON with every string in it masked (masking the text afterwards could break an escape). */
+  const maskedJson = (value, space) =>
+    JSON.stringify(value, (_key, v) => (typeof v === 'string' ? mask(v) : v), space);
+  held.mask = mask;
+
+  // ── What the run holds ──
+  // Declared before anything is started, so that taking it back (`tidyUp`)
+  // can be asked for at any point: the run's end, an error, a signal.
+  const notes = [];
+  const agents = new Map();
+  const mirrors = new Map();
+  const registryRemoved = [];
+  const ours = () => [...agents.values()].filter((a) => a.ours);
+  const oursOpen = () => ours().filter((a) => a.closedAt === null);
+  // The office's own browser page, for pictures of the run (best effort).
+  const shots = {
+    wanted: opts.screenshots === true,
+    taken: [],
+    error: null,
+    browser: null,
+    page: null,
+    lastAt: 0,
+  };
+  let server = null;
+  let serverOut = '';
+  let serverExit = null;
+  let ws = null;
+  let messagesFile = null;
+  let runInfo = null;
+  let runGoneAt = null;
+  let mcpGrantedHere = false;
+  let mcpConsentAfter = mcpConsentBefore;
+  let outcome = null;
+  const end = (result, detail = '') => {
+    outcome ??= { result, detail, at: t() };
+  };
+
+  /** Every message between this script and the office, one JSON object per line. */
+  const record = (direction, msg) => {
+    if (!messagesFile) return;
+    let body = msg;
+    const bytes = JSON.stringify(msg).length;
+    if (bytes > 6000) {
+      body = { type: msg.type, bytes };
+      if (msg.type === 'workflowsLoaded')
+        Object.assign(body, { available: msg.available, runs: msg.runs });
+    }
+    messagesFile.write(`${maskedJson({ t: t(), d: direction, msg: body })}\n`);
+  };
+  const send = (msg) => {
+    record('out', msg);
+    ws.send(JSON.stringify(msg));
+  };
+
+  // A killed office cannot tidy up after itself (Windows has no gentler way to
+  // stop a child), so its entries stay in the list of running offices, and so
+  // does the folder of its agents' MCP files (`mcp/<pid>-<rand>/`), whose
+  // tokens died with it. The ones naming the process this run started are
+  // taken back, and no other: the entries, then the files that folder names
+  // itself, then the folder, only when nothing else is in it.
+  const removeOfficeLeftovers = () => {
+    if (!server || !serverExit) return;
+    const mine = (file) => readJson(file)?.pid === server.pid;
+    const candidates = [path.join(officeDir, 'server.json')];
+    try {
+      for (const name of fs.readdirSync(path.join(officeDir, 'servers'))) {
+        if (name.endsWith('.json')) candidates.push(path.join(officeDir, 'servers', name));
+      }
+    } catch {
+      // No registry folder.
+    }
+    for (const file of candidates) {
+      if (!mine(file)) continue;
+      try {
+        fs.unlinkSync(file);
+        registryRemoved.push(path.relative(officeDir, file));
+      } catch {
+        notes.push(`A stale entry of this run's office is left: ${file}`);
+      }
+    }
+    const mcpDir = path.join(officeDir, 'mcp');
+    let folders = [];
+    try {
+      folders = fs.readdirSync(mcpDir).filter((name) => name.startsWith(`${server.pid}-`));
+    } catch {
+      // No MCP folder.
+    }
+    for (const name of folders) {
+      const folder = path.join(mcpDir, name);
+      try {
+        for (const file of fs.readdirSync(folder)) {
+          if (/^agent-\d+\.json$/.test(file)) fs.unlinkSync(path.join(folder, file));
+        }
+        fs.rmdirSync(folder);
+        registryRemoved.push(path.relative(officeDir, folder));
+      } catch {
+        notes.push(`A folder of this run's office is left: ${folder}`);
+      }
+    }
+  };
+
+  /** The consent goes back to what it was: it was allowed for the run alone. */
+  const restoreConsent = () => {
+    mcpConsentAfter = (readJson(configFile) ?? {}).officeMcpConsent ?? 'unanswered';
+    if (!mcpGrantedHere || keepMcpConsent) return;
+    if (server && !serverExit)
+      notes.push('The office could not be stopped: it may write its own answer back.');
+    const config = readJson(configFile);
+    if (!config) return;
+    if (before.config.officeMcpConsent === undefined) delete config.officeMcpConsent;
+    else config.officeMcpConsent = before.config.officeMcpConsent;
+    const tmp = `${configFile}.trial-tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
+    fs.renameSync(tmp, configFile);
+    mcpConsentAfter = config.officeMcpConsent ?? 'unanswered';
+  };
+
+  /**
+   * Takes back what the run started, in the order that leaves nothing behind:
+   * its agents closed, the office stopped, what a stopped office cannot remove
+   * removed, and only then the consent put back (a running office would write
+   * its own answer over it). One step failing does not keep the next from
+   * running. Asked for at the run's end, on an error and on a signal: done once.
+   */
+  let tidied = null;
+  const tidyUp = () =>
+    (tidied ??= (async () => {
+      const step = async (what, fn) => {
+        try {
+          await fn();
+        } catch (err) {
+          notes.push(`Tidying up (${what}) failed: ${mask(err?.message ?? err)}`);
+        }
+      };
+      await step('closing the agents', async () => {
+        if (ws?.readyState !== 1) return;
+        if (runInfo && runGoneAt === null && runInfo.finishedAt === null) {
+          send({ type: 'stopWorkflow', crewId: runInfo.crewId });
+          await sleep(500);
+        }
+        for (const agent of oursOpen()) send({ type: 'closeAgent', id: agent.id });
+        for (let waited = 0; oursOpen().length > 0 && waited < 30_000; waited += 200)
+          await sleep(200);
+      });
+      await step('the browser', () => shots.browser?.close());
+      await step('the terminals', () => {
+        for (const mirror of mirrors.values()) mirror.close();
+      });
+      await step('the connection', () => ws?.close());
+      await step('stopping the office', async () => {
+        if (!server || serverExit) return;
+        server.kill();
+        for (let waited = 0; !serverExit && waited < 10_000; waited += 100) await sleep(100);
+      });
+      await step('the message log', () => {
+        const stream = messagesFile;
+        messagesFile = null;
+        if (!stream || stream.destroyed) return undefined;
+        return new Promise((resolve) => {
+          const timer = setTimeout(resolve, 3000);
+          stream.end(() => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+      });
+      await step("the office's log", () => {
+        if (server) fs.writeFileSync(path.join(outDir, 'server.log'), mask(serverOut));
+      });
+      await step("the office's own entries", removeOfficeLeftovers);
+      await step('the consent', restoreConsent);
+    })());
+  held.tidyUp = tidyUp;
+
+  // Stopped from outside: the run ends where it is and still takes back what
+  // it started. Asked twice, it skips the evidence and only tidies up.
+  let signals = 0;
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
+    process.on(signal, () => {
+      signals++;
+      if (signals === 1) {
+        say(`${signal}: ending the run and taking back what it started`);
+        end('interrupted', `Stopped by ${signal}.`);
+        return;
+      }
+      void tidyUp().finally(() => process.exit(130));
+    });
+  }
+  // An error thrown outside the run's own steps (a stream, a timer): the same.
+  const onCrash = (err) => {
+    console.error(`[trial] ${mask(err?.stack ?? err)}`);
+    void tidyUp().finally(() => process.exit(1));
+  };
+  process.on('uncaughtException', onCrash);
+  process.on('unhandledRejection', onCrash);
 
   // ── Start the office ──
-  const port = opts.port !== undefined ? Number(opts.port) : await freePort();
+  const port = fixedPort ?? (await freePort());
   // Names only are kept for the report, never a value.
   const env = {};
   const envRemoved = [];
@@ -706,26 +917,30 @@ async function run(opts) {
   }
   const cliArgs = [CLI, '--port', String(port), '--host', '127.0.0.1'];
   if (opts['no-trust'] !== true) cliArgs.push('--trust-directories');
-  const server = spawn(process.execPath, cliArgs, {
+  server = spawn(process.execPath, cliArgs, {
     cwd: dir,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let serverOut = '';
-  let serverExit = null;
   server.stdout.on('data', (chunk) => (serverOut += chunk.toString()));
   server.stderr.on('data', (chunk) => (serverOut += chunk.toString()));
   server.on('exit', (code, signal) => (serverExit = { code, signal, at: t() }));
+  server.on('error', (err) => {
+    serverOut += `\n[trial] the office could not be started: ${err.message}\n`;
+    serverExit ??= { code: null, signal: null, at: t() };
+  });
 
   let printedUrl = null;
-  while (!printedUrl && !serverExit && t() < 90_000) {
+  while (!printedUrl && !serverExit && !outcome && t() < 90_000) {
     printedUrl = PRINTED_URL.exec(serverOut)?.[1] ?? null;
     if (!printedUrl) await sleep(100);
   }
   if (!printedUrl) {
-    fs.writeFileSync(path.join(outDir, 'server.log'), mask(serverOut));
-    if (!serverExit) server.kill();
-    fail(`the office never printed its address (see ${path.join(outDir, 'server.log')})`);
+    throw new Error(
+      outcome
+        ? 'stopped before the office was up'
+        : `the office never printed its address (see ${path.join(outDir, 'server.log')})`,
+    );
   }
   const serverStartMs = t();
   token = new URL(printedUrl).searchParams.get('token') ?? '';
@@ -734,25 +949,19 @@ async function run(opts) {
 
   // ── Connect as an office does ──
   const WebSocket = require('ws');
-  const messagesFile = fs.createWriteStream(path.join(outDir, 'messages.jsonl'));
-  const record = (direction, msg) => {
-    let text = JSON.stringify(msg);
-    if (text.length > 6000) {
-      const kept = { type: msg.type, bytes: text.length };
-      if (msg.type === 'workflowsLoaded')
-        Object.assign(kept, { available: msg.available, runs: msg.runs });
-      text = JSON.stringify(kept);
+  const messages = fs.createWriteStream(path.join(outDir, 'messages.jsonl'));
+  messages.on('error', (err) => {
+    // The run goes on without its log rather than end on it.
+    if (messagesFile === messages) {
+      messagesFile = null;
+      notes.push(`The log of messages stopped: ${err.message}`);
     }
-    messagesFile.write(`${JSON.stringify({ t: t(), d: direction })}\t${mask(text)}\n`);
-  };
+  });
+  messagesFile = messages;
 
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token)}`, {
+  ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token)}`, {
     origin,
   });
-  const send = (msg) => {
-    record('out', msg);
-    ws.send(JSON.stringify(msg));
-  };
 
   // What the office says, kept as it arrives.
   const office = {
@@ -767,16 +976,11 @@ async function run(opts) {
     preexisting: new Set(),
     snapshotAt: null,
   };
-  const agents = new Map();
-  const mirrors = new Map();
   const stageEvents = [];
   const crewEvents = [];
   const crewMembers = new Map();
-  const notes = [];
   let scenarioAt = null;
   let rejected = null;
-  let runInfo = null;
-  let runGoneAt = null;
   let lastActivityAt = 0;
   const touch = () => (lastActivityAt = t());
 
@@ -801,6 +1005,7 @@ async function run(opts) {
         awaitingInput: false,
         toolCalls: 0,
         tools: {},
+        toolIds: new Set(),
         permissionWaits: [],
         permissionSince: null,
         context: null,
@@ -811,8 +1016,6 @@ async function run(opts) {
     }
     return agent;
   };
-  const ours = () => [...agents.values()].filter((a) => a.ours);
-  const oursOpen = () => ours().filter((a) => a.closedAt === null);
 
   const setStatus = (agent, status, awaitingInput) => {
     const now = t();
@@ -840,15 +1043,6 @@ async function run(opts) {
     }
   };
 
-  // The office's own browser page, for pictures of the run (best effort).
-  const shots = {
-    wanted: opts.screenshots === true,
-    taken: [],
-    error: null,
-    browser: null,
-    page: null,
-    lastAt: 0,
-  };
   const shoot = async (label, { force = false } = {}) => {
     if (!shots.page || shots.taken.length >= 14) return;
     if (!force && t() - shots.lastAt < 20_000) return;
@@ -865,7 +1059,7 @@ async function run(opts) {
       await shots.page.screenshot({ path: path.join(outDir, 'shots', name) });
       shots.taken.push({ at: t(), file: `shots/${name}` });
     } catch (err) {
-      shots.error ??= String(err.message ?? err).split('\n')[0];
+      shots.error ??= mask(String(err.message ?? err).split('\n')[0]);
     }
   };
 
@@ -924,10 +1118,45 @@ async function run(opts) {
       if (stage.note) known.note = stage.note;
       runInfo.stages.set(stage.id, known);
     }
-    if (current.finished && runInfo.finishedAt === null) {
-      runInfo.finishedAt = t();
-      say('workflow run finished: every stage is closed');
+    if (current.finished) {
+      if (runInfo.finishedAt === null) {
+        runInfo.finishedAt = t();
+        say('workflow run finished: every stage is closed');
+      }
+    } else if (runInfo.finishedAt !== null) {
+      // A closed stage may be started again: then the run is not over.
+      runInfo.finishedAt = null;
+      say('workflow run open again: a closed stage was started again');
     }
+  };
+
+  // ── Which transcript is whose (the office's saved state says) ──
+  const refreshSessions = () => {
+    for (const saved of readJson(stateFile)?.agents ?? []) {
+      const agent = agents.get(saved.id);
+      if (agent?.ours && saved.jsonlFile)
+        agent.session = { id: saved.sessionId, jsonlFile: saved.jsonlFile };
+    }
+  };
+
+  /** A permission wait is over, as the office shows it; how long it lasted is kept. */
+  const clearPermission = (agent) => {
+    if (agent.permissionSince === null) return;
+    const wait = agent.permissionWaits[agent.permissionWaits.length - 1];
+    if (wait) wait.ms = t() - agent.permissionSince;
+    agent.permissionSince = null;
+    if (agent.ours) touch();
+  };
+
+  /**
+   * Which transcript is an agent's: the office's saved state says, and only
+   * while the agent is in it. Looked for from the moment it joins, since one
+   * that answers and is closed by its lead may be gone by the next look.
+   */
+  const captureSession = (agent, tries = 0) => {
+    refreshSessions();
+    if (agent.session || tidied || tries >= 60) return;
+    setTimeout(() => captureSession(agent, tries + 1), 500);
   };
 
   const onMessage = (msg) => {
@@ -1019,6 +1248,7 @@ async function run(opts) {
         );
         if (agent.ours) {
           touch();
+          captureSession(agent);
           attachTerminal(agent.id);
           setTimeout(() => void shoot(`agent-${agent.id}-joined`), 4000);
         }
@@ -1040,12 +1270,23 @@ async function run(opts) {
       }
       case 'agentToolStart': {
         const agent = agentOf(msg.id);
-        const name = msg.toolName ?? String(msg.status ?? 'tool').split(/[ :]/)[0];
-        agent.toolCalls++;
-        agent.tools[name] = (agent.tools[name] ?? 0) + 1;
+        // The office is told of a tool again when a background launch is
+        // confirmed and after a turn's end: one call, counted once.
+        if (typeof msg.toolId !== 'string' || !agent.toolIds.has(msg.toolId)) {
+          if (typeof msg.toolId === 'string') agent.toolIds.add(msg.toolId);
+          const name = msg.toolName ?? String(msg.status ?? 'tool').split(/[ :]/)[0];
+          agent.toolCalls++;
+          agent.tools[name] = (agent.tools[name] ?? 0) + 1;
+        }
+        // As in the office: a tool starting with no prompt pending ends the wait.
+        if (msg.permissionActive !== true) clearPermission(agent);
         if (agent.ours) touch();
         break;
       }
+      case 'agentToolsClear':
+        // A turn's end takes the prompt with it (the office clears its bubble too).
+        clearPermission(agentOf(msg.id));
+        break;
       case 'agentToolDone':
       case 'subagentToolStart':
       case 'subagentToolDone':
@@ -1069,16 +1310,9 @@ async function run(opts) {
         }
         break;
       }
-      case 'agentToolPermissionClear': {
-        const agent = agentOf(msg.id);
-        if (agent.permissionSince !== null) {
-          const wait = agent.permissionWaits[agent.permissionWaits.length - 1];
-          if (wait) wait.ms = t() - agent.permissionSince;
-          agent.permissionSince = null;
-          if (agent.ours) touch();
-        }
+      case 'agentToolPermissionClear':
+        clearPermission(agentOf(msg.id));
         break;
-      }
       case 'agentContextUsage':
         agentOf(msg.id).context = { tokens: msg.contextTokens, max: msg.maxContextTokens };
         break;
@@ -1110,8 +1344,7 @@ async function run(opts) {
     ws.on('open', resolve);
     ws.on('error', reject);
   }).catch((err) => {
-    server.kill();
-    fail(`could not connect to the office: ${err.message}`);
+    throw new Error(`could not connect to the office: ${err.message}`);
   });
   ws.on('message', (raw) => {
     try {
@@ -1163,14 +1396,6 @@ async function run(opts) {
     });
   }, 5000);
 
-  // ── Which transcript is whose (the office's saved state says) ──
-  const refreshSessions = () => {
-    for (const saved of readJson(stateFile)?.agents ?? []) {
-      const agent = agents.get(saved.id);
-      if (agent?.ours && saved.jsonlFile)
-        agent.session = { id: saved.sessionId, jsonlFile: saved.jsonlFile };
-    }
-  };
   const usageNow = () => {
     refreshSessions();
     const models = {};
@@ -1179,7 +1404,12 @@ async function run(opts) {
     return totalOf(models);
   };
 
-  /** The command lines the office started its agents with (they hold no secret). */
+  /**
+   * The command lines of sessions started with a session id, by that id: how a
+   * run's agents were launched (mode, model, what they were handed). Every
+   * session on the machine matches the search, so only the ones this run's
+   * agents hold are ever written down.
+   */
   const processes = new Map();
   const readProcesses = () => {
     let lines = [];
@@ -1214,12 +1444,6 @@ async function run(opts) {
   };
 
   // ── Grant the Pixel Office MCP for the run, when asked to ──
-  let mcpGrantedHere = false;
-  let outcome = null;
-  const end = (result, detail = '') => {
-    outcome ??= { result, detail, at: t() };
-  };
-
   const needsMcp = scenario.scenario === 'workflow';
   if (office.access?.readOnly) end('refused', 'The office took this connection as read-only.');
   else if (!office.terminal?.available) {
@@ -1269,7 +1493,8 @@ async function run(opts) {
       await sleep(1500);
       await shoot('office-before', { force: true });
     } catch (err) {
-      shots.error = String(err.message ?? err).split('\n')[0];
+      // A page that would not load names its address, token and all.
+      shots.error = mask(String(err.message ?? err).split('\n')[0]);
       say(`no pictures: ${shots.error}`);
     }
   }
@@ -1425,97 +1650,21 @@ async function run(opts) {
   for (const agent of agents.values())
     if (agent.status) setStatus(agent, agent.status, agent.awaitingInput);
 
-  if (ws.readyState === 1) {
-    if (runInfo && runGoneAt === null && runInfo.finishedAt === null) {
-      send({ type: 'stopWorkflow', crewId: runInfo.crewId });
-      await sleep(500);
-    }
-    for (const agent of oursOpen()) send({ type: 'closeAgent', id: agent.id });
-    for (let waited = 0; oursOpen().length > 0 && waited < 30_000; waited += 200) await sleep(200);
-  }
+  await tidyUp();
   const notClosed = oursOpen().map((a) => a.id);
   if (notClosed.length > 0)
     notes.push(`Not confirmed closed before the office stopped: agents ${notClosed.join(', ')}.`);
-
-  if (shots.browser) await shots.browser.close().catch(() => {});
-  for (const mirror of mirrors.values()) mirror.close();
-  ws.close();
-  if (!serverExit) {
-    server.kill();
-    for (let waited = 0; !serverExit && waited < 10_000; waited += 100) await sleep(100);
-  }
-  await new Promise((resolve) => messagesFile.end(resolve));
-  fs.writeFileSync(path.join(outDir, 'server.log'), mask(serverOut));
-
-  // A killed office cannot tidy up after itself (Windows has no gentler way to
-  // stop a child), so its entries stay in the list of running offices. The
-  // ones naming the process this run started are taken back, and no other.
-  const registryRemoved = [];
-  if (serverExit) {
-    const mine = (file) => readJson(file)?.pid === server.pid;
-    const candidates = [path.join(officeDir, 'server.json')];
-    try {
-      for (const name of fs.readdirSync(path.join(officeDir, 'servers'))) {
-        if (name.endsWith('.json')) candidates.push(path.join(officeDir, 'servers', name));
-      }
-    } catch {
-      // No registry folder.
-    }
-    for (const file of candidates) {
-      if (!mine(file)) continue;
-      try {
-        fs.unlinkSync(file);
-        registryRemoved.push(path.relative(officeDir, file));
-      } catch {
-        notes.push(`A stale entry of this run's office is left: ${file}`);
-      }
-    }
-  }
-
-  // The same for the folder of its agents' MCP files (`mcp/<pid>-<rand>/`),
-  // whose tokens died with it: the files it names itself, then the folder,
-  // only when nothing else is in it.
-  if (serverExit) {
-    const mcpDir = path.join(officeDir, 'mcp');
-    let folders = [];
-    try {
-      folders = fs.readdirSync(mcpDir).filter((name) => name.startsWith(`${server.pid}-`));
-    } catch {
-      // No MCP folder.
-    }
-    for (const name of folders) {
-      const folder = path.join(mcpDir, name);
-      try {
-        for (const file of fs.readdirSync(folder)) {
-          if (/^agent-\d+\.json$/.test(file)) fs.unlinkSync(path.join(folder, file));
-        }
-        fs.rmdirSync(folder);
-        registryRemoved.push(path.relative(officeDir, folder));
-      } catch {
-        notes.push(`A folder of this run's office is left: ${folder}`);
-      }
-    }
-  }
-
-  // The consent goes back to what it was: it was allowed for the run alone.
-  let mcpConsentAfter = (readJson(configFile) ?? {}).officeMcpConsent ?? 'unanswered';
-  if (mcpGrantedHere && !keepMcpConsent) {
-    const config = readJson(configFile);
-    if (config) {
-      if (before.config.officeMcpConsent === undefined) delete config.officeMcpConsent;
-      else config.officeMcpConsent = before.config.officeMcpConsent;
-      const tmp = `${configFile}.trial-tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
-      fs.renameSync(tmp, configFile);
-      mcpConsentAfter = config.officeMcpConsent ?? 'unanswered';
-    }
-  }
 
   // ── What it used ──
   const totals = {};
   let leadReport = null;
   for (const agent of ours()) {
-    if (!agent.session) continue;
+    if (!agent.session) {
+      notes.push(
+        `Agent ${agent.id}'s transcript was never identified: its tokens are not in the totals.`,
+      );
+      continue;
+    }
     const usage = sessionUsage(agent.session.jsonlFile);
     agent.usage = {
       models: usage.models,
@@ -1643,13 +1792,35 @@ async function run(opts) {
     planted: PLANTED,
   };
   if (summary.run && !Number.isFinite(summary.run.firstStageAt)) summary.run.firstStageAt = null;
-  fs.writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify(summary, null, 2));
-  fs.writeFileSync(path.join(outDir, 'processes.txt'), [...processes.values()].join('\n\n'));
-  const report = summaryMarkdown(summary);
+  fs.writeFileSync(path.join(outDir, 'summary.json'), maskedJson(summary, 2));
+  // The command lines of this run's agents and of nothing else: the machine's
+  // other sessions matched the same search, and their arguments are not ours
+  // to keep.
+  const launched = ours()
+    .map((agent) => agent.session && processes.get(agent.session.id))
+    .filter(Boolean);
+  fs.writeFileSync(path.join(outDir, 'processes.txt'), mask(launched.join('\n\n')));
+  const report = mask(summaryMarkdown(summary));
   fs.writeFileSync(path.join(outDir, 'summary.md'), report);
   console.log(`\n${report}`);
   console.log(`[trial] written to ${outDir}`);
-  process.exit(outcome.result === 'completed' ? 0 : 2);
+  return outcome.result === 'completed' ? 0 : 2;
+}
+
+/**
+ * A run, and whatever it started taken back however it ends: finished, thrown
+ * out of, or stopped from outside.
+ */
+async function run(opts) {
+  const held = { tidyUp: null, mask: (text) => String(text) };
+  try {
+    return await trial(opts, held);
+  } catch (err) {
+    console.error(`[trial] ${held.mask(err?.stack ?? err)}`);
+    return 1;
+  } finally {
+    await held.tidyUp?.();
+  }
 }
 
 function summaryMarkdown(s) {
@@ -1801,10 +1972,13 @@ const { command, opts } = parseArgs(process.argv.slice(2));
 if (command === 'sample') writeSample(opts._[0]);
 else if (command === 'reset-sample') resetSample(opts._[0]);
 else if (command === 'run') {
-  run(opts).catch((err) => {
-    console.error(`[trial] ${err.stack ?? err}`);
-    process.exit(1);
-  });
+  run(opts).then(
+    (code) => process.exit(code),
+    (err) => {
+      console.error(`[trial] ${err.stack ?? err}`);
+      process.exit(1);
+    },
+  );
 } else {
   console.log(
     [
