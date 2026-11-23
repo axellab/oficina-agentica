@@ -1,35 +1,36 @@
 <h1 align="center">
-  <a href="https://github.com/pixel-agents-hq/pixel-agents/discussions">
-    <img src="webview-ui/public/banner.png" alt="Pixel Agents" width="728">
+  <a href="https://github.com/axellab/oficina-agentica">
+    <img src="docs/images/agent-office-banner.png" alt="Agent Office" width="728">
   </a>
 </h1>
 <div align="center">
 
-[![version](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fpablodelucca%2F3cd28398fa4a2c0a636e1d51d41aee39%2Fraw%2Fversion.json)](https://github.com/pixel-agents-hq/pixel-agents/releases)
-[![marketplaces](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fpablodelucca%2F3cd28398fa4a2c0a636e1d51d41aee39%2Fraw%2Finstalls.json)](https://marketplace.visualstudio.com/items?itemName=pablodelucca.pixel-agents)
-[![npm downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fpablodelucca%2F3cd28398fa4a2c0a636e1d51d41aee39%2Fraw%2Fnpm-downloads.json)](https://www.npmjs.com/package/pixel-agents)
-[![stars](https://img.shields.io/github/stars/pixel-agents-hq/pixel-agents?logo=github&color=0183ff&style=flat)](https://github.com/pixel-agents-hq/pixel-agents/stargazers)
-[![license](https://img.shields.io/github/license/pixel-agents-hq/pixel-agents?color=0183ff&style=flat)](https://github.com/pixel-agents-hq/pixel-agents/blob/main/LICENSE)
-[![discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white&style=flat)](https://discord.gg/Yk7jXebv9H)
+[![built on Pixel Agents](https://img.shields.io/badge/built%20on-Pixel%20Agents-0183ff?style=flat)](https://github.com/pixel-agents-hq/pixel-agents)
+[![CI](https://img.shields.io/github/actions/workflow/status/axellab/oficina-agentica/ci.yml?branch=main&label=CI&style=flat)](https://github.com/axellab/oficina-agentica/actions/workflows/ci.yml)
+[![last commit](https://img.shields.io/github/last-commit/axellab/oficina-agentica?color=0183ff&style=flat)](https://github.com/axellab/oficina-agentica/commits/main)
+[![stars](https://img.shields.io/github/stars/axellab/oficina-agentica?logo=github&color=0183ff&style=flat)](https://github.com/axellab/oficina-agentica/stargazers)
+[![license](https://img.shields.io/github/license/axellab/oficina-agentica?color=0183ff&style=flat)](LICENSE)
 
 </div>
 
 <div align="center">
-<a href="https://pixel-agents.com">🌐 Website</a> • <a href="https://marketplace.visualstudio.com/items?itemName=pablodelucca.pixel-agents">🛒 VS Code</a> • <a href="https://open-vsx.org/extension/pablodelucca/pixel-agents">🛒 Open VSX</a> • <a href="https://www.npmjs.com/package/pixel-agents">📦 npm</a> • <a href="https://discord.gg/Yk7jXebv9H">👾 Discord</a> • <a href="CONTRIBUTING.md">🤝 Contributing</a> • <a href="CHANGELOG.md">📋 Changelog</a>
+<a href="docs/roles.md">🎭 Roles</a> • <a href="docs/playbooks.md">🧰 Playbooks</a> • <a href="docs/workflows.md">🔁 Workflows</a> • <a href="docs/roles.md#a-crew-agents-free-to-work-together">🤝 Crews</a> • <a href="#pixel-office-mcp">🧩 Pixel Office MCP</a> • <a href="#built-on-pixel-agents">👾 Pixel Agents</a> • <a href="CONTRIBUTING.md">🛠️ Contributing</a>
 </div>
 
 <br/>
 
-Pixel Agents turns the AI coding agents running in your terminals into animated pixel-art characters working in a tiny office. They walk to their desks, sit down, type when they're editing files, read when they're searching, and flag you visually when they're stuck waiting for input. The office is also where you run them: launch an agent into a project, pick its character, and see how much context it has left.
+Agent Office is a software team of AI agents that you run from a pixel-art office. Each agent comes in with a **Role** from the software lifecycle (Architect, Developer, QA Engineer, DevSecOps Engineer, Security Engineer, Cloud Engineer, or the Agile Project Manager that coordinates them), a **Contract** that says what it takes, what it delivers and what it never does, and **Playbooks** with the tools of its trade. Hand the team one request and a **Workflow** takes it stage by stage, each stage with the Role that owns it; set a **Crew** free and its agents call each other in and work together, while you watch them do it and can stop them at any moment.
 
-It ships in two forms from the same codebase:
+Inside it runs [Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents), the open-source project it is [built on](#built-on-pixel-agents): the office where the AI coding agents in your terminals become animated characters that walk to their desks, type when they're editing files, read when they're searching, and flag you when they're stuck waiting for input, and where you launch them, pick their character, and see how much context they have left. Agent Office keeps all of that and goes somewhere else with it: from watching agents work to giving a team its work.
 
-- **Standalone CLI** — `npx pixel-agents` starts a local server and serves the same office as a browser app, useful for tmux, remote, and non-VS Code workflows.
-- **VS Code extension** — [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=pablodelucca.pixel-agents) and [Open VSX](https://open-vsx.org/extension/pablodelucca/pixel-agents). Agents launch into VS Code terminals; characters render in the panel area.
+It runs in two forms from the same codebase, both built from this repository (see [Getting Started](#getting-started)):
 
-Claude Code is supported today; Codex, Gemini, Cursor, and others are on the roadmap. Want to add support for your favourite CLI? Join our [Discord](https://discord.gg/Yk7jXebv9H) and let us know!
+- **Standalone, in the browser** — a local server that serves the office as a browser app, with the agents in an embedded terminal. Everything is here, Crews and Workflows included.
+- **VS Code extension** — agents launch into VS Code terminals; characters render in the panel area. Roles come with their Contracts and Playbooks; Crews and Workflows are in the browser office only for now.
 
-![Pixel Agents screenshot](webview-ui/public/office.png)
+It runs Claude Code today, on your own plan. Agent Office is not published to npm or the Marketplaces: the `pixel-agents` package and extension you find there are Pixel Agents itself, without the team.
+
+![Agent Office screenshot](webview-ui/public/office.png)
 
 ## Features
 
@@ -50,63 +51,77 @@ Claude Code is supported today; Codex, Gemini, Cursor, and others are on the roa
 - **A hands-on tutorial** — at the end of the first-run Intro, [the greeter, Byte, can become a real agent](#the-tutorial) and show you around the office
 
 <p align="center">
-  <img src="webview-ui/public/characters.png" alt="Pixel Agents characters" width="600" style="image-rendering: pixelated;">
+  <img src="webview-ui/public/characters.png" alt="Agent Office characters" width="600" style="image-rendering: pixelated;">
 </p>
 
 ## Requirements
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and configured
+- Git and Node.js 22 (the version in [`.nvmrc`](.nvmrc)) to build it
 - **VS Code extension:** VS Code 1.105.0 or later
-- **Standalone CLI:** Node.js 20 or later
 - Windows, Linux, or macOS
 
 ## Getting Started
 
-The VS Code extension and the standalone CLI can run side by side: both share the office layout but keep separate agents and settings.
-
-### VS Code extension
-
-1. Install Pixel Agents from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=pablodelucca.pixel-agents) or [Open VSX](https://open-vsx.org/extension/pablodelucca/pixel-agents).
-2. Open the **Pixel Agents** panel beside the terminal.
-3. Click **+** (bottom left) to open its drawer of **Directories**, then click one to launch Claude Code in it. The drawer is empty at first: turn on **Settings → Show Workspace Folders**, or add a folder with **+ Directory** (see [Directories](#directories) below).
-
-To use Claude with `--dangerously-skip-permissions`, turn on **Settings → Skip Permissions**. It stays on for every agent launched from that host until you turn it off. Only use this when you accept the security implications.
-
-Pixel Agents also detects Claude sessions started outside the extension. Turn on **Settings → Watch All Sessions** to include sessions from other workspaces.
-
-### Standalone CLI
-
-Run Pixel Agents from anywhere:
+Agent Office runs from a build of this repository:
 
 ```bash
-npx pixel-agents
+git clone https://github.com/axellab/oficina-agentica.git
+cd oficina-agentica
+npm ci
+npm run build
 ```
 
-The CLI prints a local URL. Click **+** to open the drawer of Directories: add one with **+ Directory**, or turn on **Settings → Show Start Directory** to list the folder you started in. Pick a Directory to launch Claude Code in the browser's embedded terminal (on a phone, tap the **+** card). Sessions started in your own terminal show up too. To install globally:
+The standalone office and the VS Code extension can run side by side: both share the office layout but keep separate agents and settings.
+
+The engine inside keeps Pixel Agents' names, so you will meet them along the way: the command prints `pixel-agents` in its help, the VS Code panel is called **Pixel Agents**, and its data lives under `~/.pixel-agents/`. If you also use the published Pixel Agents, it shares that folder (layout, characters, settings, hook scripts) with this build.
+
+### Standalone, in the browser
+
+Start the office from the folder you built it in:
 
 ```bash
-npm install --global pixel-agents
-pixel-agents
+node dist/cli.js
 ```
+
+It prints a local URL. Click **+** to open the drawer of Directories: add one with **+ Directory**, or turn on **Settings → Show Start Directory** to list the folder you started in. Pick a Directory to launch Claude Code in the browser's embedded terminal (on a phone, tap the **+** card); press the **Role** row first to launch it as a [Role](#roles). Sessions started in your own terminal show up too.
 
 Use a fixed address or port when needed:
 
 ```bash
-pixel-agents --port 3100
-pixel-agents --host 127.0.0.1 --port 3100
-pixel-agents --no-terminal
-pixel-agents --help
+node dist/cli.js --port 3100
+node dist/cli.js --host 127.0.0.1 --port 3100
+node dist/cli.js --no-terminal
+node dist/cli.js --help
 ```
 
 The printed URL carries a `?token=`. Without it you can watch the office in a sort of read-only mode: no agents can be launched, terminals are not shown, and layout and settings cannot be edited. The token is kept in `~/.pixel-agents/standalone-token`, so a bookmark keeps working if you also fix `--port`. Treat the URL as a secret: whoever holds it can do all of the above.
 
+### VS Code extension
+
+1. Package the build and install it:
+
+   ```bash
+   npx @vscode/vsce package --allow-star-activation --out agent-office.vsix
+   code --install-extension ./agent-office.vsix --force
+   ```
+
+   It installs under Pixel Agents' extension id, so it takes the place of the Marketplace extension if you have that one.
+
+2. Run **Developer: Reload Window**, then open the **Pixel Agents** panel beside the terminal.
+3. Click **+** (bottom left) to open its drawer of **Directories**, then click one to launch Claude Code in it. The drawer is empty at first: turn on **Settings → Show Workspace Folders**, or add a folder with **+ Directory** (see [Directories](#directories) below).
+
+To use Claude with `--dangerously-skip-permissions`, turn on **Settings → Skip Permissions**. It stays on for every agent launched from that host until you turn it off. Only use this when you accept the security implications.
+
+The office also detects Claude sessions started outside the extension. Turn on **Settings → Watch All Sessions** to include sessions from other workspaces.
+
 ### On your phone, via Tailscale
 
-1. Install [Tailscale](https://tailscale.com/download) on the computer running Pixel Agents and on your phone, both signed in to the same tailnet.
+1. Install [Tailscale](https://tailscale.com/download) on the computer running Agent Office and on your phone, both signed in to the same tailnet.
 2. Start the server on a fixed port, allowing the computer's tailnet name:
 
    ```bash
-   pixel-agents --port 3100 --allowed-host my-computer.my-tailnet.ts.net
+   node dist/cli.js --port 3100 --allowed-host my-computer.my-tailnet.ts.net
    ```
 
 3. Serve it to your tailnet over HTTPS:
@@ -146,6 +161,10 @@ To let a team run on its own, turn on the drawer's **Crew** switch before you la
 ### Workflows
 
 A Workflow takes one request through its stages, each owned by a Role. In the launch drawer, press the **Workflow** row and pick the kind of request (**New feature**, **Bug fix**, **Deep security analysis**, **Deep quality analysis** and **Sprint planning**, led by the Agile Project Manager, or one of the two or three each Role leads itself, such as the DevSecOps Engineer's **Pipeline troubleshooting** or the Security Engineer's **Threat model**), pick the Directory, then write what you need and press **Start**. The Workflow's lead comes in with a Crew, hands each stage to the Role that owns it (launching the ones it needs) and reports each stage as it goes; the **Workflow** panel shows every stage's state and the note it was closed with, and **Stop Workflow** ends the run. To change the stages or add Workflows of your own, write `~/.pixel-agents/workflows.json`. See [docs/workflows.md](docs/workflows.md).
+
+<p align="center">
+  <img src="docs/images/agent-office-workflow.png" alt="A New feature Workflow under way: two stages done, the Developer on Implementation, and the Agile Project Manager walking over to hand it the work" width="520">
+</p>
 
 ### Characters
 
@@ -187,6 +206,8 @@ Ask an agent in plain words — "start an agent in the api repo to review the RE
 | `close_agent`         | Close an agent, answering the Worktree question if its Worktree has uncommitted files                                                                                                                       |
 | `read_agent_terminal` | Read another agent's terminal screen                                                                                                                                                                        |
 | `send_message`        | Type text (tagged with who sent it) or press keys (to answer a prompt or a menu) in other agents' terminals, refused if their screen changed since it was read                                              |
+| `list_roles`          | See the Roles an agent can be launched as, who in the office holds each one, and each Role's Playbooks                                                                                                      |
+| `workflow`            | Read the request and the stages of the Workflow its Crew is running; its lead starts, finishes and skips the stages, in the order the office keeps                                                          |
 | `get_feature_guide`   | Read what Pixel Agents does, feature by feature, to answer your questions about the office accurately                                                                                                       |
 | `tutorial`            | The tutorial's quests and progress; its Guide also gets its skill's name (the brief on request) and skips a quest when you ask it to. Quests tick when the office sees them                                 |
 
@@ -203,45 +224,48 @@ The Intro's last step offers a guided tour, saying up front what yes does, becau
 
 ## Where This Is Going
 
-The vision is to play a game and build a product. Two goals follow from it: to build a familiar, intuitive interface for running and orchestrating a lot of agents; and to make the hours you spend doing it feel less like administration and more like play.
+Pixel Agents set out to make running agents feel less like administration and more like play. Agent Office keeps the play and points it at one thing: a software team you can hand real work to, and see doing it.
 
 Three things get there, and they are happening in parallel, not in sequence:
 
-- **Actually a game.** Scores for whatever you care about. Furniture that _does_ things. Offices you open like save files, one per project.
-- **Expand the orchestration frontier.** Embedded orchestration. Form a team by dragging a box around them. Hand work between agents. Point them at a board and let them pick up tasks themselves.
-- **Everywhere, with everything.** Today it's Claude Code in VS Code or the browser. It should be whatever agent you run, wherever you work. A new CLI is a subdirectory, not a rewrite — this is where help is most useful right now.
+- **A team with a shape.** Every Role with its definition, its Contract and its own Workflows in plain Markdown, so the team can be read, reviewed and changed like code, and a new Role follows the same structure as the seven that ship.
+- **The tools of each trade.** Playbooks that run what each Role really works with (scanners, linters, pipeline diagnosis, infrastructure and cost checks) and report evidence, never installing a tool, applying infrastructure or opening an account on their own.
+- **Work that moves by itself, in plain sight.** Crews and Workflows that take a request from requirements to delivery without you approving each step, inside limits the office enforces, while you see who is doing what and can stop it at any moment.
 
-Most of this is still ahead. See [Issues](https://github.com/pixel-agents-hq/pixel-agents/issues) and [Discussions](https://github.com/pixel-agents-hq/pixel-agents/discussions) for what's open, and [CONTRIBUTING.md](CONTRIBUTING.md) to jump in.
+It is early. Roles, Playbooks, Crews and Workflows are covered by the test suite against a stand-in for Claude Code and are still being proven with real sessions, and Crews and Workflows come to VS Code after the browser. See [CONTRIBUTING.md](CONTRIBUTING.md) to jump in.
 
 ## How It Works
 
-Pixel Agents uses two Claude Code detection paths:
+The office follows Claude Code through two detection paths, both Pixel Agents' own:
 
-- **Hooks mode** (default) — a hook script receives Claude events such as `SessionStart`, `PreToolUse`, `PermissionRequest`, and `Stop`. It discovers active Pixel Agents servers and sends authenticated events to each one.
+- **Hooks mode** (default) — a hook script receives Claude events such as `SessionStart`, `PreToolUse`, `PermissionRequest`, and `Stop`. It discovers the active servers and sends authenticated events to each one.
 - **Heuristic mode** (fallback) — when hooks are unavailable, the runtime infers agent status by scanning Claude's JSONL session transcripts under `~/.claude/projects/`. Transcripts are also read in hooks mode for details not present in an event.
 
-Pixel Agents does not modify Claude Code. Its hook configuration and persistent data live under `~/.claude/` and `~/.pixel-agents/` respectively. The usage bars are opt-in (**Settings → Usage Bars**): Claude Code reports plan limits only to its status line, so turning them on wraps your `statusLine` command in `~/.claude/settings.json` (yours keeps running unchanged), and turning them off restores it.
+The team sits on top of that. A Role is a folder of Markdown under [`roles/`](roles): when you launch an agent as one, the office hands that session its instructions and Contract as a system prompt file and its Playbooks as skills, and the [Pixel Office MCP](#pixel-office-mcp) is how the agents see and call each other. What a Crew may reach and the order of a Workflow's stages are enforced by the server, not left to what an agent was told.
+
+Agent Office does not modify Claude Code. Its hook configuration and persistent data live under `~/.claude/` and `~/.pixel-agents/` respectively. The usage bars are opt-in (**Settings → Usage Bars**): Claude Code reports plan limits only to its status line, so turning them on wraps your `statusLine` command in `~/.claude/settings.json` (yours keeps running unchanged), and turning them off restores it.
 
 ## Development
 
-To build from source, run the tests, or add support for another agent CLI, see [CONTRIBUTING.md](CONTRIBUTING.md). It covers setup, the project structure, how an event reaches the office, the asset format, and the hosted test reports. The end-to-end suite is described in [e2e/README.md](e2e/README.md).
+To run the tests, work with live rebuilds, or add support for another agent CLI, see [CONTRIBUTING.md](CONTRIBUTING.md). It covers setup, the project structure, how an event reaches the office, the asset format, and the hosted test reports; it was written for Pixel Agents and holds here, with this repository's address in place of that one. The end-to-end suite is described in [e2e/README.md](e2e/README.md), the project's vocabulary in [CONTEXT.md](CONTEXT.md).
 
 ## Troubleshooting
 
-- **Standalone will not start:** verify Node.js 20+, omit `--port` to choose a free port, or select another fixed port.
+- **Standalone will not start:** verify your Node.js version and that `npm run build` finished, omit `--port` to choose a free port, or select another fixed port.
 - **An agent is missing:** confirm **Settings → Instant Detection (Hooks)** is on and that the session belongs to the current workspace. Enable **Watch All Sessions** if needed.
 - **The UI looks disconnected:** open **Settings → Debug View** to inspect the server connection, transcript path, and latest agent data.
 - **Extension and standalone are both running:** this is supported. Current versions create separate files under `~/.pixel-agents/servers/`; stopping one does not remove the other.
-
-Still stuck? Ask in [Discord](https://discord.gg/Yk7jXebv9H) or open an [issue](https://github.com/pixel-agents-hq/pixel-agents/issues).
+- **A Role's agent says a tool is missing:** that is its Playbook checking before it runs anything. Playbooks never install a tool: install the one it names and ask again, or tell the agent to go on without it.
 
 ## Community & Contributing
 
-Join the [Discord](https://discord.gg/Yk7jXebv9H) to chat with other users and follow development. Use [Issues](https://github.com/pixel-agents-hq/pixel-agents/issues) to report bugs or request features, and [Discussions](https://github.com/pixel-agents-hq/pixel-agents/discussions) for questions and ideas.
+Agent Office is developed in the open in [this repository](https://github.com/axellab/oficina-agentica), and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) before opening one and read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request and read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
+The office inside has a community of its own: join the Pixel Agents [Discord](https://discord.gg/Yk7jXebv9H) to chat with its users and follow its development.
 
 ## Supporting the Project
+
+Agent Office stands on the work of [Pablo De Lucca](https://github.com/pablodelucca) and the Pixel Agents contributors. If the office makes your day better, support them:
 
 <a href="https://github.com/sponsors/pablodelucca">
   <img src="https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?logo=github" alt="GitHub Sponsors">
@@ -250,16 +274,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request and read ou
   <img src="https://img.shields.io/badge/Support-Ko--fi-ff5e5b?logo=ko-fi" alt="Ko-fi">
 </a>
 
-## Star History
+## Built on Pixel Agents
 
-<a href="https://www.star-history.com/?repos=pixel-agents-hq%2Fpixel-agents&type=date&legend=bottom-right">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=pixel-agents-hq/pixel-agents&type=date&theme=dark&legend=bottom-right&sealed_token=Vn3YGMuZ_HFZAf56zIUQGCBJDYtDq38sOReKlcxWklxR_ilwVLynb7CPraf5uPhnAU7fwHXXoO88tzLkq9tpEYIExl4N8tcXOmu0ehAXPu5DdXNwjixYsxb00LSfeJ25f_jLkcZcTpRKLKYOb9p4_dR1jjAyrWDs7aicdbqejaDtLcVyj-oSoKkBfrS5" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=pixel-agents-hq/pixel-agents&type=date&legend=bottom-right&sealed_token=Vn3YGMuZ_HFZAf56zIUQGCBJDYtDq38sOReKlcxWklxR_ilwVLynb7CPraf5uPhnAU7fwHXXoO88tzLkq9tpEYIExl4N8tcXOmu0ehAXPu5DdXNwjixYsxb00LSfeJ25f_jLkcZcTpRKLKYOb9p4_dR1jjAyrWDs7aicdbqejaDtLcVyj-oSoKkBfrS5" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=pixel-agents-hq/pixel-agents&type=date&legend=bottom-right&sealed_token=Vn3YGMuZ_HFZAf56zIUQGCBJDYtDq38sOReKlcxWklxR_ilwVLynb7CPraf5uPhnAU7fwHXXoO88tzLkq9tpEYIExl4N8tcXOmu0ehAXPu5DdXNwjixYsxb00LSfeJ25f_jLkcZcTpRKLKYOb9p4_dR1jjAyrWDs7aicdbqejaDtLcVyj-oSoKkBfrS5" />
- </picture>
-</a>
+Agent Office started as a fork of [Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents) ([pixel-agents.com](https://pixel-agents.com)) and keeps it whole inside, among the other things it is made of:
+
+- **What Pixel Agents brings** — the office and how it is drawn, the characters and their wardrobe, the layout editor, the detection of agents through hooks and transcripts, the standalone server and the VS Code extension, the embedded terminal and the phone shell, the usage and context bars, the radio, the Pixel Office MCP and the tutorial.
+- **What Agent Office adds** — the seven Roles with their Contracts, their fifteen Playbooks and the tools those run (among them [Pipeline Doctor](https://github.com/maikadevops-labs/pipeline-doctor), read where your repository has it), Crews, the eighteen Workflows, one per kind of request, and the tools and office panels that go with them.
 
 ## License
 
-Pixel Agents is available under the [MIT License](LICENSE).
+Agent Office is available under the [MIT License](LICENSE), as Pixel Agents is, and keeps its copyright notice.
