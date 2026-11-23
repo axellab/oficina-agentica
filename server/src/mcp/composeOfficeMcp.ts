@@ -16,7 +16,8 @@ import type { ServerMessage } from '../../../core/src/messages.js';
 import { characterRenderer } from '../characterArt.js';
 import { commitCharacterProfiles } from '../characterProfilesPersistence.js';
 import { getCharacterProfiles, getWardrobeItems } from '../characterProfilesStore.js';
-import { getOfficeMcpConsent, readConfig } from '../configPersistence.js';
+import { getOfficeMcpConsent, getOfficeMcpReadOnly, readConfig } from '../configPersistence.js';
+import { type CrewPlace, Crews } from '../crews.js';
 import {
   normalizeDirectoryPath,
   setDirectoryCharacters,
@@ -99,8 +100,17 @@ export interface OfficeMcpFeature extends AgentMcpAccess {
   /** Settings → Replay the Intro: the Intro's MCP ask again, whatever was
    *  answered, where the MCP is offered (`offered()`); elsewhere nothing. */
   replayAsk(send: (message: ServerMessage) => void): void;
+  /** The Crews of this office, to an office connecting: who is in each and
+   *  what its agents last did to each other. Every office is told (a view-only
+   *  one sees the agents and their Messages already); nothing where this
+   *  office's agents can't launch agents (no Crew is ever started there). */
+  crewsSnapshot(send: (message: ServerMessage) => void): void;
+  /** The user's launch starts a Crew (`launchAgent.crew`): the place its first
+   *  agent takes, released once the launch settled; undefined where none can
+   *  be started now. */
+  startCrew(): CrewPlace | undefined;
   /** Answer one of an office's MCP messages (consent, its switches, the editing
-   *  locks, the layout editor's and the Characters view's undo); false when it isn't one. `client` is the office
+   *  locks, the layout editor's and the Characters view's undo, a Crew's end); false when it isn't one. `client` is the office
    *  sending it; replies meant for it alone go to `reply`. */
   handleMessage(
     message: Record<string, unknown>,
@@ -222,19 +232,48 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
     writePlugin: (name) =>
       facts.provider.skills ? writeOnboardingPlugin(facts.provider.skills, name) : undefined,
   });
-  const closing = surface.close ? createClosing(facts, surface.close, terminals) : undefined;
+  // Crews: agents the user set free to work together through these tools. Only
+  // an office whose agents can launch agents ever starts one.
+  const crews = new Crews({
+    store,
+    unavailable: () => {
+      if (!surface.launch) return "This office's agents can't launch other agents.";
+      if (!officeMcp.offered()) {
+        return "A Crew works through the Pixel Agents Office MCP, which this office can't give its agents.";
+      }
+      if (getOfficeMcpConsent() !== 'granted') {
+        return 'A Crew works through the Pixel Agents Office MCP: turn it on in Settings first.';
+      }
+      if (getOfficeMcpReadOnly()) {
+        return 'The Pixel Agents Office MCP is read-only in Settings: a Crew needs it to launch and message agents.';
+      }
+      return null;
+    },
+  });
+  const closing = surface.close ? createClosing(facts, surface.close, terminals, crews) : undefined;
   const launch = surface.launch;
   const office: OfficeOperations = {
     agents: createAgentsView(facts, (id) => terminals.has(id)),
     layout: createLayoutOps(facts, layoutEdits),
-    messaging: createMessaging(store, terminals, surface.deliveryGuard),
+    messaging: createMessaging(store, terminals, surface.deliveryGuard, crews),
     visits,
     characters: createCharacterOps(facts, characterEdits),
     directories,
     roles: createRoleOps(store),
     tutorial,
     // launch_agent's launch gives the agent this MCP, like any other launch.
-    ...(launch ? { launch: createLaunching(facts, (request) => launch(request, officeMcp)) } : {}),
+    ...(launch
+      ? {
+          launch: createLaunching(
+            facts,
+            (request) => launch(request, officeMcp),
+            crews,
+            // The launcher walks over to the agent it launched, as a Message's sender does.
+            ({ fromId, toIds, gist }) =>
+              store.broadcast({ type: 'agentMessageShow', fromId, toIds: [...toIds], gist }),
+          ),
+        }
+      : {}),
     ...(closing ? { close: closing } : {}),
     ...(surface.pcShells ? { shells: createPcShellOps(surface.pcShells) } : {}),
   };
@@ -264,6 +303,15 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
       if (officeMcp.offered()) send(officeMcp.replayedConsentRequest());
     },
 
+    crewsSnapshot(send) {
+      if (!surface.launch) return;
+      const tell = () => send(crews.statusMessage());
+      // Whether a Crew can be started hangs on whether this server serves /mcp.
+      if (decided) tell();
+      else void whenDecided.then(tell);
+    },
+    startCrew: () => crews.startForLaunch(),
+
     handshake(send, afterHooksAsks) {
       const offer = () => {
         if (!officeMcp.offered()) return;
@@ -284,6 +332,7 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
 
     handleMessage(message, client, reply) {
       if (tutorial.handleMessage(message, reply)) return true;
+      if (crews.handleMessage(message)) return true;
       const handled = handleOfficeMcpMessage(message, {
         officeMcp,
         layoutEdits,
@@ -295,6 +344,15 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
       // The consent decides whether the tutorial can be offered.
       if (message.type === 'officeMcpConsentResponse' || message.type === 'setOfficeMcpEnabled') {
         tutorial.broadcastStatus();
+      }
+      // The consent and the read-only switch decide whether a Crew can be started.
+      if (
+        surface.launch &&
+        (message.type === 'officeMcpConsentResponse' ||
+          message.type === 'setOfficeMcpEnabled' ||
+          message.type === 'setOfficeMcpReadOnly')
+      ) {
+        crews.broadcast();
       }
       return handled;
     },
@@ -315,6 +373,7 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
       tutorial.dispose();
       visits.dispose();
       closing?.dispose();
+      crews.dispose();
     },
   };
 }

@@ -11,7 +11,8 @@ export const launchAgent = defineTool({
     'Areas and Worktree rules apply), or resume a past conversation as the conversation list does. ' +
     'Give only the options the user asked for. `directory` is a Directory name (list_agents and ' +
     'get_layout show them) or an absolute folder path. `first_message` is sent as its first prompt, so ' +
-    'it starts working at once. `character` is a character id, exact name or palette index (list_characters ' +
+    'it starts working at once; it arrives tagged with your name like a Message (`[From <you>, agent ' +
+    '<your id>] `), so the new agent knows a colleague is asking, not the user. `character` is a character id, exact name or palette index (list_characters ' +
     'shows them); `seat` a seat id from get_layout, taken when free (else the office picks one, and `notes` ' +
     `says so). \`nickname\` (at most ${NICKNAME_MAX_LENGTH} characters) labels it "Directory · nickname · ` +
     'worktree" on its card and over its character; it is only a label. `role` launches it as a Role of ' +
@@ -21,8 +22,10 @@ export const launchAgent = defineTool({
     "origin's). `resume_session_id` brings back a past conversation of the Directory (where it ran, " +
     'its own Worktree included). `model` and `permission_mode` go to the CLI; without a ' +
     "`permission_mode` the office's own setting applies. bypassPermissions is refused unless the user " +
-    'allowed skipping permissions in Settings. Returns once the agent has joined (its CLI is running) ' +
-    `with its id, seat (null until an office seats it), character, Role and session id; fails after about ${Math.round(LAUNCH_JOIN_TIMEOUT_MS / 1000)} s.`,
+    'allowed skipping permissions in Settings. An agent of a Crew launches into its Crew (the new ' +
+    'agent may then launch, message and close the others without asking the user); a Crew that is ' +
+    'full, or that the user ended, refuses the launch. Returns once the agent has joined (its CLI is running) ' +
+    `with its id, seat (null until an office seats it), character, Role, Crew (when it joined yours) and session id; fails after about ${Math.round(LAUNCH_JOIN_TIMEOUT_MS / 1000)} s.`,
   input: {
     directory: z.string().min(1).describe('A Directory name, or an absolute folder path.'),
     first_message: z.string().min(1).optional().describe('Its first prompt.'),
@@ -62,8 +65,9 @@ export const launchAgent = defineTool({
   },
   changes: true,
   uses: ['launch'],
-  run: async (args, { office }) => {
+  run: async (args, { caller, office }) => {
     const result = await office.launch.launchAgent({
+      caller,
       directory: args.directory,
       character: args.character,
       seat: args.seat,
@@ -83,6 +87,7 @@ export const launchAgent = defineTool({
       seat: result.seat,
       character: result.character,
       role: result.role,
+      ...(result.crew ? { crew: { id: result.crew.id, launched_by: result.crew.launchedBy } } : {}),
       session_id: result.session,
       ...(result.notes.length > 0 ? { notes: result.notes } : {}),
     });

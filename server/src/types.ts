@@ -1,5 +1,6 @@
 import type * as vscode from 'vscode';
 
+import type { AgentCrew } from '../../core/src/crews.js';
 import type { AgentRole } from '../../core/src/messages.js';
 import type { BackgroundSpawns } from './backgroundSpawns.js';
 import type { AgentVisit } from './visits.js';
@@ -131,6 +132,10 @@ export interface AgentState {
    *  launched have one: an adopted session, a Teammate and a Sub-agent were
    *  started by someone else, with no Role's instructions. */
   role?: AgentRole;
+  /** The Crew it is in (server/src/crews.ts), for its life: the one the user
+   *  started with it, or the one of the agent that launched it. Only agents
+   *  the office launched are in one. */
+  crew?: AgentCrew;
   /** The Visit its character is on, if any (server/src/visits.ts). Never persisted. */
   visit?: AgentVisit;
 }

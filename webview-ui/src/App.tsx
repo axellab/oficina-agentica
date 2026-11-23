@@ -16,6 +16,7 @@ import { IntroDialog } from './components/IntroDialog.js';
 import { LoadingScene } from './components/LoadingScene.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { NewWorktreeModal } from './components/NewWorktreeModal.js';
+import { OfficePanels } from './components/OfficePanels.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { TerminalDrawer } from './components/TerminalDrawer.js';
 import { TerminalHideRibbon } from './components/TerminalHideRibbon.js';
@@ -27,7 +28,6 @@ import {
 import { WorktreeRejectedModal } from './components/WorktreeRejectedModal.js';
 import { MobileZoomLevel, ZoomControls } from './components/ZoomControls.js';
 import {
-  CARD_BAR_TOP_PX,
   CONVERSATION_SIDEBAR_WIDTH_PX,
   OFFICE_CANVAS_TEST_ID,
   TERMINAL_SIDEBAR_WIDTH_PX,
@@ -37,6 +37,8 @@ import { ConversationSearch } from './conversations/ConversationSearch.js';
 import { ConversationSidebar } from './conversations/ConversationSidebar.js';
 import { useConversationSidebar } from './conversations/useConversationSidebar.js';
 import type { WorktreesListing } from './conversations/WorktreeList.js';
+import { CrewPanel } from './crews/CrewPanel.js';
+import { useCrews } from './crews/crewStore.js';
 import { useDirectoryEditor } from './hooks/useDirectoryEditor.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
@@ -44,7 +46,7 @@ import { type Directory, useExtensionMessages } from './hooks/useExtensionMessag
 import { useIntroTour } from './hooks/useIntroTour.js';
 import { useIsMobile } from './hooks/useIsMobile.js';
 import { useKeyboardViewport } from './hooks/useKeyboardViewport.js';
-import { useLaunchActions } from './hooks/useLaunchActions.js';
+import { type LaunchAs, useLaunchActions } from './hooks/useLaunchActions.js';
 import { popClass, usePresence } from './hooks/usePresence.js';
 import { useTerminalDrawer } from './hooks/useTerminalDrawer.js';
 import { MobileMenu, MobileMenuButton } from './mobile/MobileMenu.js';
@@ -249,10 +251,10 @@ function App() {
   const newWorktree = useNewWorktree(launchAgent);
   const { open: askNewWorktree } = newWorktree;
   const launchIntoDirectory = useCallback(
-    (directory: Directory, palette?: number, worktree?: boolean, roleId?: string) => {
-      // The Role picked in the drawer rides through the modal to the launch.
-      if (worktree) askNewWorktree(directory, palette, roleId);
-      else launchAgent(directory, palette, undefined, roleId);
+    (directory: Directory, palette?: number, worktree?: boolean, launchAs?: LaunchAs) => {
+      // The drawer's Role and Crew switch ride through the modal to the launch.
+      if (worktree) askNewWorktree(directory, palette, launchAs);
+      else launchAgent(directory, palette, undefined, launchAs);
     },
     [askNewWorktree, launchAgent],
   );
@@ -369,6 +371,13 @@ function App() {
   // checklist while a run is under way.
   const tutorial = useTutorial();
   const [tutorialRequested, setTutorialRequested] = useState(false);
+  // The Crews: the agents the user set free to work together (crewStore).
+  const crews = useCrews();
+  const endCrew = useCallback((crewId: string) => transport.send({ type: 'endCrew', crewId }), []);
+  // The office's top-right panels (OfficePanels): the tutorial's checklist
+  // while a run is under way, the Crews while one has agents.
+  const tutorialRun = officeReadOnly ? undefined : tutorial.status?.run;
+  const shownCrews = crews && crews.crews.length > 0 ? crews : undefined;
   // What was on as the Intro's asks arrived (first run, Settings → Replay the
   // Intro): the choices' boxes start there.
   const [introReplay, setIntroReplay] = useState<{
@@ -757,16 +766,23 @@ function App() {
             />
           )}
 
-          {/* The tutorial's quest log, top-right (clear of the desktop card
-              bar, which overlaps the office's right edge), while a run is under way. */}
-          {tutorial.status?.run && !officeReadOnly && (
-            <TutorialPanel
-              run={tutorial.status.run}
-              onSkip={tutorial.skip}
-              onQuit={tutorial.quit}
-              rightInset={isMobile || isDebugMode ? 0 : TERMINAL_SIDEBAR_WIDTH_PX}
-              top={CARD_BAR_TOP_PX}
-            />
+          {/* The top-right panels, one under the other (clear of the desktop
+              card bar, which overlaps the office's right edge): the tutorial's
+              quest log while a run is under way, then the Crews while one has
+              agents. A view-only office sees the Crews and ends none. */}
+          {(tutorialRun || shownCrews) && (
+            <OfficePanels rightInset={isMobile || isDebugMode ? 0 : TERMINAL_SIDEBAR_WIDTH_PX}>
+              {tutorialRun && (
+                <TutorialPanel run={tutorialRun} onSkip={tutorial.skip} onQuit={tutorial.quit} />
+              )}
+              {shownCrews && (
+                <CrewPanel
+                  crews={shownCrews.crews}
+                  maxAgents={shownCrews.maxAgents}
+                  onEnd={officeReadOnly ? undefined : endCrew}
+                />
+              )}
+            </OfficePanels>
           )}
 
           {/* Vignette overlay */}

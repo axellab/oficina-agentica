@@ -5,6 +5,7 @@ import {
   CARD_ROLE_STRIP_HEIGHT_PX,
   ROLE_COLOR_HEX,
 } from '../constants.js';
+import { activeCrewOf, useCrews } from '../crews/crewStore.js';
 import { ContextBar } from '../office/ContextBar.js';
 import { contextLeft, useAgentContextUsed } from '../office/contextGauge.js';
 import type { CardVariant, CloseMode } from './cardBar.js';
@@ -61,6 +62,8 @@ export function AgentCard({
   onClose,
 }: AgentCardProps) {
   const contextUsed = useAgentContextUsed(agentId);
+  // The Crew it is free in (never an ended one): the server's list, not the look.
+  const inCrew = activeCrewOf(useCrews(), agentId) !== undefined;
   return (
     <div
       className={`group relative pointer-events-auto flex items-stretch gap-1 p-1 cursor-pointer border-2 shrink-0 ${CARD_VARIANT[variant]}`}
@@ -68,6 +71,7 @@ export function AgentCard({
       title={[
         `Agent ${agentId}`,
         ...(appearance.role ? [appearance.role.name] : []),
+        ...(inCrew ? ['Crew'] : []),
         ...(appearance.nickname ? [appearance.nickname] : []),
         ...(appearance.worktree ? [`worktree ${appearance.worktree.branch}`] : []),
       ].join(' · ')}
@@ -99,6 +103,17 @@ export function AgentCard({
             style={appearance.role ? { top: CARD_ROLE_STRIP_HEIGHT_PX } : undefined}
           >
             <PixelIcon name="worktree" scale={1} />
+          </span>
+        )}
+        {/* A Crew agent's mark, over the mug shot's top-right corner (the
+            Worktree's has the left one). */}
+        {inCrew && (
+          <span
+            data-testid="card-crew"
+            className="absolute top-0 right-0 flex bg-bg text-accent-bright p-1 pointer-events-none"
+            style={appearance.role ? { top: CARD_ROLE_STRIP_HEIGHT_PX } : undefined}
+          >
+            <PixelIcon name="crew" scale={1} />
           </span>
         )}
       </span>

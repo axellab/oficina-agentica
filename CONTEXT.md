@@ -56,6 +56,10 @@ _Avoid_: inline teammate, tmux teammate, session teammate (former run-style dist
 The part in the software lifecycle an agent is launched as — Architect, Developer, QA Engineer, Agile Project Manager and the like. A Role gives its agent standing instructions on top of the coding agent's own, and gives the office a name and a colour to mark it with. It is chosen at launch and kept for the agent's life, across reloads and a resumed conversation. Only agents the office launched have one: an adopted session, a Teammate and a Sub-agent were started by someone else. The Roles an office offers are its catalog: the built-in ones plus whatever the user's `roles.json` changes or adds. A Role says what an agent is for, never whom it answers to.
 _Avoid_: persona, agent type (that's a CLI's kind of sub-agent), Lead (a Team relationship; a Role is not a rank), character (that's the look)
 
+**Crew**:
+The agents the user set free to work together. The user starts one from the office, with the agent a launch begins it with; every agent a Crew's agent launches joins it, and nothing else does. Its agents launch each other without asking the user, start with the tools they reach each other with already allowed, and read, message and close only each other. It holds a fixed number of agents at a time. The user ends it; its agents keep running, as ordinary agents that no longer launch, message or close anyone. Not a Team: a Team is a Lead and the Teammates its CLI spawned inside one session, while a Crew's agents are each a main agent the office launched, with its own terminal, card and seat.
+_Avoid_: team, squad, swarm, free run, autonomous mode (a Crew frees agents towards each other, never from a CLI's own permission prompts)
+
 ## Agent Lifecycle
 
 **Launch**:

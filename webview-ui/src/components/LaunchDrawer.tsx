@@ -3,8 +3,10 @@ import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState }
 
 import type { Role, RoleColor } from '../../../core/src/messages.js';
 import { LAUNCH_DRAWER_PENCIL_GAP_PX, ROLE_COLOR_HEX, ROLE_SWATCH_SIZE_PX } from '../constants.js';
+import { useCrews } from '../crews/crewStore.js';
 import { useDismiss } from '../hooks/useDismiss.js';
 import type { Directory } from '../hooks/useExtensionMessages.js';
+import type { LaunchAs } from '../hooks/useLaunchActions.js';
 import { useLongPress } from '../hooks/useLongPress.js';
 import { useRoles } from '../roles/roleStore.js';
 import { DirectoryCharacterStrip } from './DirectoryCharacterStrip.js';
@@ -20,10 +22,16 @@ interface LaunchDrawerProps {
   /** Launch into the tapped Directory: as `palette` (the roster pick, or one
    *  of the row's mug shots pressed), else as the Directory's defaults (in
    *  its order) decide; into a new Worktree of its repo when `worktree` (the
-   *  row's worktree button); and as `roleId`, the Role picked in the drawer
-   *  (absent = no Role). The surface owns the send, because what else a
-   *  launch does differs per surface (mobile also slides to the new terminal). */
-  onSelect: (directory: Directory, palette?: number, worktree?: boolean, roleId?: string) => void;
+   *  row's worktree button); and as `launchAs` says: the Role picked in the
+   *  drawer (absent = no Role) and whether its Crew switch was on. The surface
+   *  owns the send, because what else a launch does differs per surface
+   *  (mobile also slides to the new terminal). */
+  onSelect: (
+    directory: Directory,
+    palette?: number,
+    worktree?: boolean,
+    launchAs?: LaunchAs,
+  ) => void;
   /** Open the Directory modal empty (the pinned `+ Directory` row). */
   onAddDirectory: () => void;
   /** Open the Directory modal pre-filled with this entry (user-defined rows). */
@@ -32,11 +40,11 @@ interface LaunchDrawerProps {
    *  to launch it: its heading is pinned above `+ Directory`, and rows show
    *  only their names (the launch already has its character). */
   pick?: RosterPick;
-  /** The Role row was used: from here until it closes, the drawer is a
-   *  question waiting for an answer (which Directory, for that Role), so a
-   *  surface that shuts it when the pointer leaves should stop doing so. The
-   *  rows also move under the pointer when the Roles show and hide. Called
-   *  with false once the drawer has closed. */
+  /** The Role row or the Crew switch was used: from here until it closes, the
+   *  drawer is a question waiting for an answer (which Directory, for that
+   *  Role or Crew), so a surface that shuts it when the pointer leaves should
+   *  stop doing so. The rows also move under the pointer when the Roles show
+   *  and hide. Called with false once the drawer has closed. */
   onHoldOpen?: (hold: boolean) => void;
   className?: string;
 }
@@ -80,6 +88,13 @@ export interface RosterPick {
  * The pick lasts until the drawer closes, like a roster pick: a drawer opened
  * afresh launches plain agents, never as a Role chosen some time ago. A launch
  * into a new Worktree (a row's worktree button) is as the picked Role too.
+ *
+ * Where the server runs Crews (crewStore), a Crew switch is pinned under the
+ * Role row: on, the next launch starts a Crew with its agent (the agents the
+ * user sets free to launch and message each other without asking). Off again
+ * whenever the drawer closes, like the Role: setting agents free is never a
+ * choice made some time ago. Where a Crew cannot be started now (the Pixel
+ * Office MCP is off or read-only), the switch is there, off, and says why.
  */
 export function LaunchDrawer({
   isOpen,
@@ -110,6 +125,11 @@ export function LaunchDrawer({
   const [choosingRole, setChoosingRole] = useState(false);
   const role = roles.find((candidate) => candidate.id === pickedRoleId);
 
+  const crews = useCrews();
+  // The switch's wish, and what a launch gets: never a Crew the server would refuse.
+  const [crewWanted, setCrewWanted] = useState(false);
+  const crewOn = crewWanted && crews?.available === true;
+
   // The latest callback, for the effect below: it must run when the drawer
   // closes, not whenever the surface re-renders with a new function.
   const holdOpenRef = useRef(onHoldOpen);
@@ -120,6 +140,7 @@ export function LaunchDrawer({
     dispatch({ type: 'close' });
     setPickedRoleId(undefined);
     setChoosingRole(false);
+    setCrewWanted(false);
     holdOpenRef.current?.(false);
   }, [isOpen]);
 
@@ -162,7 +183,10 @@ export function LaunchDrawer({
 
   // With a roster pick there are no mug shots: the launch wears the pick.
   const select = (directory: Directory, palette?: number, worktree?: boolean) =>
-    onSelect(directory, pick ? pick.palette : palette, worktree, role?.id);
+    onSelect(directory, pick ? pick.palette : palette, worktree, {
+      roleId: role?.id,
+      ...(crewOn ? { crew: true } : {}),
+    });
   const pickRole = (id: string | undefined) => {
     setPickedRoleId(id);
     setChoosingRole(false);
@@ -218,6 +242,42 @@ export function LaunchDrawer({
                 {role && <RoleSwatch color={role.color} />}
                 <span className="overflow-hidden text-ellipsis">{role?.name ?? NO_ROLE_LABEL}</span>
                 <PixelIcon name="down" className={choosingRole ? 'rotate-180' : ''} />
+              </span>
+            </button>
+          </div>
+        )}
+        {crews && (
+          // Pinned under the Role. A switch, not a row to launch from: it only
+          // says what the next launch is.
+          <div
+            className="shrink-0 menu-item menu-item-last"
+            onMouseEnter={() => dispatch({ type: 'hoverNone' })}
+          >
+            <button
+              type="button"
+              role="switch"
+              data-testid="crew-switch"
+              aria-checked={crewOn}
+              aria-disabled={!crews.available}
+              aria-label={`Crew: ${crewOn ? 'on' : 'off'}`}
+              title={
+                crews.available
+                  ? `Start a Crew with this agent: it and the agents it launches (up to ${crews.maxAgents}) work together without asking you.`
+                  : crews.unavailableReason || 'A Crew cannot be started here.'
+              }
+              onClick={() => {
+                if (!crews.available) return;
+                onHoldOpen?.(true);
+                setCrewWanted((on) => !on);
+              }}
+              className={`${ROLE_ROW_CLASS} justify-between gap-10 ${crewOn ? 'bg-active-bg' : 'bg-transparent'} ${
+                crews.available ? '' : 'cursor-default! opacity-[var(--btn-disabled-opacity)]'
+              }`}
+            >
+              <span className="text-text-muted">Crew</span>
+              <span className="flex items-center gap-6">
+                {crewOn && <PixelIcon name="crew" />}
+                {crewOn ? 'On' : 'Off'}
               </span>
             </button>
           </div>

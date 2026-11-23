@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 
 import type { Card } from '../components/cardBar.js';
 import type { Directory } from '../hooks/useExtensionMessages.js';
+import type { LaunchAs } from '../hooks/useLaunchActions.js';
 import type { TerminalDrawerController } from '../hooks/useTerminalDrawer.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 
@@ -18,7 +19,7 @@ export interface MobileShellController {
   /** A Directory picked from the + card's drawer: launch into it (wearing
    *  `palette` when a character was picked first). App slides over once the
    *  new terminal appears (`drawer.lastLaunched`). */
-  launch: (directory: Directory, palette?: number, worktree?: boolean, roleId?: string) => void;
+  launch: (directory: Directory, palette?: number, worktree?: boolean, launchAs?: LaunchAs) => void;
   /** A running conversation pressed in the menu: focus its agent and, when it
    *  has a pane, slide to it. */
   openAgent: (agentId: number) => void;
@@ -37,7 +38,7 @@ interface MobileShellInputs {
     directory: Directory,
     palette?: number,
     worktree?: boolean,
-    roleId?: string,
+    launchAs?: LaunchAs,
   ) => void;
 }
 

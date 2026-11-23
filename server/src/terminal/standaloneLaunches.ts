@@ -13,6 +13,7 @@ import * as path from 'path';
 import type { WorktreeBranch } from '../../../core/src/messages.js';
 import type { AgentStateStore } from '../agentStateStore.js';
 import { LAUNCH_JOIN_SETTLE_MS, LAUNCH_JOIN_TIMEOUT_MS } from '../constants.js';
+import type { CrewLaunch } from '../crews.js';
 import {
   directoryAt,
   expandTilde,
@@ -57,9 +58,21 @@ export function bypassPermissionsAllowed(store: AgentStateStore): boolean {
   return store.getAdapter()?.getSetting(KEY_BYPASS_PERMISSIONS, false) ?? false;
 }
 
-/** A launch's asks checked against this office's posture (launchAsks.ts). */
-function checkedAsks(deps: StandaloneLaunchDeps, asks: LaunchAsks | undefined) {
-  return checkLaunchAsks(deps.provider, bypassPermissionsAllowed(deps.store), asks);
+/**
+ * A launch's asks checked against this office's posture (launchAsks.ts). A
+ * launch into a Crew that asks for no permission mode gets the provider's own
+ * "safe actions go through, risky ones still ask" mode: nobody may be watching
+ * that agent's terminal, and a prompt at its first edit would stall the Crew.
+ * Where the office skips permissions, that setting stands, as for any launch.
+ */
+function checkedAsks(deps: StandaloneLaunchDeps, asks: LaunchAsks | undefined, crew?: CrewLaunch) {
+  const bypassAllowed = bypassPermissionsAllowed(deps.store);
+  const auto = deps.provider.autoPermissionMode;
+  const asked =
+    crew && auto && !bypassAllowed && asks?.permissionMode === undefined
+      ? { ...asks, permissionMode: auto }
+      : asks;
+  return checkLaunchAsks(deps.provider, bypassAllowed, asked);
 }
 
 /** A roster pick moves to the front of every office's roster, once an agent
@@ -89,12 +102,14 @@ export async function launchIntoDirectory(
     preapprovedMcpTools?: readonly string[];
     /** A plugin folder this session alone loads (the tutorial's onboarding skill). */
     pluginDir?: string;
+    /** The Crew it launches into: one the user starts with it, or its launcher's. */
+    crew?: CrewLaunch;
   },
 ): Promise<LaunchOutcome> {
   const { store, ptyManager } = deps;
   const { directoryPath, palette } = request;
   const directory = directoryAt(directoryPath ?? process.cwd(), deps.hostDirectories);
-  const checked = checkedAsks(deps, request.asks);
+  const checked = checkedAsks(deps, request.asks, request.crew);
   if (!checked.ok) return checked;
   const launch = (where: Partial<LaunchStandaloneAgentOptions>): number | null => {
     const id = launchStandaloneAgent(deps, {
@@ -105,6 +120,7 @@ export async function launchIntoDirectory(
       roleId: request.roleId,
       preapprovedMcpTools: request.preapprovedMcpTools,
       pluginDir: request.pluginDir,
+      crew: request.crew,
     });
     if (id !== null) recordPick(store, palette);
     return id;
@@ -145,10 +161,12 @@ export async function resumeInDirectory(
     /** The Role to come back as (a catalog id). Absent, it comes back as the
      *  Role its conversation remembers. */
     roleId?: string;
+    /** The Crew it comes back into: its launcher's (a conversation remembers none). */
+    crew?: CrewLaunch;
   },
 ): Promise<LaunchOutcome> {
   const { store, ptyManager, provider } = deps;
-  const checked = checkedAsks(deps, request.asks);
+  const checked = checkedAsks(deps, request.asks, request.crew);
   if (!checked.ok) return checked;
   return resumeConversation(
     {
@@ -163,6 +181,7 @@ export async function resumeInDirectory(
           asks: checked.asks,
           palette: request.palette ?? options.palette,
           roleId: request.roleId ?? options.roleId,
+          crew: request.crew,
         });
         if (id !== null && request.palette !== undefined) recordPick(store, request.palette);
         return id;
@@ -258,12 +277,20 @@ export async function launchForOffice(
 ): Promise<AgentLaunchOutcome> {
   const deadline = Date.now() + timeoutMs;
   const seconds = Math.round(timeoutMs / 1000);
-  const late = (): AgentLaunchOutcome => ({
-    ok: false,
-    reason: `The launch didn't finish within ${seconds} s. It may still join: check list_agents.`,
-  });
-  const launched = await beforeDeadline(launchOrResume(deps, request), deadline);
-  if (launched === null) return late();
+  const launching = launchOrResume(deps, request);
+  const launched = await beforeDeadline(launching, deadline);
+  if (launched === null) {
+    return {
+      ok: false,
+      reason: `The launch didn't finish within ${seconds} s. It may still join: check list_agents.`,
+      // Whoever holds something for this launch (its place in a Crew) keeps it
+      // until the launch itself is over.
+      underway: launching.then(
+        () => undefined,
+        (err) => console.error('[Pixel Agents] Terminal: a launch failed after its reply:', err),
+      ),
+    };
+  }
   if (!launched.ok) return { ok: false, reason: launched.reason };
   const session = deps.ptyManager.get(launched.id);
   if (!session) return { ok: false, reason: `Agent ${launched.id}'s terminal is gone.` };
@@ -299,6 +326,7 @@ async function launchOrResume(
       palette: request.palette,
       asks,
       roleId: request.roleId,
+      crew: request.crew,
     });
   }
   let worktree: { name?: string; from?: WorktreeBranch } | undefined;
@@ -316,6 +344,7 @@ async function launchOrResume(
     worktree,
     asks,
     roleId: request.roleId,
+    crew: request.crew,
   });
 }
 

@@ -15,7 +15,8 @@ export const closeAgent = defineTool({
     'Worktree of ours with uncommitted files, nothing is closed and the error says how many: ask the ' +
     'user, then call again with `worktree_choice` — "save" (commit them to the branch), "keep" (leave ' +
     'the folder as it is) or "discard" with `confirmed_files` set to that count. A discard is refused ' +
-    'again when the Worktree has more files by then.',
+    'again when the Worktree has more files by then. An agent of a Crew closes only agents of its ' +
+    'Crew (and itself).',
   input: {
     agent_id: z.number().int().optional().describe('The agent to close; defaults to you.'),
     worktree_choice: z

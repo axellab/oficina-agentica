@@ -1,5 +1,6 @@
 import { AGENT_CARD_HEIGHT_PX, ROSTER_ARROW_WIDTH_PX } from '../constants.js';
 import type { Directory } from '../hooks/useExtensionMessages.js';
+import type { LaunchAs } from '../hooks/useLaunchActions.js';
 import { useRosterLaunch } from '../hooks/useRosterLaunch.js';
 import { isTypingInTerminal } from '../terminal/terminalDom.js';
 import type { AgentAppearance, TabStatus } from './AgentCard.js';
@@ -25,7 +26,7 @@ interface MobileAgentBarProps {
     directory: Directory,
     palette?: number,
     worktree?: boolean,
-    roleId?: string,
+    launchAs?: LaunchAs,
   ) => void;
   /** Directories offered by the launch drawer (tap on the + card). */
   directories: Directory[];
@@ -168,9 +169,9 @@ export function MobileAgentBar({
             isOpen={menus.isDrawerOpen}
             directories={directories}
             pick={menus.pendingPick}
-            onSelect={(directory, palette, worktree, roleId) => {
+            onSelect={(directory, palette, worktree, launchAs) => {
               closeDrawer();
-              onLaunchDirectory(directory, palette, worktree, roleId);
+              onLaunchDirectory(directory, palette, worktree, launchAs);
             }}
             onAddDirectory={() => {
               closeDrawer();

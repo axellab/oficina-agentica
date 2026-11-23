@@ -129,13 +129,14 @@ test.describe('Standalone / Pixel Office MCP', () => {
     await expect(page.getByTitle('Agent 1', { exact: true })).toBeVisible({ timeout: 15_000 });
 
     // The helper joins the office: its card carries the nickname, and its
-    // terminal shows the first message it was started with.
+    // terminal shows the first message it was started with, tagged with who
+    // sent it (an agent's word, not the user's).
     const helperCard = page.getByTitle('Agent 2 · reviewer', { exact: true });
     await expect(helperCard).toBeVisible({ timeout: 30_000 });
     await expect.poll(async () => (await characterTiles(page)).length, { timeout: 15_000 }).toBe(2);
     await helperCard.click();
     const helperTerminal = page.locator('.xterm:visible');
-    await expect(helperTerminal).toContainText(`> ${firstMessage}`, { timeout: 15_000 });
+    await expect(helperTerminal).toContainText(`agent 1] ${firstMessage}`, { timeout: 15_000 });
 
     // The Message show: the sender's character walks over to the helper's
     // and says the gist beside it.

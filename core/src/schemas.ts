@@ -9,6 +9,7 @@
  * the contract, hence the @public tags.
  */
 
+import type { AgentCrew } from './crews.js';
 import type { AgentRole } from './messages.js';
 
 // ── Agent State ──────────────────────────────────────────────
@@ -62,6 +63,9 @@ export interface PersistedAgent {
   /** The Nickname it was launched with: a label shown after its Directory,
    *  never a Teammate's name (`agentName`). */
   nickname?: string;
+  /** The Crew it is in (core crews.ts): persisted so an agent whose terminal
+   *  outlives the server keeps the Crew's limits. Read back through parseAgentCrew. */
+  crew?: AgentCrew;
 }
 
 /** Agent seat assignment with visual identity
