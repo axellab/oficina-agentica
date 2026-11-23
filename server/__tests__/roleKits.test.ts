@@ -11,7 +11,12 @@ import {
   parseRoleOverrides,
   type RoleDefinition,
 } from '../../core/src/roles.js';
-import { PIXEL_AGENTS_DIR, ROLE_KITS_DIR_NAME, ROLE_PROMPTS_DIR_NAME } from '../src/constants.js';
+import {
+  PIXEL_AGENTS_DIR,
+  ROLE_KITS_DIR_NAME,
+  ROLE_PROMPTS_DIR_NAME,
+  ROLES_FILE_NAME,
+} from '../src/constants.js';
 import {
   claudeSkillPackaging,
   skillMarkdown,
@@ -504,6 +509,106 @@ describe('the Roles that ship', () => {
     }
   });
 
+  it('every Role has its Playbooks, each naming the tools it runs and saying when to run it', () => {
+    const table = BUILTIN_ROLES.flatMap((role) =>
+      (role.playbooks ?? []).map((p) => [role.id, p.id, p.name, p.tools]),
+    );
+    expect(table).toEqual([
+      ['architect', 'architecture-review', 'Architecture review', ['git', 'dependency-cruiser']],
+      ['architect', 'technical-design', 'Technical design', ['git']],
+      ['developer', 'safe-refactor', 'Safe refactor', ['git']],
+      ['developer', 'dependency-upgrade', 'Dependency upgrade', ['git', 'gh', 'osv-scanner']],
+      ['qa-engineer', 'full-regression', 'Full regression', ['git', 'gh']],
+      ['qa-engineer', 'flaky-test-hunt', 'Flaky test hunt', ['git', 'gh']],
+      [
+        'devsecops-engineer',
+        'pipeline-troubleshooting',
+        'Pipeline troubleshooting',
+        expect.anything(),
+      ],
+      ['devsecops-engineer', 'pipeline-hardening', 'Pipeline hardening', expect.anything()],
+      ['devsecops-engineer', 'supply-chain-audit', 'Supply chain audit', expect.anything()],
+      ['security-engineer', 'threat-model', 'Threat model', ['git']],
+      [
+        'security-engineer',
+        'vulnerability-review',
+        'Vulnerability review',
+        ['git', 'semgrep', 'gitleaks', 'osv-scanner', 'trivy'],
+      ],
+      [
+        'cloud-engineer',
+        'infrastructure-review',
+        'Infrastructure review',
+        ['git', 'terraform', 'tflint', 'checkov', 'trivy'],
+      ],
+      ['cloud-engineer', 'cost-review', 'Cost review', ['git', 'infracost']],
+      ['agile-project-manager', 'daily', 'Daily', ['git', 'gh']],
+      ['agile-project-manager', 'sprint-planning', 'Sprint planning', ['git', 'gh']],
+    ]);
+    for (const role of BUILTIN_ROLES) {
+      for (const { id, description, instructions } of role.playbooks!) {
+        // What the coding agent picks the skill by: it says when to run it.
+        expect(description, `${role.id}: ${id}`).toMatch(/\. Use when /);
+        // Its steps are numbered, from the first.
+        expect(instructions, `${role.id}: ${id}`).toMatch(/^## 1\. /m);
+      }
+    }
+  });
+
+  it('a Playbook that could do harm says where it stops, and whose word it needs', () => {
+    const of = (roleId: string, id: string): string =>
+      byId(roleId).playbooks!.find((candidate) => candidate.id === id)!.instructions;
+
+    // The Cloud Engineer plans only with a go-ahead, and never applies.
+    const infrastructure = of('cloud-engineer', 'infrastructure-review');
+    expect(infrastructure).toContain('Never run `terraform apply`, `destroy`, `import`, `taint`');
+    expect(infrastructure).toContain('init -backend=false -lockfile=readonly -input=false');
+    expect(infrastructure).toMatch(/## 6\. The plan, only with the human's go-ahead/);
+    expect(infrastructure).toContain('Do not run `tflint --init`');
+    expect(infrastructure).toContain('checkov -d . --quiet --compact --skip-download');
+    // Pricing needs a key only the human can get, and says what leaves the machine.
+    const cost = of('cloud-engineer', 'cost-review');
+    expect(cost).toMatch(/getting one opens an account, and that is theirs to do/);
+    expect(cost).toMatch(/tell the human so once, and skip the tool if they would rather not/);
+
+    // The Security Engineer scans without sending the code anywhere, and never prints a secret.
+    const review = of('security-engineer', 'vulnerability-review');
+    expect(review).toContain('semgrep scan --metrics=off --config p/security-audit');
+    expect(review).toContain('gitleaks dir --redact .');
+    expect(review).toMatch(/`--redact` is not optional/);
+    expect(review).toMatch(/Never against production, real user data/);
+    expect(of('security-engineer', 'threat-model')).toMatch(
+      /it attacks nothing and runs no scanner/,
+    );
+
+    // The QA Engineer never hides a failure; the Developer never loosens a test or edits a lock file.
+    expect(of('qa-engineer', 'flaky-test-hunt')).toMatch(
+      /A retry, a longer timeout or a skip hides a flaky test; it does not fix one\. Do not add them\./,
+    );
+    expect(of('qa-engineer', 'full-regression')).toMatch(
+      /Do not change a test, a timeout or a configuration to get further/,
+    );
+    expect(of('developer', 'dependency-upgrade')).toMatch(/Never edit a lock file by hand/);
+    expect(of('developer', 'dependency-upgrade')).toMatch(/Never loosen the test/);
+    expect(of('developer', 'safe-refactor')).toMatch(
+      /A refactor and a change of behaviour never share a commit/,
+    );
+
+    // The Architect runs the project's own dependency-cruiser, never a downloaded one, and writes documents only.
+    const architecture = of('architect', 'architecture-review');
+    expect(architecture).toContain('npx --no-install depcruise');
+    expect(architecture).not.toMatch(/npx (?!--no-install)/);
+    expect(of('architect', 'technical-design')).toMatch(/On a branch of its own, documents only/);
+
+    // The coordinator writes to the tracker only what the human agreed to.
+    const planning = of('agile-project-manager', 'sprint-planning');
+    expect(planning).toMatch(/Step 6 writes to the tracker, and only what the human agreed to/);
+    expect(planning.indexOf('gh issue create')).toBeGreaterThan(planning.indexOf('## 6. '));
+    expect(of('agile-project-manager', 'daily')).toMatch(
+      /Never write a status nobody showed evidence for/,
+    );
+  });
+
   it('troubleshooting reads Pipeline Doctor where it is wired, and proposes it, pinned, where it is not', () => {
     const steps = playbook('pipeline-troubleshooting');
     expect(steps).toContain('gh run view <run-id> --log-failed');
@@ -553,11 +658,26 @@ describe('the Roles that ship', () => {
         expect(names, `${workflow.id}: ${stage.id}`).toContain(named);
       }
     }
-    // And the DevSecOps Engineer's own Workflows do send it to them.
-    const sent = BUILTIN_WORKFLOWS.filter((w) => w.lead === 'devsecops-engineer').map((w) =>
-      w.stages.some((stage) => /Run your .+ playbook/.test(stage.brief)),
-    );
-    expect(sent).toEqual([true, true, true]);
+    // And every Workflow a Role leads sends its lead to one of its own.
+    for (const workflow of BUILTIN_WORKFLOWS) {
+      const own = workflow.stages.filter(
+        (stage) => stage.role === workflow.lead && /Run your .+ playbook/.test(stage.brief),
+      );
+      const coordinated = ['new-feature', 'bug-fix', 'security-review', 'quality-review'];
+      if (!coordinated.includes(workflow.id)) expect(own.length, workflow.id).toBeGreaterThan(0);
+    }
+    // The coordinator's send each stage's owner to the Playbook that is its job.
+    const sent = (workflowId: string, stageId: string): string | undefined =>
+      /Run your (.+?) playbook/.exec(
+        BUILTIN_WORKFLOWS.find((w) => w.id === workflowId)!.stages.find((s) => s.id === stageId)!
+          .brief,
+      )?.[1];
+    expect(sent('new-feature', 'design')).toBe('Technical design');
+    expect(sent('security-review', 'threat-model')).toBe('Threat model');
+    expect(sent('security-review', 'code-review')).toBe('Vulnerability review');
+    expect(sent('security-review', 'supply-chain')).toBe('Supply chain audit');
+    expect(sent('security-review', 'infrastructure')).toBe('Infrastructure review');
+    expect(sent('quality-review', 'architecture')).toBe('Architecture review');
   });
 
   it('are in the feature guide: the Contract, and every Playbook by name', () => {
@@ -603,9 +723,19 @@ describe('what an agent is told of its Contract and Playbooks', () => {
       '- DevSecOps Engineer: Builds and secures the delivery pipeline: CI/CD, supply chain, automated checks. Playbooks: Pipeline troubleshooting, Pipeline hardening, Supply chain audit.';
     expect(composeRolePrompt(architect, BUILTIN_ROLES, undefined, skill)).toContain(`\n${line}\n`);
     expect(composeCrewPrompt(BUILTIN_ROLES, { maxAgents: 8 }, true)).toContain(`\n${line}\n`);
-    // A Role with none is listed as before.
     expect(composeRolePrompt(architect, BUILTIN_ROLES, undefined, skill)).toContain(
-      '\n- Developer: Implements features and fixes with tests, in small reviewable changes.\n',
+      '\n- Developer: Implements features and fixes with tests, in small reviewable changes. Playbooks: Safe refactor, Dependency upgrade.\n',
+    );
+    // A Role with none (the host's own) is listed with its description alone.
+    const writer: RoleDefinition = {
+      id: 'writer',
+      name: 'Writer',
+      description: 'Writes.',
+      color: 'pink',
+      prompt: 'Write the docs.',
+    };
+    expect(composeRolePrompt(architect, [...BUILTIN_ROLES, writer], undefined, skill)).toContain(
+      '\n- Writer: Writes.\n',
     );
   });
 
@@ -714,12 +844,30 @@ describe("a Role's Playbooks at launch", () => {
     expect(fs.readdirSync(kitsDir())).toHaveLength(1);
   });
 
-  it('a Role with no Playbooks launches with no plugin folder, and nothing is written for it', () => {
-    const launch = prepareRoleLaunch('developer', undefined, claudeSkillPackaging)!;
+  it('each Role is handed its own Playbooks, in a folder of its own', () => {
+    const folders = BUILTIN_ROLES.map((role) => {
+      const launch = prepareRoleLaunch(role.id, undefined, claudeSkillPackaging)!;
+      expect(path.basename(launch.pluginDir!)).toMatch(new RegExp(`^${role.id}-[0-9a-f]{12}$`));
+      expect(fs.readdirSync(path.join(launch.pluginDir!, 'skills')).sort()).toEqual(
+        role.playbooks!.map((playbook) => playbook.id).sort(),
+      );
+      return launch.pluginDir!;
+    });
+    expect(new Set(folders).size).toBe(BUILTIN_ROLES.length);
+  });
+
+  it("a Role with no Playbooks (the host's own) launches with no plugin folder, and nothing is written for it", () => {
+    fs.mkdirSync(path.join(os.homedir(), PIXEL_AGENTS_DIR), { recursive: true });
+    fs.writeFileSync(
+      path.join(os.homedir(), PIXEL_AGENTS_DIR, ROLES_FILE_NAME),
+      JSON.stringify({ roles: [{ id: 'writer', name: 'Writer', prompt: 'Write the docs.' }] }),
+    );
+    const launch = prepareRoleLaunch('writer', undefined, claudeSkillPackaging)!;
+    expect(launch.role.id).toBe('writer');
     expect(launch).not.toHaveProperty('pluginDir');
     expect(fs.existsSync(kitsDir())).toBe(false);
     // It is still told the Playbooks its colleagues run.
-    expect(promptOf('developer')).toContain('Playbooks: Pipeline troubleshooting');
+    expect(promptOf('writer')).toContain('Playbooks: Pipeline troubleshooting');
   });
 
   it('where the coding agent takes no skills, nothing is written and no Playbook is promised', () => {

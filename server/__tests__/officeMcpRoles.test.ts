@@ -99,7 +99,10 @@ describe('Roles through the Pixel Office MCP (composed server, mock-claude in a 
       description: expect.stringContaining('Coordinates the team'),
       source: 'builtin',
       agents: [manager.id],
-      playbooks: [],
+      playbooks: [
+        { name: 'Daily', description: expect.stringContaining('daily meeting') },
+        { name: 'Sprint planning', description: expect.stringContaining('Plan a sprint') },
+      ],
     });
     expect(byId.get('developer')!.agents).toEqual([]);
     // A Role's Playbooks, by name and what each is for: what a colleague asks it for.
@@ -156,6 +159,8 @@ describe('Roles through the Pixel Office MCP (composed server, mock-claude in a 
     const reply = await launched(caller.client, { directory: 'proj', role: 'Technical Writer' });
     expect(reply.role).toEqual({ id: 'tech-writer', name: 'Technical Writer' });
     expect(rolePromptOf(reply.session_id)).toBe(promptFile('tech-writer'));
+    // The user's own Role has no Playbooks: its agent is handed no plugin folder.
+    expect(startOf(reply.session_id).args).not.toContain('--plugin-dir');
     expect((await roles(caller.client)).at(-1)!.agents).toEqual([reply.agent_id]);
   });
 
@@ -287,9 +292,16 @@ describe('Roles through the Pixel Office MCP (composed server, mock-claude in a 
     const colleagueArgs = startOf(colleague.session_id).args;
     expect(colleagueArgs[colleagueArgs.indexOf('--plugin-dir') + 1]).toBe(pluginDir);
 
-    // A Role with no Playbook, and an agent with no Role: no plugin at all.
+    // Another Role is handed its own Playbooks, never a colleague's; an agent with no Role, none.
     const developer = await launched(engineer.client, { directory: 'proj', role: 'developer' });
-    expect(startOf(developer.session_id).args).not.toContain('--plugin-dir');
+    const developerArgs = startOf(developer.session_id).args;
+    expect(developerArgs.filter((arg) => arg === '--plugin-dir')).toHaveLength(1);
+    const developerDir = developerArgs[developerArgs.indexOf('--plugin-dir') + 1];
+    expect(path.basename(developerDir)).toMatch(/^developer-[0-9a-f]{12}$/);
+    expect(fs.readdirSync(path.join(developerDir, 'skills')).sort()).toEqual([
+      'dependency-upgrade',
+      'safe-refactor',
+    ]);
     const plain = await launched(engineer.client, { directory: 'proj' });
     expect(startOf(plain.session_id).args).not.toContain('--plugin-dir');
     // The Developer still knows what its colleague can run.

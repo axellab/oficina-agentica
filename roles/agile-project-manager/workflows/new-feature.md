@@ -14,7 +14,7 @@ Turn the request into user stories with acceptance criteria that can be checked,
 
 ## 2. Design (architect)
 
-Read the code the feature touches and write the technical plan: the components and contracts that change, the data that flows, the decisions taken with the alternatives rejected, and the steps to build it in. Closed when the plan covers every story and names its risks.
+Run your Technical design playbook for the feature: read the code it touches and write the technical plan, with the components and contracts that change, the data that flows, the decisions taken with the alternatives rejected, and the steps to build it in. Closed when the plan covers every story and names its risks.
 
 ## 3. Implementation (developer)
 

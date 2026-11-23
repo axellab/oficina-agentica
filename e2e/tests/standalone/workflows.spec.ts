@@ -116,20 +116,36 @@ test.describe('Standalone / workflows', () => {
     await workflowPicker(drawer).click();
     const options = drawer.getByTestId('workflow-option');
     // "None", then the Workflows the office ships with, under the Role that
-    // leads each: the coordinator's four first, then a Role's own.
+    // leads each: the coordinator's first, then each Role's own.
     await expect(options).toHaveText([
       'None',
       'New feature',
       'Bug fix',
       'Deep security analysis',
       'Deep quality analysis',
+      'Sprint planning',
+      'Architecture review',
+      'Technical design',
+      'Safe refactor',
+      'Dependency upgrade',
+      'Full regression',
+      'Flaky test hunt',
       'Pipeline troubleshooting',
       'Pipeline hardening',
       'Supply chain audit',
+      'Threat model',
+      'Vulnerability review',
+      'Infrastructure review',
+      'Cost review',
     ]);
     await expect(drawer.getByTestId('workflow-group-lead')).toHaveText([
       'Agile Project Manager',
+      'Architect',
+      'Developer',
+      'QA Engineer',
       'DevSecOps Engineer',
+      'Security Engineer',
+      'Cloud Engineer',
     ]);
     await drawer.locator('[data-testid="workflow-option"][data-workflow-id="bug-fix"]').click();
     await expect(workflowPicker(drawer)).toHaveAccessibleName('Workflow: Bug fix');

@@ -87,10 +87,16 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
       'Role also has a Contract, part of what its agents are told: what a request to it must bring, what it ' +
       'delivers, when its work is done, what it never does and whom it hands over to. A Role may have Playbooks: ' +
       'jobs it does the same way every time, each an ordered run of named tools with the exact commands, handed to ' +
-      'its agents as skills of Claude Code named after the Role. The DevSecOps Engineer has three: Pipeline ' +
-      "troubleshooting (why a GitHub Actions run fails, from the run and from Pipeline Doctor's report where the " +
-      'repository has it; /devsecops-engineer:pipeline-troubleshooting in its terminal runs it), Pipeline hardening ' +
-      'and Supply chain audit. A playbook checks its tools first and reports one that is missing: an agent never ' +
+      'its agents as skills of Claude Code named after the Role. Every built-in Role has its own: the Architect, ' +
+      'Architecture review and Technical design; the Developer, Safe refactor and Dependency upgrade; the QA ' +
+      'Engineer, Full regression and Flaky test hunt; the DevSecOps Engineer, Pipeline troubleshooting (why a ' +
+      "GitHub Actions run fails, from the run and from Pipeline Doctor's report where the repository has it; " +
+      '/devsecops-engineer:pipeline-troubleshooting in its terminal runs it), Pipeline hardening and Supply chain ' +
+      'audit; the Security Engineer, Threat model and Vulnerability review; the Cloud Engineer, Infrastructure ' +
+      'review and Cost review; the Agile Project Manager, Daily and Sprint planning. A playbook says which steps ' +
+      "only read and which change something, and whose agreement those need: a cloud plan, a write to the team's " +
+      'tracker and a push to a shared pipeline wait for the user. A playbook checks its tools first and reports ' +
+      'one that is missing: an agent never ' +
       "installs software on its own. list_roles lists each Role's playbooks, so a colleague can ask for one by " +
       'name. With the ' +
       'Pixel Office MCP the Roles reach each other: list_roles lists the Roles and the agents holding each one, ' +
@@ -119,11 +125,26 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
       'Deep security analysis (threat model, code review with dependencies and pipeline, infrastructure and ' +
       'architecture beside it, triage, report) and Deep quality analysis (scope, tests with code health, ' +
       'architecture and build and pipeline beside them, triage, report). The two analyses change nothing: what they ' +
-      'deliver is a report. Each other Role leads the Workflows that are its own job. The DevSecOps Engineer leads ' +
+      'deliver is a report. It also leads Sprint planning (goal and backlog, feasibility with readiness beside it, ' +
+      'plan, report), which ends on a plan the user agreed to. Each other Role leads the Workflows that are its own ' +
+      'job, and runs its Playbooks in them. The Architect leads Architecture review (map, structure with ' +
+      'testability, security architecture and operability beside it, recommendations, report) and Technical design ' +
+      '(context, options, a security review with a test strategy and operations beside it, decision, report). The ' +
+      'Developer leads Safe refactor (bounds, target shape with a safety net beside it, refactor, verification, ' +
+      'report) and Dependency upgrade (plan, origin check, upgrade, verification, report). The QA Engineer leads ' +
+      'Full regression (baseline, run, fix with pipeline and environment beside it, second run, report) and Flaky ' +
+      'test hunt (suspects, reproduction, test fix with a product fix and a pipeline fix beside it, proof, report). ' +
+      'The DevSecOps Engineer leads ' +
       'Pipeline troubleshooting (evidence, diagnosis, fix with a pipeline change beside it, verification, report), ' +
       'Pipeline hardening (inventory, lint and audit with a security review beside it, changes, verification, ' +
-      'report) and Supply chain audit (inventory, dependencies with secrets beside them, triage, report), and runs ' +
-      'its Playbooks in them. The user starts a run from the launch drawer (standalone, with the Pixel Office MCP on ' +
+      'report) and Supply chain audit (inventory, dependencies with secrets beside them, triage, report). The ' +
+      'Security Engineer leads Threat model (scope and assets, how it is built with where it runs and how it is ' +
+      'built and shipped beside it, threats and controls, report) and Vulnerability review (scope and scan, code ' +
+      'reading with the supply chain beside it, triage, fix, verification, report). The Cloud Engineer leads ' +
+      'Infrastructure review (inventory, checks with network and identity and deployment beside them, findings, ' +
+      'report) and Cost review (inventory, estimate with design beside it, savings, report). Architecture review, ' +
+      'Threat model, Supply chain audit, Infrastructure review and Cost review are analyses too: they deliver a ' +
+      'report and change nothing. The user starts a run from the launch drawer (standalone, with the Pixel Office MCP on ' +
       'and not read-only): the Workflow row under the Crew switch lists the Workflows under the Role that leads ' +
       'each, a press on a Directory opens a ' +
       'dialog that lists its stages and asks for the request in their own words, and Start launches the Role that ' +
