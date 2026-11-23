@@ -7,11 +7,16 @@
  *   node scripts/local-trial.mjs sample <folder>
  *       Write a small repository with planted defects to try the Roles on.
  *
+ *   node scripts/local-trial.mjs reset-sample <folder>
+ *       Put that repository back on `main` after a run whose agents left it
+ *       on a branch of theirs (which stays).
+ *
  *   node scripts/local-trial.mjs run --dir <folder> --preset <name> [options]
  *       Start the office in <folder>, launch what the preset names, watch it
  *       to its end, close what it launched and write what it measured under
  *       trial-runs/ (a summary in Markdown and JSON, every office message
- *       with its time, the agents' terminal screens).
+ *       with its time, the agents' terminal screens and each agent's last
+ *       words as its transcript has them).
  *
  * What it never does: answer a permission prompt (a prompt nobody answers ends
  * the run and is reported), stop an office that is already running (it stops
@@ -43,7 +48,7 @@ const PRINTED_URL = /Pixel Agents server running at (\S+)\s/;
  * login is kept. `--keep-env` starts the office with all of them.
  */
 const NOT_FOR_THE_OFFICE =
-  /^(?:CLAUDE(?!_CONFIG_DIR$)|ANTHROPIC_|USE_STAGING_OAUTH$|NO_COLOR$|FORCE_COLOR$|GIT_(?:EDITOR|PAGER|ASKPASS|TERMINAL_PROMPT|SEQUENCE_EDITOR)$)/i;
+  /^(?:CLAUDE(?!_CONFIG_DIR$)|ANTHROPIC_|USE_(?:STAGING|LOCAL)_OAUTH$|AI_AGENT$|API_TIMEOUT_MS$|DISABLE_MICROCOMPACT$|MCP_(?:CONNECTION_NONBLOCKING|SERVER_CONNECTION_BATCH_SIZE)$|BAGGAGE$|SENTRY-TRACE$|BUN_ENABLE_CRASH_REPORTING$|NO_COLOR$|FORCE_COLOR$|GIT_(?:EDITOR|PAGER|ASKPASS|TERMINAL_PROMPT|SEQUENCE_EDITOR)$)/i;
 
 /** Set for the run: the agents must not update the CLI being measured. */
 const SET_FOR_THE_OFFICE = { DISABLE_AUTOUPDATER: '1' };
@@ -154,6 +159,13 @@ async function freePort() {
 function git(cwd, ...args) {
   const out = spawnSync('git', args, { cwd, encoding: 'utf8' });
   return out.status === 0 ? out.stdout.trim() : null;
+}
+
+/** Where a folder's repository stands, as `<branch> <commit>`; null outside one. */
+function gitState(dir) {
+  const commit = git(dir, 'rev-parse', '--short', 'HEAD');
+  if (commit === null) return null;
+  return `${git(dir, 'rev-parse', '--abbrev-ref', 'HEAD') ?? '?'} ${commit}`;
 }
 
 function seconds(ms) {
@@ -308,6 +320,9 @@ const PLANTED = [
   'src/users.js and src/report.js have no tests',
 ];
 
+/** Who the sample's first commit is by: how a folder is known to be a sample. */
+const SAMPLE_AUTHOR = 'trial@example.invalid';
+
 function writeSample(dir) {
   if (!dir) fail('sample: name the folder to write it in');
   const target = path.resolve(dir);
@@ -331,7 +346,7 @@ function writeSample(dir) {
         '-c',
         'user.name=Agent Office trial',
         '-c',
-        'user.email=trial@example.invalid',
+        `user.email=${SAMPLE_AUTHOR}`,
         '-c',
         'commit.gpgsign=false',
         'commit',
@@ -344,6 +359,30 @@ function writeSample(dir) {
   console.log(`[trial] git repository with a first commit: ${committed ? 'yes' : 'no'}`);
   console.log('[trial] planted:');
   for (const line of PLANTED) console.log(`  - ${line}`);
+}
+
+/**
+ * Puts a sample back on `main`, where every run starts: an agent that fixed
+ * something leaves the folder on its own branch. Only a folder this script
+ * wrote, only with nothing uncommitted in it, and nothing is deleted: the
+ * agents' branches stay.
+ */
+function resetSample(dir) {
+  if (!dir) fail('reset-sample: name the sample folder');
+  const target = path.resolve(dir);
+  if (git(target, 'log', '--max-parents=0', '--format=%ae', 'main') !== SAMPLE_AUTHOR)
+    fail(`reset-sample: ${target} is not a sample this script wrote; nothing done`, 3);
+  const uncommitted = git(target, 'status', '--porcelain');
+  if (uncommitted !== '')
+    fail(`reset-sample: ${target} has uncommitted changes; nothing done\n${uncommitted ?? ''}`, 3);
+  const was = gitState(target);
+  if (git(target, 'checkout', '--quiet', 'main') === null)
+    fail(`reset-sample: could not check out main in ${target}`, 3);
+  console.log(`[trial] ${target}: ${was} -> ${gitState(target)}`);
+  const others = (git(target, 'branch', '--format=%(refname:short)') ?? '')
+    .split('\n')
+    .filter((name) => name && name !== 'main');
+  if (others.length > 0) console.log(`[trial] branches left as they were: ${others.join(', ')}`);
 }
 
 // ── Reading the agents' transcripts ───────────────────────────
@@ -362,6 +401,7 @@ function transcriptUsage(file) {
     first: null,
     last: null,
     cwd: null,
+    lastWords: null,
   };
   let text;
   try {
@@ -370,6 +410,8 @@ function transcriptUsage(file) {
     return out;
   }
   const byMessage = new Map();
+  // What each message said, in the order the messages were written.
+  const said = new Map();
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     let record;
@@ -386,12 +428,20 @@ function transcriptUsage(file) {
     const message = record.message;
     if (record.type === 'user' && message && typeof message.content === 'string') out.userPrompts++;
     if (record.type !== 'assistant' || !message) continue;
+    const id = message.id ?? record.uuid;
     if (Array.isArray(message.content)) {
       out.toolUses += message.content.filter((block) => block?.type === 'tool_use').length;
+      // A sidechain record is a sub-agent's turn, not this session's own words.
+      if (record.isSidechain !== true) {
+        for (const block of message.content) {
+          if (block?.type !== 'text' || typeof block.text !== 'string' || !block.text.trim())
+            continue;
+          said.set(id, [...(said.get(id) ?? []), block.text]);
+        }
+      }
     }
     const usage = message.usage;
     if (!usage) continue;
-    const id = message.id ?? record.uuid;
     const seen = byMessage.get(id) ?? {
       model: message.model ?? 'unknown',
       input: 0,
@@ -422,6 +472,7 @@ function transcriptUsage(file) {
     model.output += seen.output;
     out.messages++;
   }
+  out.lastWords = [...said.values()].pop()?.join('\n\n') ?? null;
   return out;
 }
 
@@ -620,6 +671,7 @@ async function run(opts) {
     claudeSettingsHash: sha256(claudeSettings),
     hookScriptHash: sha256(hookScript),
     freeMemMb: Math.round(os.freemem() / 1048576),
+    git: gitState(dir),
   };
   const mcpConsentBefore = before.config.officeMcpConsent ?? 'unanswered';
 
@@ -1420,6 +1472,31 @@ async function run(opts) {
     }
   }
 
+  // The same for the folder of its agents' MCP files (`mcp/<pid>-<rand>/`),
+  // whose tokens died with it: the files it names itself, then the folder,
+  // only when nothing else is in it.
+  if (serverExit) {
+    const mcpDir = path.join(officeDir, 'mcp');
+    let folders = [];
+    try {
+      folders = fs.readdirSync(mcpDir).filter((name) => name.startsWith(`${server.pid}-`));
+    } catch {
+      // No MCP folder.
+    }
+    for (const name of folders) {
+      const folder = path.join(mcpDir, name);
+      try {
+        for (const file of fs.readdirSync(folder)) {
+          if (/^agent-\d+\.json$/.test(file)) fs.unlinkSync(path.join(folder, file));
+        }
+        fs.rmdirSync(folder);
+        registryRemoved.push(path.relative(officeDir, folder));
+      } catch {
+        notes.push(`A folder of this run's office is left: ${folder}`);
+      }
+    }
+  }
+
   // The consent goes back to what it was: it was allowed for the run alone.
   let mcpConsentAfter = (readJson(configFile) ?? {}).officeMcpConsent ?? 'unanswered';
   if (mcpGrantedHere && !keepMcpConsent) {
@@ -1436,6 +1513,7 @@ async function run(opts) {
 
   // ── What it used ──
   const totals = {};
+  let leadReport = null;
   for (const agent of ours()) {
     if (!agent.session) continue;
     const usage = sessionUsage(agent.session.jsonlFile);
@@ -1446,6 +1524,19 @@ async function run(opts) {
       subagents: usage.subagents,
     };
     addUsage(totals, usage.models);
+    if (usage.lastWords) {
+      // A screen read back with its scrollback is hard to read; the transcript
+      // has the same words as they were written.
+      const name = `agent-${agent.id}.md`;
+      try {
+        fs.mkdirSync(path.join(outDir, 'reports'), { recursive: true });
+        fs.writeFileSync(path.join(outDir, 'reports', name), `${mask(usage.lastWords)}\n`);
+        agent.lastWords = `reports/${name}`;
+      } catch {
+        notes.push(`Agent ${agent.id}'s last words could not be written.`);
+      }
+      if (agent.id === runInfo?.leadAgentId) leadReport = mask(usage.lastWords);
+    }
     const command = processes.get(agent.session.id);
     if (command) {
       agent.launch = {
@@ -1527,7 +1618,9 @@ async function run(opts) {
       launch: agent.launch,
       usage: agent.usage ?? null,
       finalScreen: agent.finalScreen ?? null,
+      lastWords: agent.lastWords ?? null,
     })),
+    leadReport,
     crewEvents: crewEvents.map(({ key: _key, ...event }) => event),
     stageEvents,
     usage: { models: totals, total: totalOf(totals) },
@@ -1544,6 +1637,7 @@ async function run(opts) {
       mcpConsent: `${mcpConsentBefore} -> ${mcpConsentAfter}`,
       agentsNotConfirmedClosed: notClosed,
       trustedFolder: opts['no-trust'] === true ? null : dir,
+      folderGit: { before: before.git, after: gitState(dir) },
     },
     notes,
     planted: PLANTED,
@@ -1654,6 +1748,19 @@ function summaryMarkdown(s) {
     lines.push('');
   }
 
+  if (s.leadReport) {
+    lines.push("## The lead's report", '');
+    for (const line of s.leadReport.split(/\r?\n/)) lines.push(line ? `> ${line}` : '>');
+    lines.push('');
+  }
+  const lastWords = s.agents.filter((agent) => agent.lastWords);
+  if (lastWords.length > 0) {
+    lines.push(
+      `Each agent's last words: ${lastWords.map((agent) => agent.lastWords).join(', ')}`,
+      '',
+    );
+  }
+
   lines.push('## Left on this machine', '');
   lines.push(
     `- Claude's own settings file changed: ${s.leftOnThisMachine.claudeSettingsTouched ? 'YES' : 'no'}`,
@@ -1664,6 +1771,17 @@ function summaryMarkdown(s) {
   lines.push(`- Pixel Office MCP consent: ${s.leftOnThisMachine.mcpConsent}`);
   if (s.leftOnThisMachine.trustedFolder)
     lines.push(`- Claude Code was told to trust: ${s.leftOnThisMachine.trustedFolder}`);
+  const folderGit = s.leftOnThisMachine.folderGit;
+  if (folderGit.before !== folderGit.after) {
+    lines.push(
+      `- The folder's repository: ${folderGit.before ?? 'none'} -> ${folderGit.after ?? 'none'}`,
+    );
+  }
+  if (s.leftOnThisMachine.registryEntriesRemoved.length > 0) {
+    lines.push(
+      `- Left by the stopped office and removed: ${s.leftOnThisMachine.registryEntriesRemoved.join(', ')}`,
+    );
+  }
   if (s.leftOnThisMachine.agentsNotConfirmedClosed.length > 0) {
     lines.push(
       `- Agents not confirmed closed: ${s.leftOnThisMachine.agentsNotConfirmedClosed.join(', ')}`,
@@ -1681,6 +1799,7 @@ function summaryMarkdown(s) {
 
 const { command, opts } = parseArgs(process.argv.slice(2));
 if (command === 'sample') writeSample(opts._[0]);
+else if (command === 'reset-sample') resetSample(opts._[0]);
 else if (command === 'run') {
   run(opts).catch((err) => {
     console.error(`[trial] ${err.stack ?? err}`);
@@ -1691,6 +1810,7 @@ else if (command === 'run') {
     [
       'Usage:',
       '  node scripts/local-trial.mjs sample <folder>',
+      '  node scripts/local-trial.mjs reset-sample <folder>',
       `  node scripts/local-trial.mjs run --dir <folder> --preset <${Object.keys(PRESETS).join('|')}>`,
       '      [--grant-mcp] [--keep-mcp-consent] [--screenshots] [--browser-channel msedge|chrome] [--browser-path <exe>]',
       '      [--max-minutes n] [--idle-seconds n] [--permission-wait-seconds n] [--max-output-tokens n]',
