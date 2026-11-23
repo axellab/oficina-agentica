@@ -63,14 +63,16 @@ nothing said.
 starts. It is applied in `spawnPty`, so agents, PC shells and the PTY host all pass through it:
 
 - The command is looked for as a shell would: in each PATH folder in turn, under PATHEXT's
-  `.com`, `.exe`, `.bat` and `.cmd` in its order. A command with a folder in it is looked for
-  there alone, and the folder the terminal opens in is never searched by itself (what stands in
-  the folder an agent is launched into is not the CLI).
+  `.com`, `.exe`, `.bat` and `.cmd` in its order. PATHEXT only completes a bare name: one that
+  already ends in one of the four (`node.exe`) is looked for as given. A command with a folder
+  in it is looked for there alone, and the folder the terminal opens in is never searched by
+  itself (what stands in the folder an agent is launched into is not the CLI).
 - An `.exe` is spawned by its full path.
 - A `.cmd` / `.bat` is **read, never run**. When it is the launcher npm, pnpm or Yarn writes, what
   its last line names is started instead: the program itself, or `node.exe` (the one beside the
-  launcher, else the one on PATH) with the script as its first argument. The arguments stay the
-  list they were.
+  launcher, else the one on PATH) with the script as its first argument. A script is whatever
+  the launcher hands to Node, by any name (an npm `bin` often has no extension). The arguments
+  stay the list they were.
 - Any other batch file is refused with the reason. The create throws, so the launch reports a
   terminal that could not start and the server log says why.
 - A command nothing on PATH answers to is left as given, for Windows to look for in its own
@@ -85,7 +87,8 @@ injection waiting for the right message, and no escaping is right for every batc
 Limits: only the launcher's last word is honoured. Its other lines are not applied (pnpm's sets
 `NODE_PATH`), and a launcher that puts arguments of its own between Node and the script is
 refused rather than half-honoured. The rules are unit-tested against a fake disk on every OS
-(`windowsCommand.test.ts`).
+(`windowsCommand.test.ts`), and a real launch was checked by hand on Windows 11 with Claude Code
+2.1.312 installed by npm (2026-11-23).
 
 ### Why a separate launch path instead of a shared one
 

@@ -27,8 +27,6 @@ const win = path.win32;
 const PROGRAM_EXTENSIONS: ReadonlySet<string> = new Set(['.exe', '.com']);
 /** What only cmd.exe runs. */
 const BATCH_EXTENSIONS: ReadonlySet<string> = new Set(['.cmd', '.bat']);
-/** A script a launcher hands to Node. */
-const NODE_SCRIPT_EXTENSIONS: ReadonlySet<string> = new Set(['.js', '.cjs', '.mjs']);
 
 /** PATHEXT's own default, cut to what can be launched here. */
 const DEFAULT_PATHEXT = '.COM;.EXE;.BAT;.CMD';
@@ -104,7 +102,9 @@ function launchExtensions(env: Record<string, string | undefined>): string[] {
 
 /**
  * The file a command names, as a shell would find it: in each PATH folder in
- * turn, under each extension in turn. A command with a folder in it is looked
+ * turn, under each extension in turn. A name that already says what it is
+ * (`node.exe`, `tool.cmd`) is looked for as given, whatever PATHEXT lists:
+ * PATHEXT only completes a bare name. A command with a folder in it is looked
  * for there alone (relative to `cwd`). Never the current folder by itself:
  * what happens to stand in the folder an agent is launched into is not the CLI.
  */
@@ -114,10 +114,11 @@ function findCommand(
   env: Record<string, string | undefined>,
   files: WindowsFiles,
 ): string | null {
-  const extensions = launchExtensions(env);
-  const names = extensions.includes(win.extname(command).toLowerCase())
-    ? [command]
-    : extensions.map((ext) => command + ext);
+  const own = win.extname(command).toLowerCase();
+  const names =
+    PROGRAM_EXTENSIONS.has(own) || BATCH_EXTENSIONS.has(own)
+      ? [command]
+      : launchExtensions(env).map((ext) => command + ext);
   const folders = /[\\/]/.test(command)
     ? [cwd]
     : (envValue(env, 'PATH') ?? '')
@@ -167,18 +168,16 @@ function launcherTarget(
   const target = win.resolve(folder, lines[0][2]);
   if (!files.isFile(target)) throw refusal(launcher, `the file it runs is missing (${target}).`);
 
-  const extension = win.extname(target).toLowerCase();
+  const isProgram = PROGRAM_EXTENSIONS.has(win.extname(target).toLowerCase());
   const programs = lines.map((line) => line[1]);
-  if (PROGRAM_EXTENSIONS.has(extension)) {
-    // The package's own program: the launcher adds nothing to it.
-    if (programs.some((program) => program !== undefined)) {
-      throw refusal(launcher, 'it runs a program through another one.');
-    }
+  if (programs.every((program) => program === undefined)) {
+    // The launcher runs the file itself: the package's own program, nothing added.
+    if (!isProgram) throw refusal(launcher, 'what it runs by itself is not a program.');
     return { command: target, args };
   }
-  if (!NODE_SCRIPT_EXTENSIONS.has(extension)) {
-    throw refusal(launcher, 'what it runs is neither a program nor a Node script.');
-  }
+  if (isProgram) throw refusal(launcher, 'it runs a program through another one.');
+  // A script is whatever the launcher hands to an interpreter (npm's `bin`
+  // files often have no extension): it is Node's when that interpreter is Node.
   if (!programs.every((program) => program !== undefined && runsNode(program, text))) {
     throw refusal(launcher, 'it does not hand its script straight to Node.');
   }
