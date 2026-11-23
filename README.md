@@ -34,9 +34,10 @@ Claude Code is supported today; Codex, Gemini, Cursor, and others are on the roa
 ## Features
 
 - **One agent, one character** — every agent terminal gets its own animated character
-- **Roles** — launch an agent as an Architect, Developer, QA, DevSecOps, Security or Cloud Engineer, or as the Agile Project Manager that coordinates them; each gets its own standing instructions, and you can change them or add your own
+- **Roles** — launch an agent as an Architect, Developer, QA, DevSecOps, Security or Cloud Engineer, or as the Agile Project Manager that coordinates them; each gets its own standing instructions and its Contract (what it takes, delivers and never does), all plain Markdown you can read, and you can change them or add your own
+- **Playbooks** — a Role's own procedures with the tools they run, handed to its agents as skills: the DevSecOps Engineer troubleshoots a failing pipeline (reading [Pipeline Doctor](https://github.com/maikadevops-labs/pipeline-doctor)'s report where your repository has it), hardens it and audits the supply chain
 - **Crews** — set a team free for one piece of work: its agents launch and message each other without asking you, inside limits the office enforces, and you watch it and end it from the office
-- **Workflows** — hand one request to the team: pick the kind (new feature, bug fix, deep security analysis, deep quality analysis, or your own), write what you need, and a Crew takes it stage by stage, each stage with the Role that owns it, while the office shows you where it stands
+- **Workflows** — hand one request to the team: pick the kind (new feature, bug fix, deep security analysis, deep quality analysis, a Role's own such as pipeline troubleshooting, or yours), write what you need, and a Crew takes it stage by stage, each stage with the Role that owns it, while the office shows you where it stands
 - **Live activity tracking** — characters animate based on what the agent is actually doing (writing, reading, running commands). Sub-agents and teammates show up as their own characters
 - **Notifications** — speech bubbles, plus optional chimes, when an agent needs input or permission or finishes its turn
 - **Office layout editor** — design your office with floors, walls, furniture, and named Areas; layouts are saved across windows, export as JSON, and take external asset packs
@@ -138,11 +139,13 @@ Your workspace folders (VS Code) or the directory the CLI started in (standalone
 
 A Role is the part an agent plays in the team. In the launch drawer, press the **Role** row, pick one (Architect, Developer, QA Engineer, DevSecOps Engineer, Security Engineer, Cloud Engineer, Agile Project Manager), then pick the Directory: the agent starts with that Role's instructions and wears its name on its label. To change what a Role is told, give it a model, or add Roles of your own, write `~/.pixel-agents/roles.json`. Where you allowed the Pixel Office MCP, the Roles also see who is in the office, message each other, and the Agile Project Manager can launch a missing Role once you agree. See [docs/roles.md](docs/roles.md).
 
+Each built-in Role is a folder of Markdown in [`roles/`](roles): its definition, its **Contract** (what it accepts, delivers, when it is done, what it never does, whom it hands over to) and its **Playbooks**, procedures with exact commands that its agents get as skills. The DevSecOps Engineer has three: Pipeline troubleshooting, Pipeline hardening and Supply chain audit. A Playbook checks its tools first and never installs one: a missing tool is reported to you. See [docs/playbooks.md](docs/playbooks.md).
+
 To let a team run on its own, turn on the drawer's **Crew** switch before you launch: that agent and the ones it launches (up to 8) call each other in and work together without asking you for each step. Their marks and the Crew panel show who launched whom, and **End Crew** stops it. See [A Crew](docs/roles.md#a-crew-agents-free-to-work-together).
 
 ### Workflows
 
-A Workflow takes one request through its stages, each owned by a Role. In the launch drawer, press the **Workflow** row and pick the kind of request (**New feature**, **Bug fix**, **Deep security analysis**, **Deep quality analysis**), pick the Directory, then write what you need and press **Start**. The Agile Project Manager comes in with a Crew, hands each stage to the Role that owns it (launching the ones it needs) and reports each stage as it goes; the **Workflow** panel shows every stage's state and the note it was closed with, and **Stop Workflow** ends the run. To change the stages or add Workflows of your own, write `~/.pixel-agents/workflows.json`. See [docs/workflows.md](docs/workflows.md).
+A Workflow takes one request through its stages, each owned by a Role. In the launch drawer, press the **Workflow** row and pick the kind of request (**New feature**, **Bug fix**, **Deep security analysis**, **Deep quality analysis**, led by the Agile Project Manager, or one a Role leads itself, such as the DevSecOps Engineer's **Pipeline troubleshooting**), pick the Directory, then write what you need and press **Start**. The Workflow's lead comes in with a Crew, hands each stage to the Role that owns it (launching the ones it needs) and reports each stage as it goes; the **Workflow** panel shows every stage's state and the note it was closed with, and **Stop Workflow** ends the run. To change the stages or add Workflows of your own, write `~/.pixel-agents/workflows.json`. See [docs/workflows.md](docs/workflows.md).
 
 ### Characters
 

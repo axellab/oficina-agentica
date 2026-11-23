@@ -9,13 +9,16 @@ import type { Directory } from '../hooks/useExtensionMessages.js';
 import type { LaunchAs } from '../hooks/useLaunchActions.js';
 import { useLongPress } from '../hooks/useLongPress.js';
 import { useRoles } from '../roles/roleStore.js';
+import { roleTitle } from '../roles/roleView.js';
 import { useWorkflows } from '../workflows/workflowStore.js';
+import { workflowsByLead } from '../workflows/workflowView.js';
 import { DirectoryCharacterStrip } from './DirectoryCharacterStrip.js';
 import type { RowButtonId } from './drawerRowButtons.js';
 import { ROW_STACK_HIDDEN, rowButtonsFor, rowStackReducer } from './drawerRowButtons.js';
 import { Dropdown, DropdownItem } from './ui/Dropdown.js';
 import { PixelIcon } from './ui/PixelIcon.js';
 import type { PixelIconName } from './ui/pixelIcons.js';
+import { PixelText } from './ui/PixelText.js';
 
 interface LaunchDrawerProps {
   isOpen: boolean;
@@ -396,13 +399,29 @@ export function LaunchDrawer({
               selected={workflow === undefined}
               onPick={pickWorkflow}
             />
-            {workflows.workflows.map((option) => (
-              <WorkflowOption
-                key={option.id}
-                workflow={option}
-                selected={option.id === workflow?.id}
-                onPick={pickWorkflow}
-              />
+            {workflowsByLead(workflows.workflows).map((group) => (
+              // Under the Role that leads them: a Role's own Workflows sit together.
+              <div key={group.leadRoleName} data-testid="workflow-group" role="group">
+                <div
+                  data-testid="workflow-group-lead"
+                  className="flex items-center gap-6 py-4 px-10 text-2xs text-text-muted whitespace-nowrap"
+                >
+                  <RoleSwatch
+                    color={roles.find((role) => role.name === group.leadRoleName)?.color}
+                  />
+                  <span className="overflow-hidden text-ellipsis">
+                    {group.leadRoleName || 'No lead'}
+                  </span>
+                </div>
+                {group.workflows.map((option) => (
+                  <WorkflowOption
+                    key={option.id}
+                    workflow={option}
+                    selected={option.id === workflow?.id}
+                    onPick={pickWorkflow}
+                  />
+                ))}
+              </div>
             ))}
           </div>
         ) : (
@@ -489,8 +508,9 @@ const ROLE_ROW_CLASS =
 /** A row that takes no press now: dimmed like a disabled button. */
 const LOCKED_ROW_CLASS = 'cursor-default! opacity-[var(--btn-disabled-opacity)]';
 
-/** The square of a Role's colour beside its name. */
-function RoleSwatch({ color }: { color: RoleColor }) {
+/** The square of a Role's colour beside its name; an empty one of the same
+ *  size where the office was not told the Role. */
+function RoleSwatch({ color }: { color: RoleColor | undefined }) {
   return (
     <span
       aria-hidden="true"
@@ -498,7 +518,7 @@ function RoleSwatch({ color }: { color: RoleColor }) {
       style={{
         width: ROLE_SWATCH_SIZE_PX,
         height: ROLE_SWATCH_SIZE_PX,
-        background: ROLE_COLOR_HEX[color],
+        background: color ? ROLE_COLOR_HEX[color] : undefined,
       }}
     />
   );
@@ -511,16 +531,18 @@ interface RoleOptionProps {
   onPick: (roleId: string | undefined) => void;
 }
 
-/** One Role to pick from: its colour and name, its description as the
- *  tooltip (hover only: the drawer is too narrow to print it). */
+/** One Role to pick from: its colour and name, how many Playbooks it has, its
+ *  description and their names as the tooltip (hover only: the drawer is too
+ *  narrow to print them). */
 function RoleOption({ role, selected, onPick }: RoleOptionProps) {
+  const playbooks = role?.playbooks?.length ?? 0;
   return (
     <button
       type="button"
       data-testid="role-option"
       data-role-id={role?.id ?? ''}
       aria-pressed={selected}
-      title={role?.description || undefined}
+      title={role ? roleTitle(role) : undefined}
       onClick={() => onPick(role?.id)}
       className={`${ROLE_ROW_CLASS} gap-6 ${selected ? 'bg-active-bg' : 'bg-transparent'}`}
     >
@@ -530,7 +552,20 @@ function RoleOption({ role, selected, onPick }: RoleOptionProps) {
         // Keeps "None" in line with the names under it.
         <span aria-hidden="true" className="shrink-0" style={{ width: ROLE_SWATCH_SIZE_PX }} />
       )}
-      <span className="overflow-hidden text-ellipsis">{role?.name ?? NONE_LABEL}</span>
+      <span data-testid="role-option-name" className="flex-1 min-w-0 overflow-hidden text-ellipsis">
+        {role?.name ?? NONE_LABEL}
+      </span>
+      {playbooks > 0 && (
+        // How many Playbooks its agents are launched with; the tooltip names them.
+        <span
+          aria-hidden="true"
+          data-testid="role-playbooks"
+          className="shrink-0 flex items-center gap-2 text-text-muted"
+        >
+          <PixelIcon name="playbook" />
+          <PixelText text={`${playbooks}`} />
+        </span>
+      )}
     </button>
   );
 }

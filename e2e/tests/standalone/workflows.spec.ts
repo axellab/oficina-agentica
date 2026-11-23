@@ -115,14 +115,21 @@ test.describe('Standalone / workflows', () => {
     await expect(workflowPicker(drawer)).toHaveAccessibleName('Workflow: None');
     await workflowPicker(drawer).click();
     const options = drawer.getByTestId('workflow-option');
-    // "None" and one per kind of request the office ships with.
-    await expect(options).toHaveCount(5);
-    await expect(options).toContainText([
+    // "None", then the Workflows the office ships with, under the Role that
+    // leads each: the coordinator's four first, then a Role's own.
+    await expect(options).toHaveText([
       'None',
       'New feature',
       'Bug fix',
       'Deep security analysis',
       'Deep quality analysis',
+      'Pipeline troubleshooting',
+      'Pipeline hardening',
+      'Supply chain audit',
+    ]);
+    await expect(drawer.getByTestId('workflow-group-lead')).toHaveText([
+      'Agile Project Manager',
+      'DevSecOps Engineer',
     ]);
     await drawer.locator('[data-testid="workflow-option"][data-workflow-id="bug-fix"]').click();
     await expect(workflowPicker(drawer)).toHaveAccessibleName('Workflow: Bug fix');
@@ -210,6 +217,100 @@ test.describe('Standalone / workflows', () => {
     await expect(page.locator('.xterm:visible')).toContainText('The user stopped this workflow', {
       timeout: 90_000,
     });
+  });
+});
+
+test.describe("Standalone / a Role's own workflows", () => {
+  test.skip(process.platform === 'win32', 'PTY spawn of the .cmd mock shim is untested on Windows');
+  test.use({
+    standaloneOptions: {
+      mockClaude: true,
+      seedConfig: { officeMcpConsent: 'granted' },
+      hostEnv: { PIXEL_AGENTS_MOCK_STDIN: 'record' },
+    },
+  });
+
+  test('a Workflow a Role leads: picked under its lead, the run is led by that Role, launched with its Playbooks @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    test.setTimeout(120_000);
+    await setSettings(page, { alwaysShowLabels: true });
+    await waitForClaudeHookSetup(standalone.tmpHome);
+
+    // The lead: it reads the run and opens its own first stage.
+    await arrangeNextClaudeInvocation(
+      standalone.tmpHome,
+      claudeScenario('pipeline troubleshooting lead')
+        .at(1_000)
+        .callOfficeMcp('workflow', {}, { saveAs: 'run' })
+        .at(2_000)
+        .callOfficeMcp('workflow', { action: 'start', stage_id: 'evidence' })
+        .holdOpenFor(90_000)
+        .build(),
+    );
+
+    const drawer = await openLaunchDrawer(page);
+    await workflowPicker(drawer).click();
+    // The DevSecOps Engineer's own Workflows sit together under its name.
+    const own = drawer
+      .getByTestId('workflow-group')
+      .filter({ has: page.getByTestId('workflow-group-lead').getByText('DevSecOps Engineer') });
+    await expect(own.getByTestId('workflow-option')).toHaveText([
+      'Pipeline troubleshooting',
+      'Pipeline hardening',
+      'Supply chain audit',
+    ]);
+    await own
+      .locator('[data-testid="workflow-option"][data-workflow-id="pipeline-troubleshooting"]')
+      .click();
+    await expect(workflowPicker(drawer)).toHaveAccessibleName('Workflow: Pipeline troubleshooting');
+    // The run's lead is the Role the Workflow belongs to.
+    const rolePicker = drawer.getByTestId('role-picker');
+    await expect(rolePicker).toHaveAccessibleName('Role: DevSecOps Engineer');
+    await expect(rolePicker).toHaveAttribute('aria-disabled', 'true');
+
+    const directoryName = path.basename(standalone.workspaceDir);
+    await drawer.getByRole('button', { name: directoryName, exact: true }).click();
+    const modal = page.getByTestId('workflow-start-modal');
+    await expect(modal.getByTestId('workflow-start-where')).toContainText(
+      `Runs in ${directoryName}, led by DevSecOps Engineer`,
+    );
+    await expect(modal.getByTestId('workflow-start-stages').locator('li')).toHaveCount(6);
+    await modal
+      .getByTestId('workflow-request-input')
+      .fill('The CI run of the main branch fails since this morning.');
+    await modal.getByTestId('workflow-start').click();
+    await expect(modal).toBeHidden();
+
+    await expect(
+      page.getByTitle('Agent 1 · DevSecOps Engineer · Crew', { exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
+    const panel = page.getByTestId('workflow-panel');
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    await panel.getByRole('button', { name: 'Show the workflow' }).click();
+    await expect(panel.getByTestId('workflow-run')).toHaveAttribute(
+      'data-workflow-id',
+      'pipeline-troubleshooting',
+    );
+    // Its stages, each with the Role that owns it; the lead opened its own first one.
+    await expect(panel.getByTestId('workflow-stage')).toHaveCount(6);
+    await expect(stageRow(panel, 'evidence')).toContainText('DevSecOps Engineer');
+    await expect(stageRow(panel, 'fix')).toContainText('Developer');
+    await expect(stageRow(panel, 'verification')).toContainText('QA Engineer');
+    await expect(stageRow(panel, 'evidence')).toHaveAttribute('data-state', 'active', {
+      timeout: 30_000,
+    });
+
+    // The lead was started as its Role: with its Playbooks as that session's
+    // skills, free like any Crew's agent, and the request never on a command line.
+    const log = invocations(standalone.mockLogFile);
+    expect(log).toContain(
+      `--plugin-dir ${path.join(standalone.tmpHome, '.pixel-agents', 'role-kits', 'devsecops-engineer-')}`,
+    );
+    expect(log).toContain('Lead the workflow the user just started with you');
+    expect(log).not.toContain('fails since this morning');
+    expect(log).toContain('--permission-mode auto');
   });
 });
 

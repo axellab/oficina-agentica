@@ -2,23 +2,26 @@
 
 A Workflow is how one kind of request is handled: an ordered list of stages, each owned by a [Role](roles.md). You pick the Workflow that fits what you need, write the request in your own words, and a [Crew](roles.md#a-crew-agents-free-to-work-together) takes it from there: its lead hands each stage to an agent of the Role that owns it, and the office shows you every stage as it moves.
 
-Four are built in, and you can write your own.
+Every Workflow is led by one Role. The four general ones are led by the Agile Project Manager, who coordinates the whole team; a Role can also lead Workflows of its own, for the requests that are its speciality. You can write your own too.
 
-| Workflow                   | For                                                                       |
-| -------------------------- | ------------------------------------------------------------------------- |
-| **New feature**            | From a request to a tested, reviewed change ready to merge.               |
-| **Bug fix**                | Reproduce a bug, find its cause, fix it and prove it stays fixed.         |
-| **Deep security analysis** | A threat model and a ranked list of security findings, with evidence.     |
-| **Deep quality analysis**  | How healthy the code, its tests and its pipeline are, with a ranked plan. |
+| Workflow                     | Led by                | For                                                                         |
+| ---------------------------- | --------------------- | --------------------------------------------------------------------------- |
+| **New feature**              | Agile Project Manager | From a request to a tested, reviewed change ready to merge.                 |
+| **Bug fix**                  | Agile Project Manager | Reproduce a bug, find its cause, fix it and prove it stays fixed.           |
+| **Deep security analysis**   | Agile Project Manager | A threat model and a ranked list of security findings, with evidence.       |
+| **Deep quality analysis**    | Agile Project Manager | How healthy the code, its tests and its pipeline are, with a ranked plan.   |
+| **Pipeline troubleshooting** | DevSecOps Engineer    | Why a pipeline that passed now fails, and a fix proven by a green run.      |
+| **Pipeline hardening**       | DevSecOps Engineer    | The pipeline reviewed for mistakes and for abuse, and hardened on a branch. |
+| **Supply chain audit**       | DevSecOps Engineer    | What the code is built from, what in it is vulnerable, unpinned or leaked.  |
 
 ## Starting a run
 
 1. Click **+** to open the launch drawer.
-2. Press the **Workflow** row (under **Crew**; it reads **None** until you pick one) and choose a Workflow. The **Role** row now names the Role that leads it and **Crew** reads **On**: a run is always a Crew led by the Workflow's own Role, so neither is yours to set.
+2. Press the **Workflow** row (under **Crew**; it reads **None** until you pick one) and choose a Workflow. They are listed under the Role that leads them. The **Role** row now names that Role and **Crew** reads **On**: a run is always a Crew led by the Workflow's own Role, so neither is yours to set.
 3. Choose the Directory the work happens in.
 4. The office shows the Workflow's stages and asks for **your request**. Write what you need as you would to a colleague, then press **Start** (or Ctrl+Enter).
 
-![The launch drawer's Workflow row: the list of Workflows, and the drawer once New feature is picked, with the Role and the Crew set by it](images/workflow-picker.png)
+![The launch drawer's Workflow row: the Workflows under the Role that leads each, and the drawer once Pipeline troubleshooting is picked, with the Role and the Crew set by it](images/workflow-picker.png)
 
 ![The request dialog for New feature: its stages numbered by step with the Role that owns each, and the request the run starts from](images/workflow-request.png)
 
@@ -26,7 +29,7 @@ Nothing launches before **Start**. The pick lasts until the drawer closes, like 
 
 ## What happens next
 
-- **The lead comes in**, as the Workflow's lead Role (the Agile Project Manager for the built-in ones), with a new Crew. It reads your request and the stages, and asks you in its own terminal for anything the request leaves open that only you can decide.
+- **The lead comes in**, as the Workflow's lead Role (the Agile Project Manager for the four general ones, the DevSecOps Engineer for its own), with a new Crew. It reads your request and the stages, and asks you in its own terminal for anything the request leaves open that only you can decide.
 - **It hands each stage to the Role that owns it**, launching the Roles the Crew does not have yet, without asking you: that is what a Crew is. A stage its own Role owns, it does itself.
 - **The stages run in order.** A stage starts once the ones before it are done or skipped. Stages that share a number in the dialog run at the same time (a security review beside the testing, for example). When later work sends an earlier stage back (QA finds a defect), the lead starts that stage again.
 - **You watch it in the office.** Every hand-over is a walk to the other agent's desk. The **Workflow** panel (top right) counts the stages closed; opened, it shows your request and each stage with its Role, where it stands, and the note the lead closed it with: what was done and how it was verified, or why the request did not need it.
@@ -36,7 +39,9 @@ Nothing launches before **Start**. The pick lasts until the drawer closes, like 
 
 _From the test suite: the terminal on the right is its stand-in for Claude Code._
 
-The two analyses change nothing in your project: what they deliver is the report, and fixing what they find is a new request you decide on.
+The analyses (Deep security analysis, Deep quality analysis, Supply chain audit) change nothing in your project: what they deliver is the report, and fixing what they find is a new request you decide on.
+
+A stage of a Role's own Workflow often sends its owner to one of its [Playbooks](playbooks.md): the Workflow says who does what and in which order, the Playbook says which tools to run and how.
 
 ## Stopping a run
 
@@ -105,6 +110,72 @@ A secret found on the way is reported by where it is, never copied into a note o
 | 3   | Triage             | QA Engineer           | Every finding left has a priority and a reason, grouped into steps. |
 | 4   | Report             | Agile Project Manager | The findings by priority and the first steps recommended.           |
 
+## The DevSecOps Engineer's Workflows
+
+Led by the DevSecOps Engineer, who does its own stages with its [Playbooks](playbooks.md) and brings in the other Roles for theirs.
+
+### Pipeline troubleshooting
+
+| #   | Stage           | Role               | What closes it                                                                                          |
+| --- | --------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
+| 1   | Evidence        | DevSecOps Engineer | The failed run, its first error, the last green run, what changed, and Pipeline Doctor's report if any. |
+| 2   | Diagnosis       | DevSecOps Engineer | One cause explains the failure, with its evidence and what was ruled out.                               |
+| 3   | Fix             | Developer          | For a cause in the code: the smallest change that removes it, on a branch.                              |
+| 3   | Pipeline change | DevSecOps Engineer | For a cause in the pipeline: the change as code, on a branch.                                           |
+| 4   | Verification    | QA Engineer        | The pipeline runs green on the branch, and nothing was skipped or silenced to get there.                |
+| 5   | Report          | DevSecOps Engineer | The cause, the evidence, the fix and where it is, what is open.                                         |
+
+Whichever of the two stages at step 3 the cause does not need is skipped, with a note. Nobody makes the pipeline green by skipping a test or turning a check off. How the Evidence stage uses [Pipeline Doctor](playbooks.md#pipeline-troubleshooting-and-pipeline-doctor) is in the Playbook.
+
+### Pipeline hardening
+
+| #   | Stage           | Role               | What closes it                                                                         |
+| --- | --------------- | ------------------ | -------------------------------------------------------------------------------------- |
+| 1   | Inventory       | DevSecOps Engineer | Every workflow with its triggers, permissions, secrets and the actions it uses.        |
+| 2   | Lint and audit  | DevSecOps Engineer | Each finding of the linter, the audit and the manual review says where it is.          |
+| 2   | Security review | Security Engineer  | What a pull request from outside could make the pipeline run, and reach.               |
+| 3   | Changes         | DevSecOps Engineer | The fixes on a branch, one finding per commit; what needs your decision is put to you. |
+| 4   | Verification    | QA Engineer        | The pipeline runs green on the branch and still runs the same tests as before.         |
+| 5   | Report          | DevSecOps Engineer | The findings by severity, what was fixed and where, what waits for your decision.      |
+
+### Supply chain audit
+
+| #   | Stage        | Role               | What closes it                                                                          |
+| --- | ------------ | ------------------ | --------------------------------------------------------------------------------------- |
+| 1   | Inventory    | DevSecOps Engineer | What the repository is built from, and its bill of materials.                           |
+| 2   | Dependencies | DevSecOps Engineer | Known vulnerabilities, pins, licences: each finding with its package and the fix.       |
+| 2   | Secrets      | Security Engineer  | Each match in the files and the history judged, by where it is, never by its value.     |
+| 3   | Triage       | Security Engineer  | Every finding left ranked by real risk in this system, with a reason.                   |
+| 4   | Report       | DevSecOps Engineer | The findings by severity, the secrets to replace, the tools that ran and those missing. |
+
+## Where the built-in Workflows live
+
+Each is a Markdown file in the folder of the Role that leads it: `roles/<role id>/workflows/<workflow id>.md` in the repository ([`roles/`](../roles)). The front matter names it, the text before the first stage is what the lead is told about the Workflow as a whole, and each stage is a section:
+
+```markdown
+---
+name: Pipeline troubleshooting
+description: Why a pipeline that passed now fails, and a fix proven by a green run.
+order: 10
+---
+
+The request is a pipeline run that fails. ...
+
+## 1. Evidence (devsecops-engineer)
+
+Run your Pipeline troubleshooting playbook, steps 1 to 4. ... Closed when all of that is in your note.
+
+## 3. Fix (developer)
+
+...
+
+## 3. Pipeline change (devsecops-engineer)
+
+...
+```
+
+A stage's heading is `## <step>. <Title> (<role id>)`: stages with the same step number run at the same time, and steps count up from 1 without a gap. The stage's id is its title in lower case with hyphens (`pipeline-change`), or the one the heading gives at its end (`{#pipeline}`). The limits are the same as in `workflows.json` below, which is also how you replace one of these or add your own without touching the repository.
+
 ## Your own Workflows: `workflows.json`
 
 Create `~/.pixel-agents/workflows.json` to add a Workflow or replace a built-in one.
@@ -161,7 +232,7 @@ Create `~/.pixel-agents/workflows.json` to add a Workflow or replace a built-in 
 | `stages[].brief`    | What the stage's owner does and what closes it, up to 2,000 characters: one string, or a list of lines. The lead is told it; write it so it can check the result. |
 | `stages[].parallel` | `true` when the stage may run at the same time as the stage listed before it. Not on the first stage.                                                             |
 
-The built-in ids are `new-feature`, `bug-fix`, `security-review` and `quality-review`. An entry with one of them replaces that Workflow **whole** (its stages are a list, not fields to merge), so start from the full Workflow you want. New Workflows are listed after the built-in ones, in the file's order. Up to 30 entries are read.
+The built-in ids are `new-feature`, `bug-fix`, `security-review`, `quality-review`, `pipeline-troubleshooting`, `pipeline-hardening` and `supply-chain-audit`. An entry with one of them replaces that Workflow **whole** (its stages are a list, not fields to merge), so start from the full Workflow you want. New Workflows are listed after the built-in ones, in the file's order; the drawer shows each under the Role that leads it. Up to 30 entries are read.
 
 A change applies to the next run you start; reload the office to see a new or renamed Workflow in the drawer. A run already under way keeps the stages it started with.
 

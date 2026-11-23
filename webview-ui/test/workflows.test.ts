@@ -2,7 +2,8 @@
  * The office's Workflows: what a `workflowsLoaded` or `workflowRejected`
  * message leaves in the store (workflowStore), and what the Workflow panel and
  * the request dialog print (workflowView): a run's progress, a stage's words,
- * the stages numbered by step, and whether a request may be sent.
+ * the stages numbered by step, the Workflows under the Role that leads them,
+ * and whether a request may be sent.
  *
  * Run with: npm test
  */
@@ -26,6 +27,7 @@ import {
   requestProblem,
   runProgress,
   stageTitle,
+  workflowsByLead,
 } from '../src/workflows/workflowView.js';
 
 beforeEach(() => resetWorkflowStoreForTests());
@@ -204,6 +206,28 @@ test('a first stage marked parallel has nothing to run beside', () => {
       [2, false],
     ],
   );
+});
+
+test('the drawer lists the Workflows under the Role that leads them, in the order sent', () => {
+  const led = (id: string, leadRoleName: string) => ({ id, leadRoleName });
+  const groups = workflowsByLead([
+    led('new-feature', 'Agile Project Manager'),
+    led('bug-fix', 'Agile Project Manager'),
+    led('pipeline-troubleshooting', 'DevSecOps Engineer'),
+    led('threat-model', 'Security Engineer'),
+    // One of the user's, listed last by the server, joins its lead's own.
+    led('release', 'DevSecOps Engineer'),
+  ]);
+
+  assert.deepEqual(
+    groups.map((group) => [group.leadRoleName, group.workflows.map((workflow) => workflow.id)]),
+    [
+      ['Agile Project Manager', ['new-feature', 'bug-fix']],
+      ['DevSecOps Engineer', ['pipeline-troubleshooting', 'release']],
+      ['Security Engineer', ['threat-model']],
+    ],
+  );
+  assert.deepEqual(workflowsByLead([]), []);
 });
 
 test('a request must say something and fit', () => {

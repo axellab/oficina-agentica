@@ -100,7 +100,11 @@ test.describe('Standalone / roles', () => {
 
     // The Role row swaps the Directories for the Roles: "None", then the team.
     await rolePicker(drawer).click();
-    await expect(drawer.getByTestId('role-option')).toHaveText(['None', ...BUILTIN_ROLE_NAMES]);
+    await expect(drawer.getByTestId('role-option')).toHaveCount(BUILTIN_ROLE_NAMES.length + 1);
+    await expect(drawer.getByTestId('role-option-name')).toHaveText([
+      'None',
+      ...BUILTIN_ROLE_NAMES,
+    ]);
     await rolePicker(drawer).click();
 
     await pickRole(drawer, 'QA Engineer');
@@ -164,7 +168,7 @@ test.describe('Standalone / roles', () => {
 
     const drawer = await openLaunchDrawer(page);
     await rolePicker(drawer).click();
-    await expect(drawer.getByTestId('role-option')).toHaveText([
+    await expect(drawer.getByTestId('role-option-name')).toHaveText([
       'None',
       ...BUILTIN_ROLE_NAMES.map((name) => (name === 'Developer' ? 'Rust Developer' : name)),
       'Technical Writer',
@@ -201,6 +205,70 @@ test.describe('Standalone / roles', () => {
     expect(instructions).toContain('Every change ships with its docs.');
     expect(instructions).toContain('- Rust Developer: ');
     expect(instructions).toContain('- Technical Writer (you): Keeps the docs true.');
+  });
+
+  test("a Role's Playbooks: the drawer says how many it has, and its agent is launched with them as its skills and with its Contract @area:standalone", async ({
+    page,
+    standalone,
+  }) => {
+    await setSettings(page, { alwaysShowLabels: true });
+    await waitForClaudeHookSetup(standalone.tmpHome);
+    await arrangeNextClaudeInvocation(
+      standalone.tmpHome,
+      claudeScenario('role with playbooks').holdOpenFor(60_000).build(),
+    );
+
+    const drawer = await openLaunchDrawer(page);
+    await rolePicker(drawer).click();
+    // The DevSecOps Engineer has three; the hover names them under what it does.
+    const engineer = drawer.locator(
+      '[data-testid="role-option"][data-role-id="devsecops-engineer"]',
+    );
+    await expect(engineer.getByTestId('role-playbooks')).toHaveText('3');
+    await expect(engineer).toHaveAttribute(
+      'title',
+      /\nPlaybooks: Pipeline troubleshooting, Pipeline hardening, Supply chain audit\.$/,
+    );
+    // A Role with none says nothing of them.
+    const developer = drawer.locator('[data-testid="role-option"][data-role-id="developer"]');
+    await expect(developer.getByTestId('role-playbooks')).toHaveCount(0);
+    await expect(developer).not.toHaveAttribute('title', /Playbooks/);
+    await rolePicker(drawer).click();
+
+    await pickRole(drawer, 'DevSecOps Engineer');
+    const directoryName = path.basename(standalone.workspaceDir);
+    await drawer.getByRole('button', { name: directoryName, exact: true }).click();
+    await expectOverlayCount(page, 1);
+    await expectOverlayVisibleWithTexts(page, ['DevSecOps Engineer', directoryName]);
+
+    // The coding agent was started with the Role's Playbooks as a plugin of
+    // that session alone: a folder under ~/.pixel-agents named on its command
+    // line, one skill per Playbook.
+    const kits = path.join(standalone.tmpHome, '.pixel-agents', 'role-kits');
+    await expect
+      .poll(() => invocations(standalone.mockLogFile))
+      .toContain(`--plugin-dir ${path.join(kits, 'devsecops-engineer-')}`);
+    const [pluginFolder] = fs.readdirSync(kits);
+    expect(pluginFolder).toMatch(/^devsecops-engineer-[0-9a-f]{12}$/);
+    expect(fs.readdirSync(path.join(kits, pluginFolder, 'skills')).sort()).toEqual([
+      'pipeline-hardening',
+      'pipeline-troubleshooting',
+      'supply-chain-audit',
+    ]);
+    const troubleshooting = fs.readFileSync(
+      path.join(kits, pluginFolder, 'skills', 'pipeline-troubleshooting', 'SKILL.md'),
+      'utf8',
+    );
+    expect(troubleshooting).toContain('name: pipeline-troubleshooting');
+    expect(troubleshooting).toContain('Pipeline Doctor');
+
+    // Its instructions hold its Contract and name each Playbook as the CLI lists it.
+    const instructions = fs.readFileSync(
+      path.join(standalone.tmpHome, '.pixel-agents', 'role-prompts', 'devsecops-engineer.md'),
+      'utf8',
+    );
+    expect(instructions).toContain('## Your contract');
+    expect(instructions).toContain('`devsecops-engineer:pipeline-troubleshooting`');
   });
 
   test('a launch into a new worktree is as the picked Role too @area:standalone', async ({

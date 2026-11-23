@@ -1,7 +1,8 @@
 /**
  * What the office says of a Workflow and its runs, pure (Node-tested): the
- * panel's counts, a stage's words, and how the request dialog numbers the
- * stages. The order itself is core's (`stageSteps`).
+ * panel's counts, a stage's words, how the request dialog numbers the stages
+ * and how the drawer groups the Workflows by their lead. The order itself is
+ * core's (`stageSteps`).
  */
 
 import type {
@@ -54,6 +55,21 @@ export function numberedStages(
     roleName: stage.roleName,
     parallel: stage.parallel === true && index > 0,
   }));
+}
+
+/** The Workflows as the drawer lists them: under the Role that leads them, the
+ *  leads in the order their first Workflow is listed (the coordinator's come
+ *  first from the server; one of the user's joins its lead's own). */
+export function workflowsByLead<T extends Pick<Workflow, 'leadRoleName'>>(
+  workflows: readonly T[],
+): Array<{ leadRoleName: string; workflows: T[] }> {
+  const groups = new Map<string, T[]>();
+  for (const workflow of workflows) {
+    const group = groups.get(workflow.leadRoleName);
+    if (group) group.push(workflow);
+    else groups.set(workflow.leadRoleName, [workflow]);
+  }
+  return [...groups].map(([leadRoleName, led]) => ({ leadRoleName, workflows: led }));
 }
 
 /** Why a request cannot be sent as it is, or null when it can. */
