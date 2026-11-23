@@ -35,6 +35,7 @@ allure-report/
 .claude
 .mcp.json
 /sprites-export
+/trial-runs
 .vercel/
 agent-orchestrator.yaml
 .worktrees
