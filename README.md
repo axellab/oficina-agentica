@@ -35,6 +35,7 @@ Claude Code is supported today; Codex, Gemini, Cursor, and others are on the roa
 
 - **One agent, one character** — every agent terminal gets its own animated character
 - **Roles** — launch an agent as an Architect, Developer, QA, DevSecOps, Security or Cloud Engineer, or as the Agile Project Manager that coordinates them; each gets its own standing instructions, and you can change them or add your own
+- **Crews** — set a team free for one piece of work: its agents launch and message each other without asking you, inside limits the office enforces, and you watch it and end it from the office
 - **Live activity tracking** — characters animate based on what the agent is actually doing (writing, reading, running commands). Sub-agents and teammates show up as their own characters
 - **Notifications** — speech bubbles, plus optional chimes, when an agent needs input or permission or finishes its turn
 - **Office layout editor** — design your office with floors, walls, furniture, and named Areas; layouts are saved across windows, export as JSON, and take external asset packs
@@ -135,6 +136,8 @@ Your workspace folders (VS Code) or the directory the CLI started in (standalone
 ### Roles
 
 A Role is the part an agent plays in the team. In the launch drawer, press the **Role** row, pick one (Architect, Developer, QA Engineer, DevSecOps Engineer, Security Engineer, Cloud Engineer, Agile Project Manager), then pick the Directory: the agent starts with that Role's instructions and wears its name on its label. To change what a Role is told, give it a model, or add Roles of your own, write `~/.pixel-agents/roles.json`. Where you allowed the Pixel Office MCP, the Roles also see who is in the office, message each other, and the Agile Project Manager can launch a missing Role once you agree. See [docs/roles.md](docs/roles.md).
+
+To let a team run on its own, turn on the drawer's **Crew** switch before you launch: that agent and the ones it launches (up to 8) call each other in and work together without asking you for each step. Their marks and the Crew panel show who launched whom, and **End Crew** stops it. See [A Crew](docs/roles.md#a-crew-agents-free-to-work-together).
 
 ### Characters
 
