@@ -10,6 +10,8 @@ The cause comes from evidence: the failing step, the last green run, and what ch
 
 Ask the user once, early, in your own terminal, for what the request leaves open: which run, when it names none and several failed.
 
+When both stages of step 3 have work, they write at the same time, and agents launched into one folder share its checkout: launch the Developer into a new Worktree (launch_agent with `worktree`), from the commit that failed, and bring both changes onto one branch before the Verification.
+
 ## 1. Evidence (devsecops-engineer)
 
 Run your Pipeline troubleshooting playbook, steps 1 to 4: the failed run with its failing job and step, the first error, the last green run of the same workflow, what changed in the code between the two, and Pipeline Doctor's report where the repository has it wired. Closed when all of that is in your note, with the run's link.

@@ -26,8 +26,10 @@ What you are testing, and what you compare it with:
 git status --short
 git rev-parse --short HEAD
 gh repo view --json defaultBranchRef --jq .defaultBranchRef.name
-gh run list --branch <default-branch> --status success --limit 1 --json databaseId,headSha,workflowName,createdAt,url
+gh run list --workflow <workflow file> --branch <default-branch> --status success --limit 1 --json databaseId,headSha,workflowName,createdAt,url
 ```
+
+The baseline is the last green run of the workflow that runs the suites (step 1 named it), not of any workflow: a run that only published a page or updated a badge is green and has no test to compare with. Where several workflows run suites, take one baseline for each.
 
 Uncommitted changes are part of what you test: say so, or stop and ask. From the last green run, note how many tests each suite ran: a suite that now runs fewer is a finding even when it is green.
 

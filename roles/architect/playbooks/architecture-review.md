@@ -46,10 +46,10 @@ npx --no-install depcruise --no-config --output-type metrics <source folders>
 A rule of step 1 that the tool does not hold is checked by reading the imports. For "this part depends on nothing in that one":
 
 ```bash
-git grep -nE "(from|require\(|import) ['\"][^'\"]*<that part>/" -- <this part>
+git grep -nE "(from|import|require)[[:space:](]*['\"][^'\"]*<that part>/" -- <this part>
 ```
 
-(Write the pattern for this language's imports.) A dependency that crosses a boundary through a side door counts too: a shared global, a file both sides read, a type imported only to be cast.
+(That one finds `from '…'`, `import '…'`, `import('…')` and `require('…')`. Write the pattern for this language's imports.) A dependency that crosses a boundary through a side door counts too: a shared global, a file both sides read, a type imported only to be cast.
 
 ## 4. Where change is expensive
 

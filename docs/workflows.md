@@ -217,7 +217,7 @@ A refactor and a change of behaviour never share a commit: a bug found on the wa
 | 4   | Proof        | QA Engineer        | Each fixed test repeated at least three times as many runs as it took to fail, with no failure.      |
 | 5   | Report       | QA Engineer        | Each flaky test with its cause, what was fixed and where, the runs that prove it.                    |
 
-In both, nobody gets a suite green with a retry, a longer timeout or a skip, and whichever stages at step 3 the causes do not need are skipped, with a note.
+In both, nobody gets a suite green with a retry, a longer timeout or a skip, and whichever stages at step 3 the causes do not need are skipped, with a note. The fixes of step 3 are written at the same time, so each agent that writes one is launched into a Worktree of its own, and step 4 runs on a branch that brings them together, made for that run alone: the fixes stay on their own branches for you to merge.
 
 ### DevSecOps Engineer
 

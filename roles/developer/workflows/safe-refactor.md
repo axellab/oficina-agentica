@@ -28,7 +28,7 @@ Playbook, steps 3 and 4: the baseline of the repository's checks, then one move 
 
 ## 4. Verification (qa-engineer)
 
-Prove nothing changed: the same tests exist and pass as before, none was removed, skipped or loosened (read the diff of the test files), the public interface is the same, and the number of tests that ran is the baseline's plus the safety net's. Closed when the comparison is in your note.
+Prove nothing changed: the same tests exist and pass as before, none was removed, skipped or loosened (read the diff of the test files), the public interface is the same, and as many tests ran as in the baseline the Refactor stage took, which already counts the safety net's. Closed when the comparison is in your note.
 
 ## 5. Report (developer)
 

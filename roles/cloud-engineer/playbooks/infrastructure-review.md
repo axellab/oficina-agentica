@@ -24,14 +24,14 @@ Write down each root module (a folder with a backend or a provider block), the e
 terraform fmt -check -recursive -diff
 ```
 
-Validation needs the providers. This step downloads the ones the lock file names into `.terraform`; it reaches no cloud account and no state:
+Validation needs the providers. This step downloads the ones the lock file names into `.terraform`, and nothing else: `-backend=false` keeps it from the state, and `-get=false` from the modules. A module's source may be a bucket, a private git host or a private registry, and `init` would fetch it with the human's own credentials (their cloud keys, their SSH key) before anyone agreed to that:
 
 ```bash
-terraform -chdir=<root module> init -backend=false -lockfile=readonly -input=false
+terraform -chdir=<root module> init -backend=false -get=false -lockfile=readonly -input=false
 terraform -chdir=<root module> validate -no-color
 ```
 
-With no `.terraform.lock.hcl` committed, that is a finding (the providers are not pinned): report it and skip the validation, rather than let `init` choose the versions.
+Where the root module calls modules that are not installed yet (either command says a module is not installed), do not fetch them: report the validation as not run for that root module, with the reason. It is run in step 6, after the human's go-ahead. With no `.terraform.lock.hcl` committed, that is a finding (the providers are not pinned): report it and skip the validation, rather than let `init` choose the versions.
 
 ## 3. Lint
 
@@ -65,14 +65,14 @@ Read the code against this list:
 
 ## 6. The plan, only with the human's go-ahead
 
-A plan reads the real cloud account with the human's credentials, and may take a lock on the state. Ask first, saying which account and which environment. Then:
+A plan reads the real cloud account with the human's credentials, and may take a lock on the state. Its `init` also fetches the modules step 2 left alone, from wherever their sources point, with the same credentials. Ask first, saying which account and which environment, and that the modules will be downloaded. Then:
 
 ```bash
 terraform -chdir=<root module> init -lockfile=readonly -input=false
 terraform -chdir=<root module> plan -input=false -no-color -out=<temporary folder>/review.tfplan
 ```
 
-Read what it would create, change and destroy, and above all what it would replace: a database that is replaced is a database that is deleted. A plan file holds secrets in clear text: it stays outside the repository, and nothing sensitive from it is copied into a note. Without the go-ahead, say that no plan was made, and review from the code alone.
+Where step 2 could not validate for want of the modules, run `validate` now. Read what the plan would create, change and destroy, and above all what it would replace: a database that is replaced is a database that is deleted. A plan file holds secrets in clear text: it stays outside the repository, and nothing sensitive from it is copied into a note. Without the go-ahead, say that no plan was made, and review from the code alone.
 
 ## 7. Report
 

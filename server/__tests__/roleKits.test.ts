@@ -562,7 +562,9 @@ describe('the Roles that ship', () => {
     // The Cloud Engineer plans only with a go-ahead, and never applies.
     const infrastructure = of('cloud-engineer', 'infrastructure-review');
     expect(infrastructure).toContain('Never run `terraform apply`, `destroy`, `import`, `taint`');
-    expect(infrastructure).toContain('init -backend=false -lockfile=readonly -input=false');
+    expect(infrastructure).toContain(
+      'init -backend=false -get=false -lockfile=readonly -input=false',
+    );
     expect(infrastructure).toMatch(/## 6\. The plan, only with the human's go-ahead/);
     expect(infrastructure).toContain('Do not run `tflint --init`');
     expect(infrastructure).toContain('checkov -d . --quiet --compact --skip-download');

@@ -10,6 +10,8 @@ A retry, a longer timeout or a skip hides a flaky test; it does not fix one. Nob
 
 Re-running jobs on the pipeline spends the user's minutes: ask the user once, in your own terminal, before the first one.
 
+The fixes of step 3 are written at the same time, and agents launched into one folder share its checkout: two of them changing branches there would undo each other's work. Launch every agent that writes a fix into a new Worktree of its own (launch_agent with `worktree`), each from the commit the hunt started on. Only one writer, you at most, works in the folder you run in.
+
 ## 1. Suspects (qa-engineer)
 
 Run your Flaky test hunt playbook, step 1: the runs that needed a second attempt, the failures on the default branch that no change explains, and the retries and skips the code already has. Closed when each suspect is in your note with how often it failed and where.
@@ -32,7 +34,7 @@ For a cause in how the suite runs (too few resources, a service not ready, a cac
 
 ## 4. Proof (qa-engineer)
 
-Each fixed test repeated under the condition that made it fail, for at least three times as many runs as it took to see it fail, with no failure; then the whole suite once. Closed when the number of runs and their result are in your note for each test.
+Bring the fixes together first: a branch for the proof alone, from the commit the hunt started on, with each fix's branch merged into it (a conflict goes back to whoever wrote the fix). The fixes stay on their own branches; this one is not the result. On it, each fixed test repeated under the condition that made it fail, for at least three times as many runs as it took to see it fail, with no failure; then the whole suite once. Closed when the number of runs and their result are in your note for each test.
 
 ## 5. Report (qa-engineer)
 
