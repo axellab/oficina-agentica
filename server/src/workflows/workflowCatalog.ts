@@ -100,13 +100,16 @@ export function roleNameOf(roleId: string): string {
   return roleCatalog().find((role) => role.id === roleId)?.name ?? roleId;
 }
 
-/** A catalog Workflow as the office lists it: no brief, Roles by name. */
+/** A catalog Workflow as the office lists it: no brief, Roles by name (and
+ *  its lead by id too: the office groups the Workflows by who leads them, and
+ *  two Roles may go by one name). */
 export function workflowListing(workflow: CatalogWorkflow): Workflow {
   return {
     id: workflow.id,
     name: workflow.name,
     description: workflow.description,
     source: workflow.source,
+    leadRoleId: workflow.lead,
     leadRoleName: roleNameOf(workflow.lead),
     stages: workflow.stages.map((stage) => ({
       id: stage.id,

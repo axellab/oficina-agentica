@@ -377,6 +377,17 @@ export const ICONS = {
     '##.#####',
     '##.#####',
   ],
+  // A Playbook: a closed book, its spine on the left, two lines on its cover.
+  playbook: [
+    '.######.',
+    '##....#.',
+    '##.##.#.',
+    '##....#.',
+    '##.##.#.',
+    '##....#.',
+    '.######.',
+    '........',
+  ],
   // A magnifying glass: the lens top-left, the handle out to the corner.
   search: [
     '.####...',

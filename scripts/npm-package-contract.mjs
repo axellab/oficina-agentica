@@ -27,6 +27,9 @@ export const REQUIRED_PACKAGE_FILES = [
 
 export const REQUIRED_PACKAGE_PREFIXES = [
   'dist/assets/furniture/',
+  // The built-in Roles' folders (roles/, copied by esbuild.js): without them the
+  // office offers no Role and no Workflow.
+  'dist/assets/roles/',
   'dist/assets/wardrobe/',
   'dist/webview/assets/',
 ];

@@ -274,6 +274,13 @@ export const ROLES_FILE_NAME = 'roles.json';
 /** Where each Role's standing instructions are written for the coding agent to
  *  read at launch (one `<role id>.md` per Role), in the persistence dir. */
 export const ROLE_PROMPTS_DIR_NAME = 'role-prompts';
+/** Where the build puts the built-in Roles' folders, under dist/ (esbuild.js
+ *  copyRoleKits; read by server/src/roles/roleKits.ts). */
+export const ROLE_KITS_DIST_DIR = 'assets/roles';
+/** Where a Role's Playbooks are written as skills for the coding agent to load
+ *  at launch (one `<role id>-<hash>` plugin folder per Role and content), in
+ *  the persistence dir. */
+export const ROLE_KITS_DIR_NAME = 'role-kits';
 
 // ── Crews (server/src/crews.ts) ──────────────────────────────
 /** How many agents one Crew holds at a time. Its agents launch each other

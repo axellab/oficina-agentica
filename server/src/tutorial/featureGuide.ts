@@ -83,7 +83,16 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
       '(the name in its tooltip). An agent keeps its Role for its life, and a resumed conversation comes back as the ' +
       'Role it had. Only agents the office launched have one: adopted sessions, teammates and sub-agents never do. ' +
       'The user writes Roles of their own, or changes the built-in ones, in ~/.pixel-agents/roles.json; a change ' +
-      'applies to the next launch. Every Role is told the whole team and the same working agreements. With the ' +
+      'applies to the next launch. Every Role is told the whole team and the same working agreements. Each built-in ' +
+      'Role also has a Contract, part of what its agents are told: what a request to it must bring, what it ' +
+      'delivers, when its work is done, what it never does and whom it hands over to. A Role may have Playbooks: ' +
+      'jobs it does the same way every time, each an ordered run of named tools with the exact commands, handed to ' +
+      'its agents as skills of Claude Code named after the Role. The DevSecOps Engineer has three: Pipeline ' +
+      "troubleshooting (why a GitHub Actions run fails, from the run and from Pipeline Doctor's report where the " +
+      'repository has it; /devsecops-engineer:pipeline-troubleshooting in its terminal runs it), Pipeline hardening ' +
+      'and Supply chain audit. A playbook checks its tools first and reports one that is missing: an agent never ' +
+      "installs software on its own. list_roles lists each Role's playbooks, so a colleague can ask for one by " +
+      'name. With the ' +
       'Pixel Office MCP the Roles reach each other: list_roles lists the Roles and the agents holding each one, ' +
       "list_agents gives each agent's Role, send_message hands work over and arrives marked with the sender's Role " +
       '("[From Byte (Agile Project Manager), agent 1]"), and on standalone launch_agent takes a `role` (its id, or ' +
@@ -103,16 +112,22 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
     id: 'workflows',
     title: 'Workflows: one request handled stage by stage',
     body:
-      'A Workflow is how one kind of request is handled: an ordered list of stages, each owned by a Role. Four are ' +
-      'built in: New feature (requirements, design, implementation, testing with a security review beside it, ' +
+      'A Workflow is how one kind of request is handled: an ordered list of stages, each owned by a Role. The four ' +
+      'a request usually starts from are led by the Agile Project Manager: New feature (requirements, design, ' +
+      'implementation, testing with a security review beside it, ' +
       'delivery, report), Bug fix (reproduce, diagnosis, fix, verification with a security check beside it, report), ' +
       'Deep security analysis (threat model, code review with dependencies and pipeline, infrastructure and ' +
       'architecture beside it, triage, report) and Deep quality analysis (scope, tests with code health, ' +
       'architecture and build and pipeline beside them, triage, report). The two analyses change nothing: what they ' +
-      'deliver is a report. The user starts a run from the launch drawer (standalone, with the Pixel Office MCP on ' +
-      'and not read-only): the Workflow row under the Crew switch picks the Workflow, a press on a Directory opens a ' +
+      'deliver is a report. Each other Role leads the Workflows that are its own job. The DevSecOps Engineer leads ' +
+      'Pipeline troubleshooting (evidence, diagnosis, fix with a pipeline change beside it, verification, report), ' +
+      'Pipeline hardening (inventory, lint and audit with a security review beside it, changes, verification, ' +
+      'report) and Supply chain audit (inventory, dependencies with secrets beside them, triage, report), and runs ' +
+      'its Playbooks in them. The user starts a run from the launch drawer (standalone, with the Pixel Office MCP on ' +
+      'and not read-only): the Workflow row under the Crew switch lists the Workflows under the Role that leads ' +
+      'each, a press on a Directory opens a ' +
       'dialog that lists its stages and asks for the request in their own words, and Start launches the Role that ' +
-      'leads it (the Agile Project Manager for the built-in ones) with a new Crew. That lead reads the request, the ' +
+      'leads it with a new Crew. That lead reads the request, the ' +
       'stages and its rules with the workflow tool, hands each stage to an agent of the Role that owns it ' +
       '(launching the Roles the Crew lacks, without asking) and reports each stage there: start, finish with a note ' +
       'of what was done and how it was verified, or skip with a note saying why. The office keeps the order (a stage ' +

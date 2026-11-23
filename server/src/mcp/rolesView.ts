@@ -66,6 +66,10 @@ export function createRoleOps(store: AgentStateStore): RoleOps {
         description: role.description,
         source: role.source,
         agents: holders.get(role.id) ?? [],
+        playbooks: (role.playbooks ?? []).map((playbook) => ({
+          name: playbook.name,
+          description: playbook.description,
+        })),
       }));
     },
   };

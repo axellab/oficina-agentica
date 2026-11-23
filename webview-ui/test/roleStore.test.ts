@@ -1,6 +1,7 @@
 /**
  * The office's list of Roles (roleStore): what a `rolesLoaded` message leaves
- * in it, and that nothing else touches it.
+ * in it, and that nothing else touches it; and what the drawer says of a Role
+ * (roleView).
  *
  * Run with: npm test
  */
@@ -10,6 +11,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, test } from 'vitest';
 
 import { handleRolesMessage, listedRoles, resetRoleStoreForTests } from '../src/roles/roleStore.js';
+import { roleTitle } from '../src/roles/roleView.js';
 
 beforeEach(() => resetRoleStoreForTests());
 
@@ -59,4 +61,37 @@ test('any other message is not taken, and changes nothing', () => {
 
   assert.equal(handleRolesMessage({ type: 'directoriesLoaded', roles: [] }), false);
   assert.equal(listedRoles(), before);
+});
+
+test("a Role's Playbooks are listed by name, and only names", () => {
+  const engineer = {
+    ...ARCHITECT,
+    id: 'devsecops-engineer',
+    name: 'DevSecOps Engineer',
+    playbooks: ['Pipeline troubleshooting', 7, '', 'Supply chain audit'],
+  };
+
+  handleRolesMessage({ type: 'rolesLoaded', roles: [engineer, { ...ARCHITECT, playbooks: [] }] });
+
+  assert.deepEqual(listedRoles(), [
+    { ...engineer, playbooks: ['Pipeline troubleshooting', 'Supply chain audit'] },
+    ARCHITECT,
+  ]);
+});
+
+test("a Role's tooltip says what it does, then names its Playbooks", () => {
+  assert.equal(roleTitle({ description: 'Shapes the system.' }), 'Shapes the system.');
+  assert.equal(
+    roleTitle({ description: 'Shapes the system.', playbooks: [] }),
+    'Shapes the system.',
+  );
+  assert.equal(
+    roleTitle({
+      description: 'Builds and secures the pipeline.',
+      playbooks: ['Pipeline troubleshooting', 'Supply chain audit'],
+    }),
+    'Builds and secures the pipeline.\nPlaybooks: Pipeline troubleshooting, Supply chain audit.',
+  );
+  assert.equal(roleTitle({ description: '', playbooks: ['Daily'] }), 'Playbooks: Daily.');
+  assert.equal(roleTitle({ description: '' }), undefined);
 });

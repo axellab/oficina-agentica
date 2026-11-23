@@ -2,7 +2,8 @@
  * The office's Workflows: what a `workflowsLoaded` or `workflowRejected`
  * message leaves in the store (workflowStore), and what the Workflow panel and
  * the request dialog print (workflowView): a run's progress, a stage's words,
- * the stages numbered by step, and whether a request may be sent.
+ * the stages numbered by step, the Workflows under the Role that leads them,
+ * and whether a request may be sent.
  *
  * Run with: npm test
  */
@@ -26,6 +27,7 @@ import {
   requestProblem,
   runProgress,
   stageTitle,
+  workflowsByLead,
 } from '../src/workflows/workflowView.js';
 
 beforeEach(() => resetWorkflowStoreForTests());
@@ -35,6 +37,7 @@ const BUG_FIX: Workflow = {
   name: 'Bug fix',
   description: 'Reproduce it, fix it, prove it stays fixed.',
   source: 'builtin',
+  leadRoleId: 'agile-project-manager',
   leadRoleName: 'Agile Project Manager',
   stages: [
     { id: 'reproduce', title: 'Reproduce', roleName: 'QA Engineer' },
@@ -204,6 +207,39 @@ test('a first stage marked parallel has nothing to run beside', () => {
       [2, false],
     ],
   );
+});
+
+test('the drawer lists the Workflows under the Role that leads them, in the order sent', () => {
+  const led = (id: string, leadRoleId: string, leadRoleName: string) => ({
+    id,
+    leadRoleId,
+    leadRoleName,
+  });
+  const groups = workflowsByLead([
+    led('new-feature', 'agile-project-manager', 'Agile Project Manager'),
+    led('bug-fix', 'agile-project-manager', 'Agile Project Manager'),
+    led('pipeline-troubleshooting', 'devsecops-engineer', 'DevSecOps Engineer'),
+    led('threat-model', 'security-engineer', 'Security Engineer'),
+    // One of the user's, listed last by the server, joins its lead's own.
+    led('release', 'devsecops-engineer', 'DevSecOps Engineer'),
+    // A Role of the user's that goes by another's name keeps its own Workflows.
+    led('platform-release', 'platform-engineer', 'DevSecOps Engineer'),
+  ]);
+
+  assert.deepEqual(
+    groups.map((group) => [
+      group.leadRoleId,
+      group.leadRoleName,
+      group.workflows.map((workflow) => workflow.id),
+    ]),
+    [
+      ['agile-project-manager', 'Agile Project Manager', ['new-feature', 'bug-fix']],
+      ['devsecops-engineer', 'DevSecOps Engineer', ['pipeline-troubleshooting', 'release']],
+      ['security-engineer', 'Security Engineer', ['threat-model']],
+      ['platform-engineer', 'DevSecOps Engineer', ['platform-release']],
+    ],
+  );
+  assert.deepEqual(workflowsByLead([]), []);
 });
 
 test('a request must say something and fit', () => {

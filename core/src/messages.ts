@@ -694,6 +694,7 @@ export interface Role {
   description: string;
   color: RoleColor;
   source: RoleSource;
+  playbooks?: string[];
 }
 
 export type RoleSource = 'builtin' | 'user';
@@ -745,6 +746,7 @@ export interface Workflow {
   name: string;
   description: string;
   source: WorkflowSource;
+  leadRoleId: string;
   leadRoleName: string;
   stages: WorkflowStage[];
 }
