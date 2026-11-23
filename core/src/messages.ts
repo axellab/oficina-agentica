@@ -746,6 +746,7 @@ export interface Workflow {
   name: string;
   description: string;
   source: WorkflowSource;
+  leadRoleId: string;
   leadRoleName: string;
   stages: WorkflowStage[];
 }

@@ -299,6 +299,7 @@ function parseListedWorkflow(raw: unknown): Workflow | null {
     name: raw.name,
     description: typeof raw.description === 'string' ? raw.description : '',
     source: raw.source === 'user' ? 'user' : 'builtin',
+    leadRoleId: typeof raw.leadRoleId === 'string' ? raw.leadRoleId : '',
     leadRoleName: typeof raw.leadRoleName === 'string' ? raw.leadRoleName : '',
     stages: stages.flatMap((stage) => parseListedStage(stage) ?? []),
   };

@@ -16,12 +16,17 @@ import * as path from 'path';
 import type { SkillPackaging } from '../../../../../core/src/provider.js';
 
 /**
- * A frontmatter value as YAML reads it back: as it is when nothing in it means
- * something to YAML, else as a double-quoted string (a description holding
- * `: ` would otherwise end the value there, or stop the file from loading).
+ * A frontmatter value that YAML reads back as this very text. A sentence is
+ * left as it is (the form the tutorial's skill has always had): it starts with
+ * a letter and holds a space, so YAML cannot take it for `true`, `null`, a
+ * number or a date, as it would a single word or a text that starts with a
+ * digit. Everything else, and a sentence holding what means something to YAML
+ * (`: ` would end the value there, or stop the file from loading), is written
+ * as a double-quoted string, which a JSON string is.
  */
 function frontmatterValue(text: string): string {
-  const plain = /^[A-Za-z0-9(]/.test(text) && !/: |:$|\s#|\s$/.test(text);
+  const sentence = /^[A-Za-z(]/.test(text) && text.includes(' ');
+  const plain = sentence && !/: |:$|\s#|\s$/.test(text);
   return plain ? text : JSON.stringify(text);
 }
 

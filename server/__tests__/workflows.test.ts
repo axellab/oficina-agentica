@@ -518,7 +518,10 @@ describe('the host catalog (workflows.json)', () => {
     });
     const catalog = workflowCatalog();
     const release = catalog.find((w) => w.id === 'release')!;
-    expect(workflowListing(release)).toMatchObject({ leadRoleName: 'Release Manager' });
+    expect(workflowListing(release)).toMatchObject({
+      leadRoleId: 'release-manager',
+      leadRoleName: 'Release Manager',
+    });
     // What an office lists: Roles by name, and nothing a stage's owner is told.
     const hotfix = workflowListing(catalog.find((w) => w.id === 'hotfix')!);
     expect(hotfix).toEqual({
@@ -526,6 +529,7 @@ describe('the host catalog (workflows.json)', () => {
       name: 'Hotfix',
       description: '',
       source: 'user',
+      leadRoleId: 'agile-project-manager',
       leadRoleName: 'Agile Project Manager',
       stages: [{ id: 'fix', title: 'Fix it', roleName: 'Rust Developer' }],
     });

@@ -154,7 +154,7 @@ export function LaunchDrawer({
   // A Workflow's run is a Crew led by the Workflow's own Role: with one picked,
   // the two rows above say so and take no press.
   const role = workflow
-    ? roles.find((candidate) => candidate.name === workflow.leadRoleName)
+    ? roles.find((candidate) => candidate.id === workflow.leadRoleId)
     : pickedRole;
   const roleName = workflow ? workflow.leadRoleName : (pickedRole?.name ?? NONE_LABEL);
   const crewOn = workflow !== undefined || (crewWanted && crews?.available === true);
@@ -401,14 +401,12 @@ export function LaunchDrawer({
             />
             {workflowsByLead(workflows.workflows).map((group) => (
               // Under the Role that leads them: a Role's own Workflows sit together.
-              <div key={group.leadRoleName} data-testid="workflow-group" role="group">
+              <div key={group.leadRoleId} data-testid="workflow-group" role="group">
                 <div
                   data-testid="workflow-group-lead"
                   className="flex items-center gap-6 py-4 px-10 text-2xs text-text-muted whitespace-nowrap"
                 >
-                  <RoleSwatch
-                    color={roles.find((role) => role.name === group.leadRoleName)?.color}
-                  />
+                  <RoleSwatch color={roles.find((role) => role.id === group.leadRoleId)?.color} />
                   <span className="overflow-hidden text-ellipsis">
                     {group.leadRoleName || 'No lead'}
                   </span>

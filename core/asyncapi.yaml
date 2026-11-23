@@ -1842,11 +1842,12 @@ components:
       description: |
         A Workflow: how one kind of request (a new feature, a bug fix, a deep
         security or quality analysis...) is handled, as an ordered list of
-        stages, each owned by a Role. `leadRoleName` is the Role of the agent
-        that leads its runs.
+        stages, each owned by a Role. `leadRoleId` and `leadRoleName` are the
+        Role of the agent that leads its runs: the id says which Role it is
+        (two Roles may go by one name), the name is what is shown.
       type: object
       additionalProperties: false
-      required: [id, name, description, source, leadRoleName, stages]
+      required: [id, name, description, source, leadRoleId, leadRoleName, stages]
       properties:
         id:
           type: string
@@ -1856,6 +1857,8 @@ components:
           type: string
         source:
           $ref: '#/components/schemas/WorkflowSource'
+        leadRoleId:
+          type: string
         leadRoleName:
           type: string
         stages:

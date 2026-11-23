@@ -150,15 +150,21 @@ function writePrompt(stem: string, prompt: string): string {
  * The file holding the instructions of `role`: `<id>.md`, or, for an agent of
  * a Crew, `<id>.crew.md` (a file of its own, so a Crew's launch and a plain
  * one of the same Role never rewrite each other's; a Role id holds no dot).
+ * `lostPlaybooks`: this launch's Playbooks could not be written, so its
+ * instructions name none. They go to a file of their own too
+ * (`<id>.no-playbooks.md`): the Role's usual file may be the one an agent
+ * launched a moment ago, with its Playbooks, is about to read, and each file
+ * must keep saying what the launches that read it were handed.
  */
 function writeRolePrompt(
   role: CatalogRole,
   catalog: readonly CatalogRole[],
   crew?: CrewTerms,
   playbookSkill?: PlaybookSkillName,
+  lostPlaybooks = false,
 ): string {
   return writePrompt(
-    crew ? `${role.id}.crew` : role.id,
+    `${role.id}${crew ? '.crew' : ''}${lostPlaybooks ? '.no-playbooks' : ''}`,
     composeRolePrompt(role, catalog, crew, playbookSkill),
   );
 }
@@ -221,7 +227,8 @@ export interface RoleLaunch {
  * instructions are the ones of that Role in a Crew. With `skills` (how the
  * coding agent is handed a skill), the Role's Playbooks are written as skills
  * and its instructions name them; Playbooks that could not be written are
- * logged and left out, and the agent launches as the Role without them.
+ * logged and left out, and the agent launches as the Role without them, on
+ * instructions of its own that name none.
  */
 export function prepareRoleLaunch(
   roleId: unknown,
@@ -242,11 +249,13 @@ export function prepareRoleLaunch(
   // The Playbooks first: the instructions name them only once they are there.
   let pluginDir: string | undefined;
   let playbookSkill: PlaybookSkillName | undefined;
+  let lostPlaybooks = false;
   if (skills) {
     try {
       pluginDir = writeRolePlaybooks(skills, role);
       playbookSkill = (plugin, id) => skills.skillName(plugin, id);
     } catch (err) {
+      lostPlaybooks = true;
       console.error(
         `${LOG_PREFIX} cannot write the playbooks of "${roleId}"; launching without them:`,
         err,
@@ -256,7 +265,7 @@ export function prepareRoleLaunch(
   try {
     const launch: RoleLaunch = {
       role: agentRoleOf(role),
-      appendSystemPromptFile: writeRolePrompt(role, catalog, crew, playbookSkill),
+      appendSystemPromptFile: writeRolePrompt(role, catalog, crew, playbookSkill, lostPlaybooks),
     };
     if (role.model !== undefined) launch.model = role.model;
     if (pluginDir !== undefined) launch.pluginDir = pluginDir;

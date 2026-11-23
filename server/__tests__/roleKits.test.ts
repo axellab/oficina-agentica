@@ -742,7 +742,41 @@ describe("a Role's Playbooks at launch", () => {
     expect(launch).not.toHaveProperty('pluginDir');
     expect(console.error).toHaveBeenCalledTimes(1);
     // Never told of a skill it was not handed.
-    expect(promptOf('devsecops-engineer')).not.toMatch(/playbook/i);
+    expect(fs.readFileSync(launch.appendSystemPromptFile, 'utf-8')).not.toMatch(/playbook/i);
+  });
+
+  it('a launch that lost its Playbooks never rewrites the instructions of one that was handed them', () => {
+    // Two agents of one Role launched a moment apart: the first reads its
+    // instructions only once its process is up, after the second was prepared.
+    const handed = prepareRoleLaunch('devsecops-engineer', undefined, claudeSkillPackaging)!;
+    const told = fs.readFileSync(handed.appendSystemPromptFile, 'utf-8');
+    expect(told).toContain('`devsecops-engineer:pipeline-troubleshooting`');
+
+    const failing: SkillPackaging = {
+      ...claudeSkillPackaging,
+      write: () => {
+        throw new Error('disk full');
+      },
+    };
+    const lost = prepareRoleLaunch('devsecops-engineer', undefined, failing)!;
+    expect(lost).not.toHaveProperty('pluginDir');
+    // A file of its own, naming no Playbook; the first one's is untouched.
+    expect(path.basename(lost.appendSystemPromptFile)).toBe('devsecops-engineer.no-playbooks.md');
+    expect(fs.readFileSync(lost.appendSystemPromptFile, 'utf-8')).not.toMatch(/playbook/i);
+    expect(fs.readFileSync(handed.appendSystemPromptFile, 'utf-8')).toBe(told);
+    // The other way round too, and in a Crew, which has files of its own.
+    prepareRoleLaunch('devsecops-engineer', undefined, claudeSkillPackaging);
+    expect(fs.readFileSync(lost.appendSystemPromptFile, 'utf-8')).not.toMatch(/playbook/i);
+    const crew = { maxAgents: 8 };
+    const inCrew = prepareRoleLaunch('devsecops-engineer', crew, claudeSkillPackaging)!;
+    const lostInCrew = prepareRoleLaunch('devsecops-engineer', crew, failing)!;
+    expect(path.basename(inCrew.appendSystemPromptFile)).toBe('devsecops-engineer.crew.md');
+    expect(path.basename(lostInCrew.appendSystemPromptFile)).toBe(
+      'devsecops-engineer.crew.no-playbooks.md',
+    );
+    expect(fs.readFileSync(inCrew.appendSystemPromptFile, 'utf-8')).toContain(
+      '`devsecops-engineer:pipeline-troubleshooting`',
+    );
   });
 });
 
@@ -758,5 +792,11 @@ describe('a skill on disk', () => {
     expect(skillMarkdown({ ...skill, description: '[draft] audit' })).toContain(
       '\ndescription: "[draft] audit"\n',
     );
+    // One word, or a digit first, could be a boolean, null, a number or a date to YAML.
+    for (const description of ['true', 'null', 'Yes', '123', '2026-11-23 audit', '~']) {
+      expect(skillMarkdown({ ...skill, description })).toContain(
+        `\ndescription: ${JSON.stringify(description)}\n`,
+      );
+    }
   });
 });

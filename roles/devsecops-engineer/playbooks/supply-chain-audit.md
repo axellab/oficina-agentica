@@ -10,7 +10,7 @@ An audit: it reads, scans and reports, and changes nothing in the repository. Wr
 ## 1. What it is built from
 
 ```bash
-git ls-files | grep -E '(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|requirements[^/]*\.txt|poetry\.lock|uv\.lock|Pipfile\.lock|go\.sum|Cargo\.lock|Gemfile\.lock|pom\.xml|build\.gradle(\.kts)?|Dockerfile[^/]*)$'
+git ls-files | grep -E '(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|pyproject\.toml|requirements[^/]*\.txt|Pipfile(\.lock)?|poetry\.lock|uv\.lock|go\.(mod|sum)|Cargo\.(toml|lock)|Gemfile(\.lock)?|pom\.xml|build\.gradle(\.kts)?|Dockerfile[^/]*)$'
 ```
 
 Write down each ecosystem and where its manifest and lock file are. A manifest with no lock file beside it is the first finding: its builds are not repeatable.
