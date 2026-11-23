@@ -34,6 +34,20 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const CLI = path.join(REPO_ROOT, 'dist', 'cli.js');
 const PRINTED_URL = /Pixel Agents server running at (\S+)\s/;
 
+/**
+ * Variables the office is not started with. A trial is often started from
+ * inside a Claude Code session, which exports its own markers and settings to
+ * everything under it; and `ANTHROPIC_*` (an API key, a base URL, a model)
+ * sends a CLI to another account than its own login, when the trial measures
+ * the plan that login is on. `CLAUDE_CONFIG_DIR` stays: it says where the
+ * login is kept. `--keep-env` starts the office with all of them.
+ */
+const NOT_FOR_THE_OFFICE =
+  /^(?:CLAUDE(?!_CONFIG_DIR$)|ANTHROPIC_|USE_STAGING_OAUTH$|NO_COLOR$|FORCE_COLOR$|GIT_(?:EDITOR|PAGER|ASKPASS|TERMINAL_PROMPT|SEQUENCE_EDITOR)$)/i;
+
+/** Set for the run: the agents must not update the CLI being measured. */
+const SET_FOR_THE_OFFICE = { DISABLE_AUTOUPDATER: '1' };
+
 // ── What a run can be ─────────────────────────────────────────
 
 /** The sample repository's own requests. `--request` / `--prompt` replace the words. */
@@ -621,7 +635,15 @@ async function run(opts) {
 
   // ── Start the office ──
   const port = opts.port !== undefined ? Number(opts.port) : await freePort();
-  const env = { ...process.env };
+  // Names only are kept for the report, never a value.
+  const env = {};
+  const envRemoved = [];
+  for (const [name, value] of Object.entries(process.env)) {
+    if (opts['keep-env'] !== true && NOT_FOR_THE_OFFICE.test(name)) envRemoved.push(name);
+    else env[name] = value;
+  }
+  const envSet = opts['keep-env'] === true ? {} : SET_FOR_THE_OFFICE;
+  Object.assign(env, envSet);
   if (typeof opts.home === 'string') {
     env.HOME = home;
     env.USERPROFILE = home;
@@ -1373,6 +1395,31 @@ async function run(opts) {
   await new Promise((resolve) => messagesFile.end(resolve));
   fs.writeFileSync(path.join(outDir, 'server.log'), mask(serverOut));
 
+  // A killed office cannot tidy up after itself (Windows has no gentler way to
+  // stop a child), so its entries stay in the list of running offices. The
+  // ones naming the process this run started are taken back, and no other.
+  const registryRemoved = [];
+  if (serverExit) {
+    const mine = (file) => readJson(file)?.pid === server.pid;
+    const candidates = [path.join(officeDir, 'server.json')];
+    try {
+      for (const name of fs.readdirSync(path.join(officeDir, 'servers'))) {
+        if (name.endsWith('.json')) candidates.push(path.join(officeDir, 'servers', name));
+      }
+    } catch {
+      // No registry folder.
+    }
+    for (const file of candidates) {
+      if (!mine(file)) continue;
+      try {
+        fs.unlinkSync(file);
+        registryRemoved.push(path.relative(officeDir, file));
+      } catch {
+        notes.push(`A stale entry of this run's office is left: ${file}`);
+      }
+    }
+  }
+
   // The consent goes back to what it was: it was allowed for the run alone.
   let mcpConsentAfter = (readJson(configFile) ?? {}).officeMcpConsent ?? 'unanswered';
   if (mcpGrantedHere && !keepMcpConsent) {
@@ -1486,7 +1533,12 @@ async function run(opts) {
     usage: { models: totals, total: totalOf(totals) },
     samples,
     pictures: { taken: shots.taken, error: shots.error },
+    environment: {
+      keptFromTheOffice: envRemoved.sort(),
+      setForTheRun: Object.keys(envSet),
+    },
     leftOnThisMachine: {
+      registryEntriesRemoved: registryRemoved,
       claudeSettingsTouched: before.claudeSettingsHash !== sha256(claudeSettings),
       hookScriptReplaced: before.hookScriptHash !== sha256(hookScript),
       mcpConsent: `${mcpConsentBefore} -> ${mcpConsentAfter}`,
@@ -1527,6 +1579,16 @@ function summaryMarkdown(s) {
   }
   if (s.asked)
     lines.push(`- The agent's prompt was ready ${seconds(s.asked.readyMs)} after it joined`);
+  if (s.environment.keptFromTheOffice.length > 0) {
+    const account = s.environment.keptFromTheOffice.filter((name) => /^ANTHROPIC_/i.test(name));
+    lines.push(
+      `- Environment: ${s.environment.keptFromTheOffice.length} variable(s) of the launching session kept from the office (names in summary.json)${
+        account.length > 0
+          ? `; among them ${account.join(', ')}, so the agents ran on the CLI's own login`
+          : ''
+      }`,
+    );
+  }
   lines.push('');
 
   if (s.run) {
@@ -1632,7 +1694,7 @@ else if (command === 'run') {
       `  node scripts/local-trial.mjs run --dir <folder> --preset <${Object.keys(PRESETS).join('|')}>`,
       '      [--grant-mcp] [--keep-mcp-consent] [--screenshots] [--browser-channel msedge|chrome] [--browser-path <exe>]',
       '      [--max-minutes n] [--idle-seconds n] [--permission-wait-seconds n] [--max-output-tokens n]',
-      '      [--request "..."] [--prompt "..."] [--role <id>] [--workflow <id>] [--out <folder>] [--no-trust]',
+      '      [--request "..."] [--prompt "..."] [--role <id>] [--workflow <id>] [--out <folder>] [--no-trust] [--keep-env]',
     ].join('\n'),
   );
   process.exit(command ? 1 : 0);
