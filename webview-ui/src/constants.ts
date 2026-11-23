@@ -394,6 +394,12 @@ export const CREW_MEMBER_MAX_INDENT_LEVELS = 3;
 /** Height the Crew panel's activity list scrolls in, in CSS px. */
 export const CREW_EVENTS_MAX_HEIGHT_PX = 132;
 
+// ── Workflows ───────────────────────────────────────────────────
+/** The Workflow panel's width once opened, in CSS px (the Crew panel's and the tutorial checklist's). */
+export const WORKFLOW_PANEL_WIDTH_PX = 280;
+/** Rows of the request field in the dialog a Workflow run starts from. */
+export const WORKFLOW_REQUEST_ROWS = 6;
+
 // ── Pets ────────────────────────────────────────────────────────
 /** Walking speed in world pixels per second (matches character walk speed visually but slower). */
 export const PET_WALK_SPEED_PX_PER_SEC = 32;

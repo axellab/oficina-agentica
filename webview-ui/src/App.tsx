@@ -81,6 +81,11 @@ import { TutorialPanel } from './tutorial/TutorialPanel.js';
 import { useTutorial } from './tutorial/useTutorial.js';
 import { UsageBars } from './usage/UsageBars.js';
 import { useUsageBridge } from './usage/useUsageBridge.js';
+import { useWorkflowStart } from './workflows/useWorkflowStart.js';
+import { WorkflowPanel } from './workflows/WorkflowPanel.js';
+import { WorkflowRejectedModal } from './workflows/WorkflowRejectedModal.js';
+import { WorkflowStartModal } from './workflows/WorkflowStartModal.js';
+import { useWorkflows } from './workflows/workflowStore.js';
 import { useNewWorktree } from './worktrees/useNewWorktree.js';
 
 // Game state lives outside React — updated imperatively by message handlers
@@ -250,13 +255,18 @@ function App() {
   // first (NewWorktreeModal); every other launch goes straight out.
   const newWorktree = useNewWorktree(launchAgent);
   const { open: askNewWorktree } = newWorktree;
+  // A Workflow picked in the drawer asks for the request first
+  // (WorkflowStartModal): its lead is launched by the server, on Start.
+  const workflowStart = useWorkflowStart(terminalDrawer.expectLaunch);
+  const { open: askWorkflowRequest } = workflowStart;
   const launchIntoDirectory = useCallback(
     (directory: Directory, palette?: number, worktree?: boolean, launchAs?: LaunchAs) => {
+      if (launchAs?.workflowId) askWorkflowRequest(launchAs.workflowId, directory, palette);
       // The drawer's Role and Crew switch ride through the modal to the launch.
-      if (worktree) askNewWorktree(directory, palette, launchAs);
+      else if (worktree) askNewWorktree(directory, palette, launchAs);
       else launchAgent(directory, palette, undefined, launchAs);
     },
-    [askNewWorktree, launchAgent],
+    [askWorkflowRequest, askNewWorktree, launchAgent],
   );
   // Every pane's id: agents' terminals and PC shells'.
   const paneIds = useMemo(() => panes.map((pane) => pane.id), [panes]);
@@ -374,9 +384,16 @@ function App() {
   // The Crews: the agents the user set free to work together (crewStore).
   const crews = useCrews();
   const endCrew = useCallback((crewId: string) => transport.send({ type: 'endCrew', crewId }), []);
+  // The Workflows: a request handled by a Crew stage by stage (workflowStore).
+  const workflows = useWorkflows();
+  const stopWorkflow = useCallback(
+    (crewId: string) => transport.send({ type: 'stopWorkflow', crewId }),
+    [],
+  );
   // The office's top-right panels (OfficePanels): the tutorial's checklist
-  // while a run is under way, the Crews while one has agents.
+  // while a run is under way, the Workflow runs, the Crews while one has agents.
   const tutorialRun = officeReadOnly ? undefined : tutorial.status?.run;
+  const shownRuns = workflows && workflows.runs.length > 0 ? workflows.runs : undefined;
   const shownCrews = crews && crews.crews.length > 0 ? crews : undefined;
   // What was on as the Intro's asks arrived (first run, Settings → Replay the
   // Intro): the choices' boxes start there.
@@ -768,12 +785,19 @@ function App() {
 
           {/* The top-right panels, one under the other (clear of the desktop
               card bar, which overlaps the office's right edge): the tutorial's
-              quest log while a run is under way, then the Crews while one has
-              agents. A view-only office sees the Crews and ends none. */}
-          {(tutorialRun || shownCrews) && (
+              quest log while a run is under way, then the Workflow runs, then
+              the Crews while one has agents. A view-only office sees the runs
+              and the Crews and stops none. */}
+          {(tutorialRun || shownRuns || shownCrews) && (
             <OfficePanels rightInset={isMobile || isDebugMode ? 0 : TERMINAL_SIDEBAR_WIDTH_PX}>
               {tutorialRun && (
                 <TutorialPanel run={tutorialRun} onSkip={tutorial.skip} onQuit={tutorial.quit} />
+              )}
+              {shownRuns && (
+                <WorkflowPanel
+                  runs={shownRuns}
+                  onStop={officeReadOnly ? undefined : stopWorkflow}
+                />
               )}
               {shownCrews && (
                 <CrewPanel
@@ -1098,6 +1122,14 @@ function App() {
         onClose={newWorktree.close}
       />
       <WorktreeRejectedModal rejection={worktreeRejection} onClose={dismissWorktreeRejection} />
+      {/* A Workflow picked in the launch drawer: what the user needs from it,
+          asked before its lead is launched. */}
+      <WorkflowStartModal
+        asking={workflowStart.asking}
+        onSubmit={workflowStart.submit}
+        onClose={workflowStart.close}
+      />
+      <WorkflowRejectedModal />
       {/* A Worktree its agent left with uncommitted changes: asked in every
           privileged office, both shells (read-only offices are never sent
           any, and the server refuses their answers). */}

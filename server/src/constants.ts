@@ -296,11 +296,23 @@ export const CREW_PREAPPROVED_TOOLS: readonly string[] = [
   'read_agent_terminal',
   'close_agent',
   'visit',
+  // A Crew running a Workflow reports and reads its stages with it.
+  'workflow',
 ];
 /** The file name (no extension) of the instructions a Crew's agent with no
  *  Role is given, in the Role prompts folder. Not a Role id (those start with
  *  a letter), so no Role's file can take its place. */
 export const CREW_PROMPT_FILE_STEM = '_crew';
+
+// ── Workflows (server/src/workflows/) ───────────────────────
+/** The host's own Workflows and its replacements of the built-in ones, in the persistence dir. */
+export const WORKFLOWS_FILE_NAME = 'workflows.json';
+/** The longest note a lead leaves on a stage it finishes or skips. */
+export const WORKFLOW_NOTE_MAX_CHARS = 1000;
+/** How much of a run's request and of a stage's note every office is sent
+ *  (one line, cut): the panel shows a line, and a view-only office is told no
+ *  more than that. The run's own agents read the whole text from the tool. */
+export const WORKFLOW_SHOWN_TEXT_MAX_CHARS = 240;
 
 // ── Recent conversations (the sidebar) ──────────────────────
 /** What each conversation's agent wore and where it sat, in the persistence dir. */

@@ -100,6 +100,31 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
       'keep running but no longer launch, message or close each other. Only the user starts or ends a Crew.',
   },
   {
+    id: 'workflows',
+    title: 'Workflows: one request handled stage by stage',
+    body:
+      'A Workflow is how one kind of request is handled: an ordered list of stages, each owned by a Role. Four are ' +
+      'built in: New feature (requirements, design, implementation, testing with a security review beside it, ' +
+      'delivery, report), Bug fix (reproduce, diagnosis, fix, verification with a security check beside it, report), ' +
+      'Deep security analysis (threat model, code review with dependencies and pipeline, infrastructure and ' +
+      'architecture beside it, triage, report) and Deep quality analysis (scope, tests with code health, ' +
+      'architecture and build and pipeline beside them, triage, report). The two analyses change nothing: what they ' +
+      'deliver is a report. The user starts a run from the launch drawer (standalone, with the Pixel Office MCP on ' +
+      'and not read-only): the Workflow row under the Crew switch picks the Workflow, a press on a Directory opens a ' +
+      'dialog that lists its stages and asks for the request in their own words, and Start launches the Role that ' +
+      'leads it (the Agile Project Manager for the built-in ones) with a new Crew. That lead reads the request, the ' +
+      'stages and its rules with the workflow tool, hands each stage to an agent of the Role that owns it ' +
+      '(launching the Roles the Crew lacks, without asking) and reports each stage there: start, finish with a note ' +
+      'of what was done and how it was verified, or skip with a note saying why. The office keeps the order (a stage ' +
+      'starts once the ones before it are done or skipped; stages marked parallel run together) and only the lead ' +
+      "moves a stage. The Workflow panel (top right) shows the request and every stage's state and note as they " +
+      'move, and the characters walk to each other as work is handed over. Stop Workflow in that panel ends the run ' +
+      'and its Crew: the agents keep running but no longer work with each other. No agent starts a run; only the ' +
+      'user does. The user writes Workflows of their own, or replaces a built-in one, in ' +
+      '~/.pixel-agents/workflows.json (a name, the lead Role, and stages each with an id, a title, a Role and a ' +
+      'brief); a change applies to the next start.',
+  },
+  {
     id: 'conversations',
     title: 'Recent conversations and resume',
     body:

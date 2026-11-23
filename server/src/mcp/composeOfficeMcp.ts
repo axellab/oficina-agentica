@@ -29,6 +29,7 @@ import { writeOnboardingPlugin } from '../tutorial/onboardingPlugin.js';
 import { Tutorial, type TutorialSurface } from '../tutorial/tutorial.js';
 import { GUIDE_FALLBACK_NAME } from '../tutorial/tutorialCopy.js';
 import { layoutSignature } from '../tutorial/tutorialSightings.js';
+import { Workflows } from '../workflows/workflows.js';
 import { invalidateAttributionDirectories } from '../worktreeAttribution.js';
 import { isRepo } from '../worktreeGit.js';
 import { agentLabel } from './agentLabel.js';
@@ -109,8 +110,13 @@ export interface OfficeMcpFeature extends AgentMcpAccess {
    *  agent takes, released once the launch settled; undefined where none can
    *  be started now. */
   startCrew(): CrewPlace | undefined;
+  /** The Workflows of this office, to an office connecting: the catalog a run
+   *  is started from and the runs under way. Told to the offices the Crews are
+   *  told to, and nowhere else: a run is a Crew's work. */
+  workflowsSnapshot(send: (message: ServerMessage) => void): void;
   /** Answer one of an office's MCP messages (consent, its switches, the editing
-   *  locks, the layout editor's and the Characters view's undo, a Crew's end); false when it isn't one. `client` is the office
+   *  locks, the layout editor's and the Characters view's undo, a Crew's end, a
+   *  Workflow run's start and stop); false when it isn't one. `client` is the office
    *  sending it; replies meant for it alone go to `reply`. */
   handleMessage(
     message: Record<string, unknown>,
@@ -234,24 +240,33 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
   });
   // Crews: agents the user set free to work together through these tools. Only
   // an office whose agents can launch agents ever starts one.
-  const crews = new Crews({
-    store,
-    unavailable: () => {
-      if (!surface.launch) return "This office's agents can't launch other agents.";
-      if (!officeMcp.offered()) {
-        return "A Crew works through the Pixel Agents Office MCP, which this office can't give its agents.";
-      }
-      if (getOfficeMcpConsent() !== 'granted') {
-        return 'A Crew works through the Pixel Agents Office MCP: turn it on in Settings first.';
-      }
-      if (getOfficeMcpReadOnly()) {
-        return 'The Pixel Agents Office MCP is read-only in Settings: a Crew needs it to launch and message agents.';
-      }
-      return null;
-    },
-  });
+  const crewUnavailable = (): string | null => {
+    if (!surface.launch) return "This office's agents can't launch other agents.";
+    if (!officeMcp.offered()) {
+      return "A Crew works through the Pixel Agents Office MCP, which this office can't give its agents.";
+    }
+    if (getOfficeMcpConsent() !== 'granted') {
+      return 'A Crew works through the Pixel Agents Office MCP: turn it on in Settings first.';
+    }
+    if (getOfficeMcpReadOnly()) {
+      return 'The Pixel Agents Office MCP is read-only in Settings: a Crew needs it to launch and message agents.';
+    }
+    return null;
+  };
+  const crews = new Crews({ store, unavailable: crewUnavailable });
   const closing = surface.close ? createClosing(facts, surface.close, terminals, crews) : undefined;
   const launch = surface.launch;
+  // Workflow runs: a request handled by a Crew stage by stage. Only where a
+  // Crew can ever be started (an office whose agents can launch agents).
+  const workflows = launch
+    ? new Workflows({
+        store,
+        crews,
+        // A run is a Crew's work: it can start where a Crew can.
+        unavailable: crewUnavailable,
+        launch: (request) => launch(request, officeMcp),
+      })
+    : undefined;
   const office: OfficeOperations = {
     agents: createAgentsView(facts, (id) => terminals.has(id)),
     layout: createLayoutOps(facts, layoutEdits),
@@ -276,6 +291,7 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
       : {}),
     ...(closing ? { close: closing } : {}),
     ...(surface.pcShells ? { shells: createPcShellOps(surface.pcShells) } : {}),
+    ...(workflows ? { workflows } : {}),
   };
   const officeMcp = new OfficeMcp({ office, provider: facts.provider, tools: surface.tools });
   // Tokens die with their agents.
@@ -312,6 +328,14 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
     },
     startCrew: () => crews.startForLaunch(),
 
+    workflowsSnapshot(send) {
+      if (!workflows) return;
+      const tell = () => send(workflows.statusMessage());
+      // Whether a run can be started hangs on whether this server serves /mcp.
+      if (decided) tell();
+      else void whenDecided.then(tell);
+    },
+
     handshake(send, afterHooksAsks) {
       const offer = () => {
         if (!officeMcp.offered()) return;
@@ -332,7 +356,12 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
 
     handleMessage(message, client, reply) {
       if (tutorial.handleMessage(message, reply)) return true;
-      if (crews.handleMessage(message)) return true;
+      if (crews.handleMessage(message)) {
+        // A Crew the user ended was perhaps working a Workflow run: over too.
+        if (typeof message.crewId === 'string') workflows?.crewEnded(message.crewId);
+        return true;
+      }
+      if (workflows?.handleMessage(message, reply)) return true;
       const handled = handleOfficeMcpMessage(message, {
         officeMcp,
         layoutEdits,
@@ -353,6 +382,7 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
           message.type === 'setOfficeMcpReadOnly')
       ) {
         crews.broadcast();
+        workflows?.broadcast();
       }
       return handled;
     },
@@ -373,6 +403,7 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
       tutorial.dispose();
       visits.dispose();
       closing?.dispose();
+      workflows?.dispose();
       crews.dispose();
     },
   };

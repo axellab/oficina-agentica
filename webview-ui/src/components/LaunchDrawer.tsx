@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 
-import type { Role, RoleColor } from '../../../core/src/messages.js';
+import type { Role, RoleColor, Workflow } from '../../../core/src/messages.js';
 import { LAUNCH_DRAWER_PENCIL_GAP_PX, ROLE_COLOR_HEX, ROLE_SWATCH_SIZE_PX } from '../constants.js';
 import { useCrews } from '../crews/crewStore.js';
 import { useDismiss } from '../hooks/useDismiss.js';
@@ -9,6 +9,7 @@ import type { Directory } from '../hooks/useExtensionMessages.js';
 import type { LaunchAs } from '../hooks/useLaunchActions.js';
 import { useLongPress } from '../hooks/useLongPress.js';
 import { useRoles } from '../roles/roleStore.js';
+import { useWorkflows } from '../workflows/workflowStore.js';
 import { DirectoryCharacterStrip } from './DirectoryCharacterStrip.js';
 import type { RowButtonId } from './drawerRowButtons.js';
 import { ROW_STACK_HIDDEN, rowButtonsFor, rowStackReducer } from './drawerRowButtons.js';
@@ -23,9 +24,10 @@ interface LaunchDrawerProps {
    *  of the row's mug shots pressed), else as the Directory's defaults (in
    *  its order) decide; into a new Worktree of its repo when `worktree` (the
    *  row's worktree button); and as `launchAs` says: the Role picked in the
-   *  drawer (absent = no Role) and whether its Crew switch was on. The surface
-   *  owns the send, because what else a launch does differs per surface
-   *  (mobile also slides to the new terminal). */
+   *  drawer (absent = no Role), whether its Crew switch was on, or the Workflow
+   *  picked (then the press starts no agent yet: the surface asks for the
+   *  request first). The surface owns the send, because what else a launch
+   *  does differs per surface (mobile also slides to the new terminal). */
   onSelect: (
     directory: Directory,
     palette?: number,
@@ -40,11 +42,12 @@ interface LaunchDrawerProps {
    *  to launch it: its heading is pinned above `+ Directory`, and rows show
    *  only their names (the launch already has its character). */
   pick?: RosterPick;
-  /** The Role row or the Crew switch was used: from here until it closes, the
-   *  drawer is a question waiting for an answer (which Directory, for that
-   *  Role or Crew), so a surface that shuts it when the pointer leaves should
-   *  stop doing so. The rows also move under the pointer when the Roles show
-   *  and hide. Called with false once the drawer has closed. */
+  /** The Role row, the Crew switch or the Workflow row was used: from here
+   *  until it closes, the drawer is a question waiting for an answer (which
+   *  Directory, for that Role, Crew or Workflow), so a surface that shuts it
+   *  when the pointer leaves should stop doing so. The rows also move under
+   *  the pointer when the Roles or the Workflows show and hide. Called with
+   *  false once the drawer has closed. */
   onHoldOpen?: (hold: boolean) => void;
   className?: string;
 }
@@ -95,6 +98,14 @@ export interface RosterPick {
  * whenever the drawer closes, like the Role: setting agents free is never a
  * choice made some time ago. Where a Crew cannot be started now (the Pixel
  * Office MCP is off or read-only), the switch is there, off, and says why.
+ *
+ * Where the server lists Workflows (workflowStore), a Workflow row is pinned
+ * under the Crew switch: "None" until one is picked from the list it opens.
+ * With a Workflow picked, the Role row names the Role that leads it and the
+ * Crew switch reads On, both locked (a run is a Crew led by that Role, and the
+ * server decides both), a row has no worktree button, and pressing a Directory
+ * launches nothing yet: the surface asks for the request first. Dropped
+ * whenever the drawer closes, like the Role and the Crew.
  */
 export function LaunchDrawer({
   isOpen,
@@ -122,13 +133,28 @@ export function LaunchDrawer({
   // Roles instead of the Directories. An id the list no longer holds (the
   // server sent a new one) is no Role.
   const [pickedRoleId, setPickedRoleId] = useState<string | undefined>(undefined);
-  const [choosingRole, setChoosingRole] = useState(false);
-  const role = roles.find((candidate) => candidate.id === pickedRoleId);
+  // Which list the drawer shows instead of the Directories, if any.
+  const [choosing, setChoosing] = useState<'role' | 'workflow' | null>(null);
+  const pickedRole = roles.find((candidate) => candidate.id === pickedRoleId);
 
   const crews = useCrews();
   // The switch's wish, and what a launch gets: never a Crew the server would refuse.
   const [crewWanted, setCrewWanted] = useState(false);
-  const crewOn = crewWanted && crews?.available === true;
+
+  const workflows = useWorkflows();
+  // The Workflow the next press starts: never one the server would refuse.
+  const [pickedWorkflowId, setPickedWorkflowId] = useState<string | undefined>(undefined);
+  const workflow = workflows?.available
+    ? workflows.workflows.find((candidate) => candidate.id === pickedWorkflowId)
+    : undefined;
+
+  // A Workflow's run is a Crew led by the Workflow's own Role: with one picked,
+  // the two rows above say so and take no press.
+  const role = workflow
+    ? roles.find((candidate) => candidate.name === workflow.leadRoleName)
+    : pickedRole;
+  const roleName = workflow ? workflow.leadRoleName : (pickedRole?.name ?? NONE_LABEL);
+  const crewOn = workflow !== undefined || (crewWanted && crews?.available === true);
 
   // The latest callback, for the effect below: it must run when the drawer
   // closes, not whenever the surface re-renders with a new function.
@@ -139,8 +165,9 @@ export function LaunchDrawer({
     if (isOpen) return;
     dispatch({ type: 'close' });
     setPickedRoleId(undefined);
-    setChoosingRole(false);
+    setChoosing(null);
     setCrewWanted(false);
+    setPickedWorkflowId(undefined);
     holdOpenRef.current?.(false);
   }, [isOpen]);
 
@@ -178,18 +205,31 @@ export function LaunchDrawer({
     return () => observer.disconnect();
   }, [stackRow]);
 
-  const buttons = stackDirectory ? rowButtonsFor(stackDirectory) : [];
+  // A Workflow's lead starts in the Directory itself: no worktree button then.
+  const rowButtons = (directory: Directory): RowButtonId[] =>
+    workflow
+      ? rowButtonsFor(directory).filter((id) => id !== 'worktree')
+      : rowButtonsFor(directory);
+  const buttons = stackDirectory ? rowButtons(stackDirectory) : [];
   const shown = stackDirectory && stackBox && buttons.length > 0 ? stackDirectory : null;
 
   // With a roster pick there are no mug shots: the launch wears the pick.
   const select = (directory: Directory, palette?: number, worktree?: boolean) =>
-    onSelect(directory, pick ? pick.palette : palette, worktree, {
-      roleId: role?.id,
-      ...(crewOn ? { crew: true } : {}),
-    });
+    onSelect(
+      directory,
+      pick ? pick.palette : palette,
+      worktree,
+      workflow
+        ? { workflowId: workflow.id }
+        : { roleId: role?.id, ...(crewOn ? { crew: true } : {}) },
+    );
   const pickRole = (id: string | undefined) => {
     setPickedRoleId(id);
-    setChoosingRole(false);
+    setChoosing(null);
+  };
+  const pickWorkflow = (id: string | undefined) => {
+    setPickedWorkflowId(id);
+    setChoosing(null);
   };
 
   const press = (id: RowButtonId, directory: Directory) => {
@@ -227,21 +267,29 @@ export function LaunchDrawer({
             <button
               type="button"
               data-testid="role-picker"
-              aria-expanded={choosingRole}
-              aria-label={`Role: ${role?.name ?? NO_ROLE_LABEL}`}
-              title={role?.description || undefined}
+              aria-expanded={choosing === 'role'}
+              aria-disabled={workflow !== undefined}
+              aria-label={`Role: ${roleName}`}
+              title={
+                workflow
+                  ? `The ${workflow.name} workflow is led by the ${workflow.leadRoleName}.`
+                  : role?.description || undefined
+              }
               onClick={() => {
+                if (workflow) return;
                 // Before the rows move: the pointer may be left outside them.
                 onHoldOpen?.(true);
-                setChoosingRole((open) => !open);
+                setChoosing((open) => (open === 'role' ? null : 'role'));
               }}
-              className={`${ROLE_ROW_CLASS} bg-transparent justify-between gap-10`}
+              className={`${ROLE_ROW_CLASS} bg-transparent justify-between gap-10 ${workflow ? LOCKED_ROW_CLASS : ''}`}
             >
               <span className="text-text-muted">Role</span>
               <span className="flex items-center gap-6 min-w-0">
                 {role && <RoleSwatch color={role.color} />}
-                <span className="overflow-hidden text-ellipsis">{role?.name ?? NO_ROLE_LABEL}</span>
-                <PixelIcon name="down" className={choosingRole ? 'rotate-180' : ''} />
+                <span className="overflow-hidden text-ellipsis">{roleName}</span>
+                {!workflow && (
+                  <PixelIcon name="down" className={choosing === 'role' ? 'rotate-180' : ''} />
+                )}
               </span>
             </button>
           </div>
@@ -258,20 +306,22 @@ export function LaunchDrawer({
               role="switch"
               data-testid="crew-switch"
               aria-checked={crewOn}
-              aria-disabled={!crews.available}
+              aria-disabled={!crews.available || workflow !== undefined}
               aria-label={`Crew: ${crewOn ? 'on' : 'off'}`}
               title={
-                crews.available
-                  ? `Start a Crew with this agent: it and the agents it launches (up to ${crews.maxAgents}) work together without asking you.`
-                  : crews.unavailableReason || 'A Crew cannot be started here.'
+                workflow
+                  ? `A workflow's agents work as a Crew (up to ${crews.maxAgents}), without asking you.`
+                  : crews.available
+                    ? `Start a Crew with this agent: it and the agents it launches (up to ${crews.maxAgents}) work together without asking you.`
+                    : crews.unavailableReason || 'A Crew cannot be started here.'
               }
               onClick={() => {
-                if (!crews.available) return;
+                if (!crews.available || workflow) return;
                 onHoldOpen?.(true);
                 setCrewWanted((on) => !on);
               }}
               className={`${ROLE_ROW_CLASS} justify-between gap-10 ${crewOn ? 'bg-active-bg' : 'bg-transparent'} ${
-                crews.available ? '' : 'cursor-default! opacity-[var(--btn-disabled-opacity)]'
+                workflow ? 'cursor-default!' : crews.available ? '' : LOCKED_ROW_CLASS
               }`}
             >
               <span className="text-text-muted">Crew</span>
@@ -282,18 +332,76 @@ export function LaunchDrawer({
             </button>
           </div>
         )}
-        {choosingRole ? (
+        {workflows && workflows.workflows.length > 0 && (
+          // Pinned under the Crew switch. Its accessible name says the Workflow
+          // the next press starts.
+          <div
+            className="shrink-0 menu-item menu-item-last"
+            onMouseEnter={() => dispatch({ type: 'hoverNone' })}
+          >
+            <button
+              type="button"
+              data-testid="workflow-picker"
+              aria-expanded={choosing === 'workflow'}
+              aria-disabled={!workflows.available}
+              aria-label={`Workflow: ${workflow?.name ?? NONE_LABEL}`}
+              title={
+                workflows.available
+                  ? workflow?.description ||
+                    'Hand a request to a workflow: its lead takes it through the stages with the Roles it needs.'
+                  : workflows.unavailableReason || 'A workflow cannot be started here.'
+              }
+              onClick={() => {
+                if (!workflows.available) return;
+                onHoldOpen?.(true);
+                setChoosing((open) => (open === 'workflow' ? null : 'workflow'));
+              }}
+              className={`${ROLE_ROW_CLASS} justify-between gap-10 ${workflow ? 'bg-active-bg' : 'bg-transparent'} ${
+                workflows.available ? '' : LOCKED_ROW_CLASS
+              }`}
+            >
+              <span className="text-text-muted">Workflow</span>
+              <span className="flex items-center gap-6 min-w-0">
+                {workflow && <PixelIcon name="workflow" />}
+                <span className="overflow-hidden text-ellipsis">
+                  {workflow?.name ?? NONE_LABEL}
+                </span>
+                <PixelIcon name="down" className={choosing === 'workflow' ? 'rotate-180' : ''} />
+              </span>
+            </button>
+          </div>
+        )}
+        {choosing === 'role' ? (
           <div
             data-testid="role-options"
             className="min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pixel-scrollbar border-t-2 border-border menu-stagger-up"
           >
-            <RoleOption role={undefined} selected={role === undefined} onPick={pickRole} />
+            <RoleOption role={undefined} selected={pickedRole === undefined} onPick={pickRole} />
             {roles.map((option) => (
               <RoleOption
                 key={option.id}
                 role={option}
-                selected={option.id === role?.id}
+                selected={option.id === pickedRole?.id}
                 onPick={pickRole}
+              />
+            ))}
+          </div>
+        ) : choosing === 'workflow' && workflows ? (
+          <div
+            data-testid="workflow-options"
+            className="min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pixel-scrollbar border-t-2 border-border menu-stagger-up"
+          >
+            <WorkflowOption
+              workflow={undefined}
+              selected={workflow === undefined}
+              onPick={pickWorkflow}
+            />
+            {workflows.workflows.map((option) => (
+              <WorkflowOption
+                key={option.id}
+                workflow={option}
+                selected={option.id === workflow?.id}
+                onPick={pickWorkflow}
               />
             ))}
           </div>
@@ -319,6 +427,7 @@ export function LaunchDrawer({
                   directory={directory}
                   isStackRow={shown?.path === directory.path}
                   isHeld={stack.held}
+                  hasButtons={rowButtons(directory).length > 0}
                   showCharacters={!pick}
                   rowRef={(el) => {
                     if (el) rowEls.current.set(directory.path, el);
@@ -329,7 +438,7 @@ export function LaunchDrawer({
                     dispatch({
                       type: 'hover',
                       row: directory.path,
-                      hasButtons: rowButtonsFor(directory).length > 0,
+                      hasButtons: rowButtons(directory).length > 0,
                     })
                   }
                   onLongPress={() => dispatch({ type: 'longPress', row: directory.path })}
@@ -339,7 +448,7 @@ export function LaunchDrawer({
           </>
         )}
       </div>
-      {shown && stackBox && !choosingRole && (
+      {shown && stackBox && choosing === null && (
         // Outside the option list entirely: a stack beside the drawer's right
         // border, level with its row. The gap before it is this transparent
         // wrapper's padding, so the pointer crossing it is still inside the
@@ -367,8 +476,8 @@ export function LaunchDrawer({
   );
 }
 
-/** What the Role row and the first option say while no Role is picked. */
-const NO_ROLE_LABEL = 'None';
+/** What a row and its list's first option say while nothing is picked. */
+const NONE_LABEL = 'None';
 
 /** A row of the drawer that is not a DropdownItem (it needs ARIA state or a
  *  tooltip), drawn like one. Its background is the caller's: two background
@@ -376,6 +485,9 @@ const NO_ROLE_LABEL = 'None';
  *  class list's, so the lit row must not also say "transparent". */
 const ROLE_ROW_CLASS =
   'flex w-full items-center text-left py-2 px-12 border-none rounded-none cursor-pointer whitespace-nowrap text-base hover:bg-btn-bg';
+
+/** A row that takes no press now: dimmed like a disabled button. */
+const LOCKED_ROW_CLASS = 'cursor-default! opacity-[var(--btn-disabled-opacity)]';
 
 /** The square of a Role's colour beside its name. */
 function RoleSwatch({ color }: { color: RoleColor }) {
@@ -418,7 +530,40 @@ function RoleOption({ role, selected, onPick }: RoleOptionProps) {
         // Keeps "None" in line with the names under it.
         <span aria-hidden="true" className="shrink-0" style={{ width: ROLE_SWATCH_SIZE_PX }} />
       )}
-      <span className="overflow-hidden text-ellipsis">{role?.name ?? NO_ROLE_LABEL}</span>
+      <span className="overflow-hidden text-ellipsis">{role?.name ?? NONE_LABEL}</span>
+    </button>
+  );
+}
+
+interface WorkflowOptionProps {
+  /** The Workflow, or undefined for the "None" option. */
+  workflow: Workflow | undefined;
+  selected: boolean;
+  onPick: (workflowId: string | undefined) => void;
+}
+
+/** One Workflow to pick from: its name, its description as the tooltip (the
+ *  request dialog prints it, with the stages, before anything starts). */
+function WorkflowOption({ workflow, selected, onPick }: WorkflowOptionProps) {
+  return (
+    <button
+      type="button"
+      data-testid="workflow-option"
+      data-workflow-id={workflow?.id ?? ''}
+      aria-pressed={selected}
+      title={workflow?.description || undefined}
+      onClick={() => onPick(workflow?.id)}
+      className={`${ROLE_ROW_CLASS} justify-between gap-10 ${selected ? 'bg-active-bg' : 'bg-transparent'}`}
+    >
+      <span className="overflow-hidden text-ellipsis">{workflow?.name ?? NONE_LABEL}</span>
+      {workflow?.source === 'user' && (
+        <span
+          aria-hidden="true"
+          className="shrink-0 text-2xs text-text-muted border-2 border-border pl-4 pr-2 leading-none"
+        >
+          yours
+        </span>
+      )}
     </button>
   );
 }
@@ -465,6 +610,8 @@ interface DirectoryRowProps {
   isStackRow: boolean;
   /** The showing stack was revealed by a long press (lit on any pointer). */
   isHeld: boolean;
+  /** The row has buttons to show beside the drawer now. */
+  hasButtons: boolean;
   showCharacters: boolean;
   rowRef: (el: HTMLElement | null) => void;
   onSelect: (directory: Directory, palette?: number) => void;
@@ -478,13 +625,13 @@ function DirectoryRow({
   directory,
   isStackRow,
   isHeld,
+  hasButtons,
   showCharacters,
   rowRef,
   onSelect,
   onHover,
   onLongPress,
 }: DirectoryRowProps) {
-  const hasButtons = rowButtonsFor(directory).length > 0;
   // A long press reveals the row's buttons (touch only: a mouse hovers).
   const longPress = useLongPress(onLongPress, hasButtons);
 

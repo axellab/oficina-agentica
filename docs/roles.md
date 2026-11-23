@@ -80,6 +80,8 @@ _From the test suite: the terminal on the right is its stand-in for Claude Code.
 
 A Crew needs the Pixel Office MCP allowed and not read-only, and an office that launches agents itself: the standalone office. Where it cannot be started, the switch is there, off, and its tooltip says what is missing.
 
+To hand a Crew one request and have it worked stage by stage (a new feature, a bug fix, a deep security or quality analysis), start a [Workflow](workflows.md) instead: it starts the Crew for you, led by the Role the Workflow names.
+
 An agent with the office's tools can also explain all of this to you: the office's feature guide (`get_feature_guide`) has a topic on Roles.
 
 ## Your own Roles: `roles.json`

@@ -23,6 +23,7 @@ import { typeInPcShell } from './typeInPcShell.js';
 import { undoCharacterEdit } from './undoCharacterEdit.js';
 import { undoLayoutEdit } from './undoLayoutEdit.js';
 import { visit } from './visit.js';
+import { workflow } from './workflow.js';
 
 /** Every Pixel Office MCP tool, in the order agents see them. A new tool is
  *  its own file in this folder plus one line here. */
@@ -51,4 +52,5 @@ export const OFFICE_TOOLS: readonly OfficeTool[] = [
   undoLayoutEdit,
   getFeatureGuide,
   tutorial,
+  workflow,
 ];

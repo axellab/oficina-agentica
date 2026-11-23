@@ -406,8 +406,11 @@ export function handleClientMessage(
     case 'skipTutorialQuest':
     case 'quitTutorial':
     case 'endCrew':
+    case 'startWorkflow':
+    case 'stopWorkflow':
       // The Pixel Office MCP's consent, its switches, the editing lock and undo,
-      // and what runs on it: the tutorial, and a Crew's end.
+      // and what runs on it: the tutorial, a Crew's end, a Workflow run's start
+      // and stop.
       ctx.officeMcp?.handleMessage(msg, ctx.client, (m) => send({ ...m }));
       break;
 
@@ -861,6 +864,10 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   // 4a-ter-bis. Crews: who is in each, for every office (a view-only one sees
   // the agents and their Messages already; it can end none).
   ctx.officeMcp?.crewsSnapshot((m) => send({ ...m }));
+
+  // 4a-ter-ter. Workflows: the catalog a run is started from and the runs under
+  // way, to the offices the Crews are told to (a run is a Crew's work).
+  ctx.officeMcp?.workflowsSnapshot((m) => send({ ...m }));
 
   // 4a-quater. Usage bars: the operator's account usage, privileged clients only.
   if (ctx.privileged) {

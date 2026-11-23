@@ -52,6 +52,7 @@ import { transport } from '../transport/index.js';
 import { onReconnect } from '../transport/onReconnect.js';
 import { handleTutorialMessage } from '../tutorial/tutorialStore.js';
 import { handleUsageMessage } from '../usage/usageStore.js';
+import { handleWorkflowsMessage } from '../workflows/workflowStore.js';
 import type { Pane } from './terminalPanes.js';
 import { prefersReducedMotion } from './usePresence.js';
 
@@ -441,6 +442,8 @@ export function useExtensionMessages(
       if (handleRolesMessage(msg)) return;
       // Crews (crews/crewStore.ts): who the user set free to work together.
       if (handleCrewsMessage(msg)) return;
+      // Workflows (workflows/workflowStore.ts): the list, the runs, a refused start.
+      if (handleWorkflowsMessage(msg)) return;
       if (handleSignInMessage(msg)) return;
       // The Pixel Office MCP (officeMcp/officeMcpStore.ts): its settings and Intro step.
       if (handleOfficeMcpMessage(msg)) return;
