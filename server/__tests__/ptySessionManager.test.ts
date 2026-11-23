@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   TERMINAL_DEFAULT_LANG,
@@ -8,6 +8,12 @@ import {
 import type { IPty, PtyModule, PtyModuleResolution } from '../src/terminal/ptyModule.js';
 import { PtySessionManager } from '../src/terminal/ptySessionManager.js';
 import { terminalEnv } from '../src/terminal/terminalEnv.js';
+
+/** The Windows reading of a command (windowsCommand.test.ts holds its rules): here, only that it is asked. */
+const windowsLaunch = vi.hoisted(() =>
+  vi.fn((command: string, args: string[]) => ({ command, args })),
+);
+vi.mock('../src/terminal/windowsCommand.js', () => ({ windowsLaunch }));
 
 /**
  * Fake PTY. Tests never spawn a real process: they'd be slow, platform-specific,
@@ -405,5 +411,47 @@ describe('PtySession snapshot', () => {
     const snapshot = stripAnsi((await session.replay()).data);
     expect(snapshot).toContain(`L${String(total - 1).padStart(6, '0')}`);
     expect(snapshot).not.toContain('L000000');
+  });
+});
+
+describe('PtySessionManager on Windows', () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  beforeEach(() => {
+    windowsLaunch.mockClear();
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+  });
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', platform);
+  });
+
+  it('spawns what the command stands for there, not its bare name', () => {
+    // `claude` installed by npm is a .cmd launcher: spawned by name, the PTY
+    // found no claude.exe and the agent left the moment it joined.
+    windowsLaunch.mockReturnValueOnce({ command: 'C:\\cli\\claude.exe', args: ['resolved'] });
+    const { manager, spawnArgs } = harness();
+    create(manager);
+    expect(windowsLaunch).toHaveBeenCalledWith('claude', ['--session-id', 'x'], {
+      cwd: '/tmp',
+      env: expect.objectContaining({ TERM: TERMINAL_TERM_NAME }),
+    });
+    expect(spawnArgs[0]).toMatchObject({ file: 'C:\\cli\\claude.exe', args: ['resolved'] });
+  });
+
+  it('fails the create, spawning nothing, when the command cannot be started there', () => {
+    windowsLaunch.mockImplementationOnce(() => {
+      throw new Error('tool.cmd cannot be started in a terminal');
+    });
+    const { manager, spawned } = harness();
+    expect(() => create(manager)).toThrow(/cannot be started in a terminal/);
+    expect(spawned).toHaveLength(0);
+    expect(manager.has(1)).toBe(false);
+  });
+
+  it('is not asked on any other system', () => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+    const { manager, spawnArgs } = harness();
+    create(manager);
+    expect(windowsLaunch).not.toHaveBeenCalled();
+    expect(spawnArgs[0]).toMatchObject({ file: 'claude', args: ['--session-id', 'x'] });
   });
 });

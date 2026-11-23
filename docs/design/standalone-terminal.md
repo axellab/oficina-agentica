@@ -49,6 +49,44 @@ Layering is unchanged: everything new on the server lives under `server/src/term
 only on `core/`, and is never imported by `adapters/vscode/`. The webview drawer depends only on
 `core/` + the existing transport singleton.
 
+### Windows: what a command stands for
+
+A PTY spawn on Windows is `CreateProcess`, which starts an `.exe` and nothing else. A CLI that
+npm installed is not one: `claude` on PATH is `claude.cmd`, a launcher a few lines long that ends
+on the package's own program (`"%dp0%\node_modules\@anthropic-ai\claude-code\bin\claude.exe" %*`,
+Claude Code 2.x) or on Node and a script (`"%_prog%" "%dp0%\node_modules\…\cli.js" %*`). Spawned
+by its bare name the launch found no `claude.exe`, and the PTY library reports that as a process
+that exited with code 2, not as a throw: the agent joined the office and left it at once, with
+nothing said.
+
+`server/src/terminal/windowsCommand.ts` `windowsLaunch` turns a command into something Windows
+starts. It is applied in `spawnPty`, so agents, PC shells and the PTY host all pass through it:
+
+- The command is looked for as a shell would: in each PATH folder in turn, under PATHEXT's
+  `.com`, `.exe`, `.bat` and `.cmd` in its order. A command with a folder in it is looked for
+  there alone, and the folder the terminal opens in is never searched by itself (what stands in
+  the folder an agent is launched into is not the CLI).
+- An `.exe` is spawned by its full path.
+- A `.cmd` / `.bat` is **read, never run**. When it is the launcher npm, pnpm or Yarn writes, what
+  its last line names is started instead: the program itself, or `node.exe` (the one beside the
+  launcher, else the one on PATH) with the script as its first argument. The arguments stay the
+  list they were.
+- Any other batch file is refused with the reason. The create throws, so the launch reports a
+  terminal that could not start and the server log says why.
+- A command nothing on PATH answers to is left as given, for Windows to look for in its own
+  folders (`cmd.exe` under a bare PATH).
+
+**Why not `cmd.exe /c`.** cmd reads the whole line again by rules of its own: an `&`, a `|`, a
+`%NAME%` or a quote inside an argument becomes syntax, and a line break ends the command. A
+launch's arguments include a first message an agent wrote (`launch_agent`), so that is a command
+injection waiting for the right message, and no escaping is right for every batch file (the
+"BatBadBut" class of bug). Not going through cmd is the fix.
+
+Limits: only the launcher's last word is honoured. Its other lines are not applied (pnpm's sets
+`NODE_PATH`), and a launcher that puts arguments of its own between Node and the script is
+refused rather than half-honoured. The rules are unit-tested against a fake disk on every OS
+(`windowsCommand.test.ts`).
+
 ### Why a separate launch path instead of a shared one
 
 `adapters/vscode/agentManager.ts:launchNewTerminal()` is a 190-line function that takes twelve
@@ -420,7 +458,8 @@ RemotePtySessions ── Unix socket ──────▶ startPtyHost()
   means a session id in the key, the drawer, and the WS path. No demand yet.
 - **Windows beyond what node-pty handles.** Both candidates use ConPTY on Windows 10 1809+
   (`@lydell/node-pty` ships `win32-x64` + `win32-arm64` prebuilds, and drops the old winpty
-  fallback). Untested on Windows in this branch — see risks.
+  fallback). The launch itself is covered (see "Windows: what a command stands for"); the rest
+  is not exercised by any test — see risks.
 - **Unifying the VS Code and standalone launch paths** behind one core seam (see "Why a separate
   launch path").
 - **Heuristic (hooks-off) `/clear` detection for PTY agents.** `fileWatcher`'s per-agent `/clear`
@@ -435,7 +474,8 @@ RemotePtySessions ── Unix socket ──────▶ startPtyHost()
 spawns a PTY, hooks route to the new character, mock-claude output renders in the drawer, a
 reload reattaches to the still-running PTY (replay), and close cleans up. A second scenario
 pins the `--no-terminal` degradation (launch disabled with its reason, hook-driven agents still
-render). Both skip on Windows, where spawning the `.cmd` mock shim through a PTY is untested.
+render). Both skip on Windows: the mock CLI there is a hand-written `.cmd`, which a PTY cannot
+start and the launch refuses (see "Windows: what a command stands for").
 
 The security negatives are pinned at the unit level, against a real server where a socket is
 involved: `terminalRoutes.test.ts` (no token, wrong token, same-length token, valid token from a
@@ -449,10 +489,11 @@ degradation path (see open question 3).
 - **Beta dependency.** `@lydell/node-pty` is `1.2.0-beta.12`. Mitigated by optionality, the
   fallback candidate list, and graceful degradation, but it is a real supply-chain call that
   deserves a maintainer's sign-off.
-- **Windows untested.** ConPTY is claimed by prebuilds but not exercised here. The e2e terminal
-  spec (`e2e/tests/standalone/terminal.spec.ts`) covers launch → drawer → I/O → reload → close on
-  macOS/Linux, but skips the PTY-launch path on Windows: it spawns `claude` directly (no shell
-  hop), and running a `.cmd` shim that way is exactly the untested part.
+- **Windows not covered end to end.** ConPTY is claimed by prebuilds but no CI test spawns
+  through it. The e2e terminal spec (`e2e/tests/standalone/terminal.spec.ts`) covers launch →
+  drawer → I/O → reload → close on macOS/Linux and skips on Windows, where its mock CLI is a
+  hand-written `.cmd`. What a command stands for there is unit-tested (`windowsCommand.test.ts`);
+  a mock shaped like npm's launcher would let these specs run on Windows too.
 - **`npx` install size.** Adds one prebuilt `.node` (~100–200 KB) for the host platform only.
 - **Non-loopback `--host`.** A user who sets `--host 0.0.0.0` exposes a token-guarded shell.
   Warned at startup; not blocked (blocking would be a behavior change to an existing flag).

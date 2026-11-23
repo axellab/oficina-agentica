@@ -128,6 +128,7 @@ server/                              Lifecycle runtime + Fastify HTTP/WS server
       fileUploads.ts                 Files sent to a terminal: upload directory, sweep, naming
       localFile.ts                   Finding a sent file already on this machine
       trustPrompt.ts                 --trust-directories: answering the CLI's trust question for launched agents
+      windowsCommand.ts              windowsLaunch: what a command stands for on Windows (its .exe, or what a package manager's .cmd launcher runs; never cmd.exe)
     usageLimits.ts                   Usage bars: last report per provider, PRIVILEGED_BROADCAST_TYPES
     cardOrder.ts                     The agent cards' order
     cliSignIn.ts                     CliSignIns: the Intro's sign-in messages, one sign-in per provider, both surfaces
@@ -870,6 +871,7 @@ Use `console.log`/`error`/`warn` with prefixed context:
 - **A session that moves keeps its transcript.** EnterWorktree / ExitWorktree in an interactive session MOVE the whole file into the new folder's project dir (same name); a `-p` session keeps writing the old one, while its hooks name a `transcript_path` that never exists. So an agent is re-pointed only to a file that exists, once the one it reads is gone, keeping its offset — re-reading from 0 is the resume bug below (`agentMoves.ts`).
 - **Resume reopens the OLD transcript.** Attaching an agent to a transcript starts at its end unless the file was born within the scan window (`fileWatcher.initialReadOffset`, shared by adoption and `reassignAgentToFile`): reading a resumed session from byte 0 replayed its history and resurrected background spawns that died with the previous process as Sub-agents that never left.
 - `--output-format stream-json` needs non-TTY stdin — can't use with VS Code terminals.
+- **On Windows a CLI on PATH is usually a `.cmd` launcher, not a program.** npm installs `claude` as `claude.cmd` (a few lines ending on the package's `bin/claude.exe`, or on `node cli.js`). A PTY starts only an .exe: spawned by its bare name the launch failed with no throw (the PTY library reports a process that exited with code 2), so the agent joined and left at once. Running the .cmd through cmd.exe would have cmd read the arguments (a first message an agent wrote) as commands, so `terminal/windowsCommand.ts` reads the launcher and starts what it runs; any other batch file is refused.
 - Hook-based IPC failed in early prototypes (hooks captured at startup, env vars don't propagate). HTTP `/api/hooks/:providerId` with `~/.pixel-agents/server.json` discovery works.
 - PNG→SpriteData: pngjs for RGBA buffer, alpha threshold 2 (`PNG_ALPHA_THRESHOLD`), supports `#RRGGBBAA` semi-transparent pixels.
 - OfficeCanvas selection changes are imperative (`editorState.selectedFurnitureUid`); must call `onEditorSelectionChange()` to trigger React re-render for toolbar.
