@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   closedStageCount,
+  MAX_WORKFLOW_REQUEST_CHARS,
   MAX_WORKFLOW_STAGES,
   MAX_WORKFLOWS,
   mergeWorkflowCatalog,
@@ -28,13 +29,13 @@ import {
   CREW_PREAPPROVED_TOOLS,
   PIXEL_AGENTS_DIR,
   ROLES_FILE_NAME,
-  WORKFLOW_REQUEST_MAX_CHARS,
   WORKFLOW_SHOWN_TEXT_MAX_CHARS,
   WORKFLOWS_FILE_NAME,
 } from '../src/constants.js';
 import { Crews } from '../src/crews.js';
 import type { AgentLaunch, AgentLaunchOutcome } from '../src/mcp/officeOperations.js';
 import { BUILTIN_ROLES } from '../src/roles/builtinRoles.js';
+import { FEATURE_GUIDE } from '../src/tutorial/featureGuide.js';
 import type { AgentState } from '../src/types.js';
 import { BUILTIN_WORKFLOWS } from '../src/workflows/builtinWorkflows.js';
 import { workflowCatalog, workflowListing } from '../src/workflows/workflowCatalog.js';
@@ -250,6 +251,19 @@ describe('the built-in Workflows', () => {
     const security = BUILTIN_WORKFLOWS.find((w) => w.id === 'security-review')!;
     expect(security.brief).toMatch(/secret/i);
     expect(security.brief).toMatch(/never/i);
+  });
+
+  it('are all in the feature guide, stage by stage', () => {
+    const topic = FEATURE_GUIDE.find((candidate) => candidate.id === 'workflows')!;
+    expect(topic.title).toMatch(/^Workflows/);
+    // The guide is prose, the catalog is data: a Workflow or a stage added
+    // here must be added there too.
+    const body = topic.body.toLowerCase();
+    for (const workflow of BUILTIN_WORKFLOWS) {
+      expect(topic.body).toContain(workflow.name);
+      for (const stage of workflow.stages) expect(body).toContain(stage.title.toLowerCase());
+    }
+    expect(topic.body).toContain('workflows.json');
   });
 });
 
@@ -628,7 +642,7 @@ describe('Workflows (the runs)', () => {
       [{ workflowId: 7 }, /no such workflow/],
       [{ request: '   ' }, /starts from a request/],
       [{ request: undefined }, /starts from a request/],
-      [{ request: 'x'.repeat(WORKFLOW_REQUEST_MAX_CHARS + 1) }, /longer than 4000 characters/],
+      [{ request: 'x'.repeat(MAX_WORKFLOW_REQUEST_CHARS + 1) }, /longer than 4000 characters/],
       [{ request: 'a\u0000b' }, /NUL/],
       [{ directoryPath: '' }, /starts in a Directory/],
       [{ directoryPath: undefined }, /starts in a Directory/],
@@ -642,7 +656,7 @@ describe('Workflows (the runs)', () => {
     expect(runs()).toEqual([]);
     expect(crews.statusMessage().crews).toEqual([]);
     // The longest request there is passes whole.
-    const longest = 'x'.repeat(WORKFLOW_REQUEST_MAX_CHARS);
+    const longest = 'x'.repeat(MAX_WORKFLOW_REQUEST_CHARS);
     const lead = await started({ request: `  ${longest}\n` });
     const view = workflows.view(lead);
     expect(view.running && view.request).toBe(longest);

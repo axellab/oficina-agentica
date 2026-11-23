@@ -307,10 +307,6 @@ export const CREW_PROMPT_FILE_STEM = '_crew';
 // ── Workflows (server/src/workflows/) ───────────────────────
 /** The host's own Workflows and its replacements of the built-in ones, in the persistence dir. */
 export const WORKFLOWS_FILE_NAME = 'workflows.json';
-/** The longest request a Workflow run is started with. It reaches the lead
- *  through the `workflow` tool, so it is bounded by what a tool reply should
- *  hold, not by a command line. */
-export const WORKFLOW_REQUEST_MAX_CHARS = 4000;
 /** The longest note a lead leaves on a stage it finishes or skips. */
 export const WORKFLOW_NOTE_MAX_CHARS = 1000;
 /** How much of a run's request and of a stage's note every office is sent

@@ -11,6 +11,10 @@ export interface LaunchAs {
   roleId?: string;
   /** The drawer's Crew switch was on: the user starts a Crew with this agent. */
   crew?: boolean;
+  /** The Workflow picked in the drawer: the press launches nothing yet, the
+   *  surface asks for the request first (workflows/useWorkflowStart.ts). The
+   *  Role and the Crew are then the Workflow's, not the drawer's. */
+  workflowId?: string;
 }
 
 /**

@@ -66,6 +66,11 @@ export const MAX_WORKFLOW_BRIEF_CHARS = 4000;
 export const MAX_STAGE_TITLE_CHARS = 60;
 export const MAX_STAGE_BRIEF_CHARS = 2000;
 
+/** The longest request a run is started with: checked by the office's request
+ *  dialog and again by the server. It reaches the lead through the `workflow`
+ *  tool, so it is bounded by what a tool reply should hold, not by a command line. */
+export const MAX_WORKFLOW_REQUEST_CHARS = 4000;
+
 /** A Workflow's id and a stage's: the same shape as a Role's (lower-case
  *  letters, digits and hyphens, starting with a letter). */
 export const isWorkflowId = isRoleId;

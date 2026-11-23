@@ -60,6 +60,14 @@ _Avoid_: persona, agent type (that's a CLI's kind of sub-agent), Lead (a Team re
 The agents the user set free to work together. The user starts one from the office, with the agent a launch begins it with; every agent a Crew's agent launches joins it, and nothing else does. Its agents launch each other without asking the user, start with the tools they reach each other with already allowed, and read, message and close only each other. It holds a fixed number of agents at a time. The user ends it; its agents keep running, as ordinary agents that no longer launch, message or close anyone. Not a Team: a Team is a Lead and the Teammates its CLI spawned inside one session, while a Crew's agents are each a main agent the office launched, with its own terminal, card and seat.
 _Avoid_: team, squad, swarm, free run, autonomous mode (a Crew frees agents towards each other, never from a CLI's own permission prompts)
 
+**Workflow**:
+How one kind of request is handled: an ordered list of stages, each owned by a Role, led by one Role. New feature, Bug fix, Deep security analysis and Deep quality analysis are built in; the user's `workflows.json` replaces them or adds others. A stage says what its owner does and what closes it; stages marked parallel run at the same time as the stage listed before them. A Workflow is a description, like a Role: it does nothing until the user starts a run of it.
+_Avoid_: pipeline (that's CI), process, playbook, plan (an agent's own plan for its turn)
+
+**Workflow run**:
+One request of the user's, handled by a Crew following a Workflow. The user starts it from the office, choosing the Workflow and writing the request in their own words; that launches the Workflow's lead Role with a new Crew, and the run is that Crew's work. The lead hands each stage to an agent of the Role that owns it and reports each stage as it starts, is done or is skipped; the office keeps the order and shows the user every stage. It ends when the user stops it (which ends its Crew), ends its Crew, or its lead leaves. No agent starts a run.
+_Avoid_: job, task (a CLI's own word), session (an agent's), sprint (the Agile Project Manager's own planning word)
+
 ## Agent Lifecycle
 
 **Launch**:

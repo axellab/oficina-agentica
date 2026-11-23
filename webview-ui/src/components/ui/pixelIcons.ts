@@ -366,6 +366,17 @@ export const ICONS = {
     '###..###',
     '........',
   ],
+  // A Workflow: its stages, one under the other, each a box and its line.
+  workflow: [
+    '##.#####',
+    '##.#####',
+    '........',
+    '##.#####',
+    '##.#####',
+    '........',
+    '##.#####',
+    '##.#####',
+  ],
   // A magnifying glass: the lens top-left, the handle out to the corner.
   search: [
     '.####...',

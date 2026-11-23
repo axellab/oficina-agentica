@@ -23,9 +23,9 @@
  */
 
 import type { WorkflowRun, WorkflowsLoaded } from '../../../core/src/messages.js';
-import type { CatalogWorkflow } from '../../../core/src/workflows.js';
+import { type CatalogWorkflow, MAX_WORKFLOW_REQUEST_CHARS } from '../../../core/src/workflows.js';
 import type { AgentStateStore } from '../agentStateStore.js';
-import { WORKFLOW_REQUEST_MAX_CHARS, WORKFLOW_SHOWN_TEXT_MAX_CHARS } from '../constants.js';
+import { WORKFLOW_SHOWN_TEXT_MAX_CHARS } from '../constants.js';
 import type { CrewPlace } from '../crews.js';
 import type { AgentLaunch, AgentLaunchOutcome } from '../mcp/officeOperations.js';
 import type { AgentState } from '../types.js';
@@ -244,10 +244,10 @@ export class Workflows {
     if (!request) {
       return { ok: false, reason: 'A workflow starts from a request: write what you need.' };
     }
-    if (request.length > WORKFLOW_REQUEST_MAX_CHARS) {
+    if (request.length > MAX_WORKFLOW_REQUEST_CHARS) {
       return {
         ok: false,
-        reason: `The request is longer than ${WORKFLOW_REQUEST_MAX_CHARS} characters. Write the essential here and give the rest to the lead in its terminal.`,
+        reason: `The request is longer than ${MAX_WORKFLOW_REQUEST_CHARS} characters. Write the essential here and give the rest to the lead in its terminal.`,
       };
     }
     if (request.includes('\u0000')) {
