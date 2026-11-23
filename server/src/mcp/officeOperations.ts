@@ -533,6 +533,17 @@ export function noAgentReason(id: number): string {
   return `There is no agent ${id} in the office: see list_agents for who is.`;
 }
 
+/**
+ * What a call still under way answers once its caller is no longer in the
+ * office: nothing more is done in its name. A new call of its is refused at
+ * the route (officeMcp's `callerOf`); this is the same rule for the one that
+ * was waiting (on git, or its turn at a terminal) when its caller left, and
+ * whose limits (its Crew's) can no longer be read off it.
+ */
+export function callerLeftReason(caller: number): string {
+  return `Agent ${caller} has left the office, so nothing more is done in its name.`;
+}
+
 /** Where a visit goes: a tile and the way to face there, or a piece of furniture by uid. */
 export type VisitTarget =
   { tile: { col: number; row: number }; facing: Facing } | { furnitureUid: string };

@@ -18,7 +18,8 @@
  * the user's own answers are kept out of its reach here. Both are looked at
  * again at every write (`Withheld`): a Message waits its turn behind another
  * and its keys land one at a time, and the user may end the Crew, or a prompt
- * may open, meanwhile.
+ * may open, meanwhile. A sender that left the office meanwhile types nothing
+ * more, whoever it was: its limits can no longer be read off it.
  */
 
 import type { AgentMessageShow } from '../../../core/src/messages.js';
@@ -43,7 +44,7 @@ import type {
   MessageRecipient,
   Messaging,
 } from './officeOperations.js';
-import { noAgentReason } from './officeOperations.js';
+import { callerLeftReason, noAgentReason } from './officeOperations.js';
 
 /** How a surface checks a Message before it is typed, and again before its Enter. */
 export interface DeliveryGuard {
@@ -193,8 +194,12 @@ export function createMessaging(
       if (!checked.ok) return refused(checked.reason, checked.screen);
       // What a Crew's agent is held to, as it stands NOW: asked again here (the
       // Message may have waited behind another) and before every write below.
+      // A sender that has left types nothing more: whether it was in a Crew can
+      // no longer be read off it, so its Crew's limits would hold nothing.
       const withheld = (): string | null =>
-        crews.reachProblem(from, id, 'message') ?? crews.promptProblem(from, id);
+        store.has(from)
+          ? (crews.reachProblem(from, id, 'message') ?? crews.promptProblem(from, id))
+          : callerLeftReason(from);
       const stopped = withheld();
       if (stopped) return refused(stopped);
       let writes = 0;
