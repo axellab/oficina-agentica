@@ -175,11 +175,15 @@ describe('mergeWorkflowCatalog', () => {
     const merged = mergeWorkflowCatalog(BUILTIN_WORKFLOWS, [own()], ROLE_IDS);
     expect(merged.problems).toEqual([]);
     expect(merged.workflows.map((w) => [w.id, w.source])).toEqual([
-      ['new-feature', 'builtin'],
-      ['bug-fix', 'builtin'],
-      ['security-review', 'builtin'],
-      ['quality-review', 'builtin'],
+      ...BUILTIN_WORKFLOWS.map((w) => [w.id, 'builtin']),
       ['hotfix', 'user'],
+    ]);
+    // The ones a request usually starts from come first.
+    expect(merged.workflows.slice(0, 4).map((w) => w.id)).toEqual([
+      'new-feature',
+      'bug-fix',
+      'security-review',
+      'quality-review',
     ]);
   });
 
@@ -202,15 +206,20 @@ describe('mergeWorkflowCatalog', () => {
     expect(merged.problems).toEqual(['"hotfix": there is no role "release-manager" on this host']);
 
     // The built-in ones are held to it too: none is listed without its lead's Role.
+    const rolesOf = (w: WorkflowDefinition): string[] => [w.lead, ...w.stages.map((s) => s.role)];
+    const without = (role: string): string[] =>
+      BUILTIN_WORKFLOWS.filter((w) => !rolesOf(w).includes(role)).map((w) => w.id);
     const noLead = new Set([...ROLE_IDS].filter((id) => id !== 'agile-project-manager'));
     const fewer = mergeWorkflowCatalog(BUILTIN_WORKFLOWS, [], noLead);
-    expect(fewer.workflows).toEqual([]);
-    expect(fewer.problems).toHaveLength(BUILTIN_WORKFLOWS.length);
+    expect(fewer.workflows.map((w) => w.id)).toEqual(without('agile-project-manager'));
+    expect(fewer.workflows.map((w) => w.id)).not.toContain('new-feature');
+    expect(fewer.problems).toHaveLength(BUILTIN_WORKFLOWS.length - fewer.workflows.length);
     // A stage's Role counts like the lead's.
     const noQa = new Set([...ROLE_IDS].filter((id) => id !== 'qa-engineer'));
-    expect(mergeWorkflowCatalog(BUILTIN_WORKFLOWS, [], noQa).workflows.map((w) => w.id)).toEqual([
-      'security-review',
-    ]);
+    const noQaIds = mergeWorkflowCatalog(BUILTIN_WORKFLOWS, [], noQa).workflows.map((w) => w.id);
+    expect(noQaIds).toEqual(without('qa-engineer'));
+    expect(noQaIds).toContain('security-review');
+    expect(noQaIds).not.toContain('bug-fix');
   });
 });
 
@@ -224,19 +233,32 @@ describe('the built-in Workflows', () => {
     expect(mergeWorkflowCatalog(BUILTIN_WORKFLOWS, [], ROLE_IDS).problems).toEqual([]);
   });
 
-  it('cover a new feature, a bug fix and the two deep analyses, each led by the coordinator and ending on its report', () => {
-    expect(BUILTIN_WORKFLOWS.map((w) => [w.id, w.name])).toEqual([
+  it('cover a new feature, a bug fix and the two deep analyses, led by the coordinator and listed first', () => {
+    const coordinated = BUILTIN_WORKFLOWS.filter((w) => w.lead === 'agile-project-manager');
+    expect(coordinated.map((w) => [w.id, w.name])).toEqual([
       ['new-feature', 'New feature'],
       ['bug-fix', 'Bug fix'],
       ['security-review', 'Deep security analysis'],
       ['quality-review', 'Deep quality analysis'],
     ]);
+    expect(BUILTIN_WORKFLOWS.slice(0, coordinated.length)).toEqual(coordinated);
+  });
+
+  it('each other Role leads the Workflows that are its own job', () => {
+    const own = BUILTIN_WORKFLOWS.filter((w) => w.lead !== 'agile-project-manager');
+    expect(own.map((w) => [w.lead, w.id, w.name])).toEqual([
+      ['devsecops-engineer', 'pipeline-troubleshooting', 'Pipeline troubleshooting'],
+      ['devsecops-engineer', 'pipeline-hardening', 'Pipeline hardening'],
+      ['devsecops-engineer', 'supply-chain-audit', 'Supply chain audit'],
+    ]);
+  });
+
+  it('every one ends on the report of the Role that leads it, and every stage says what closes it', () => {
     for (const workflow of BUILTIN_WORKFLOWS) {
-      expect(workflow.lead).toBe('agile-project-manager');
       expect(workflow.description).not.toBe('');
       expect(workflow.brief).not.toBe('');
       const last = workflow.stages.at(-1)!;
-      expect(last).toMatchObject({ id: 'report', role: 'agile-project-manager' });
+      expect(last).toMatchObject({ id: 'report', role: workflow.lead });
       expect(last.parallel).toBeUndefined();
       // Every stage says what its owner does and what closes it.
       for (const stage of workflow.stages) expect(stage.brief.length).toBeGreaterThan(40);
@@ -244,10 +266,12 @@ describe('the built-in Workflows', () => {
   });
 
   it('the analyses change nothing and never copy a secret into a finding', () => {
-    for (const id of ['security-review', 'quality-review']) {
+    for (const id of ['security-review', 'quality-review', 'supply-chain-audit']) {
       const workflow = BUILTIN_WORKFLOWS.find((w) => w.id === id)!;
       expect(workflow.brief).toMatch(/This is an analysis: nobody changes product code/);
     }
+    const audit = BUILTIN_WORKFLOWS.find((w) => w.id === 'supply-chain-audit')!;
+    expect(audit.brief).toMatch(/reported by where it is, never copied/);
     const security = BUILTIN_WORKFLOWS.find((w) => w.id === 'security-review')!;
     expect(security.brief).toMatch(/secret/i);
     expect(security.brief).toMatch(/never/i);

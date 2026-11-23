@@ -694,6 +694,7 @@ export interface Role {
   description: string;
   color: RoleColor;
   source: RoleSource;
+  playbooks?: string[];
 }
 
 export type RoleSource = 'builtin' | 'user';

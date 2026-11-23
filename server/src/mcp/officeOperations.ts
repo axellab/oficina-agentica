@@ -254,6 +254,9 @@ export interface OfficeRole {
   source: 'builtin' | 'user';
   /** The agents in the office launched as it. */
   agents: number[];
+  /** Its Playbooks (the jobs its agents run the same way every time): what a
+   *  colleague can ask one of them for, by name. */
+  playbooks: { name: string; description: string }[];
 }
 
 /** Roles (list_roles): the parts agents are launched as, and who holds each. */

@@ -176,7 +176,7 @@ export async function launchNewTerminal(
   const projectDir = getProjectDirPath(cwd);
   // The Role's instructions are written before the command that names them
   // (a failed write is logged and launches a plain agent, it never throws).
-  const roleLaunch = prepareRoleLaunch(roleId);
+  const roleLaunch = prepareRoleLaunch(roleId, undefined, claudeProvider.skills);
   // The id first: the Pixel Office MCP mints its token for this agent (the
   // file's path on the command line, never the token).
   const id = nextAgentIdRef.current++;
@@ -193,7 +193,10 @@ export async function launchNewTerminal(
       mcpConfig && preapprovedMcpTools
         ? { server: OFFICE_MCP_SERVER_NAME, tools: preapprovedMcpTools }
         : undefined,
-    pluginDirs: pluginDir ? [pluginDir] : undefined,
+    // The session's own skills: the tutorial's, and its Role's Playbooks.
+    pluginDirs: [pluginDir, roleLaunch?.pluginDir].filter(
+      (dir): dir is string => dir !== undefined,
+    ),
   });
   if (!launch) {
     mcp?.revoke(id);

@@ -90,6 +90,10 @@ describe('Workflows through the Pixel Office MCP (composed server, mock-claude i
       ['bug-fix', 'Bug fix', 'Agile Project Manager'],
       ['security-review', 'Deep security analysis', 'Agile Project Manager'],
       ['quality-review', 'Deep quality analysis', 'Agile Project Manager'],
+      // Then the ones each other Role leads.
+      ['pipeline-troubleshooting', 'Pipeline troubleshooting', 'DevSecOps Engineer'],
+      ['pipeline-hardening', 'Pipeline hardening', 'DevSecOps Engineer'],
+      ['supply-chain-audit', 'Supply chain audit', 'DevSecOps Engineer'],
     ]);
     // What an office lists holds no brief: that is the lead's to read.
     expect(JSON.stringify(loaded().workflows)).not.toContain('brief');
@@ -330,7 +334,7 @@ describe('Workflows through the Pixel Office MCP (composed server, mock-claude i
     await waitFor(() => loaded()?.available === false, 'the office to be told');
     expect(loaded().unavailableReason).toMatch(/read-only in Settings/);
     // The Workflows are still listed: the drawer says why none can start.
-    expect(loaded().workflows as Json[]).toHaveLength(4);
+    expect(loaded().workflows as Json[]).toHaveLength(7);
 
     const before = h.starts().length;
     h.send({

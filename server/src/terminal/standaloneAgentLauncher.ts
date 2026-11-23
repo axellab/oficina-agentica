@@ -149,7 +149,7 @@ export function launchStandaloneAgent(
   const crewTerms = crew && { maxAgents: crew.maxAgents };
   // The instructions are written before the command that names them: the
   // Role's (in a Crew, with its terms), else a Crew's own.
-  const roleLaunch = prepareRoleLaunch(options.roleId, crewTerms);
+  const roleLaunch = prepareRoleLaunch(options.roleId, crewTerms, provider.skills);
   const preapprovedTools = [
     ...new Set([...(options.preapprovedMcpTools ?? []), ...(crew ? CREW_PREAPPROVED_TOOLS : [])]),
   ];
@@ -161,13 +161,17 @@ export function launchStandaloneAgent(
     // A model the launch asks for by name wins over its Role's usual one.
     model: options.asks?.model ?? roleLaunch?.model,
     appendSystemPromptFile:
-      roleLaunch?.appendSystemPromptFile ?? (crewTerms && prepareCrewPrompt(crewTerms)),
+      roleLaunch?.appendSystemPromptFile ??
+      (crewTerms && prepareCrewPrompt(crewTerms, provider.skills !== undefined)),
     prompt: options.asks?.firstMessage,
     preapprovedMcpTools:
       mcpConfig && preapprovedTools.length > 0
         ? { server: OFFICE_MCP_SERVER_NAME, tools: preapprovedTools }
         : undefined,
-    pluginDirs: options.pluginDir ? [options.pluginDir] : undefined,
+    // The session's own skills: the tutorial's, and its Role's Playbooks.
+    pluginDirs: [options.pluginDir, roleLaunch?.pluginDir].filter(
+      (dir): dir is string => dir !== undefined,
+    ),
   });
 
   const agent = createAgentState({

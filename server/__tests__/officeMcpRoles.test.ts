@@ -99,12 +99,23 @@ describe('Roles through the Pixel Office MCP (composed server, mock-claude in a 
       description: expect.stringContaining('Coordinates the team'),
       source: 'builtin',
       agents: [manager.id],
+      playbooks: [],
     });
     expect(byId.get('developer')!.agents).toEqual([]);
+    // A Role's Playbooks, by name and what each is for: what a colleague asks it for.
+    const playbooks = byId.get('devsecops-engineer')!.playbooks as Json[];
+    expect(playbooks.map((playbook) => playbook.name)).toEqual([
+      'Pipeline troubleshooting',
+      'Pipeline hardening',
+      'Supply chain audit',
+    ]);
+    expect(playbooks[0].description).toMatch(/Pipeline Doctor/);
+    expect(Object.keys(playbooks[0]).sort()).toEqual(['description', 'name']);
     // What the office is never told, an agent isn't either.
     for (const role of listed) {
       expect(role).not.toHaveProperty('prompt');
       expect(role).not.toHaveProperty('model');
+      expect(role).not.toHaveProperty('contract');
     }
 
     const agents = await h.listAgents(plain.client);
@@ -135,6 +146,7 @@ describe('Roles through the Pixel Office MCP (composed server, mock-claude in a 
       description: '',
       source: 'user',
       agents: [],
+      playbooks: [],
     });
     expect(listed.find((role) => role.id === 'developer')).toMatchObject({
       description: 'Builds it, our way.',
@@ -238,6 +250,52 @@ describe('Roles through the Pixel Office MCP (composed server, mock-claude in a 
     const askedArgs = startOf(asked.session_id).args;
     expect(askedArgs.filter((arg) => arg === '--model')).toHaveLength(1);
     expect(askedArgs[askedArgs.indexOf('--model') + 1]).toBe('sonnet');
+  });
+
+  it("a Role's Playbooks are handed to its agent as skills of that session, and to no other", async () => {
+    // From the drawer and from a colleague alike.
+    const engineer = await fromDrawer('devsecops-engineer');
+    const engineerArgs = startOf(engineer.sessionId).args;
+    expect(engineerArgs.filter((arg) => arg === '--plugin-dir')).toHaveLength(1);
+    const pluginDir = engineerArgs[engineerArgs.indexOf('--plugin-dir') + 1];
+    expect(path.dirname(pluginDir)).toBe(path.join(h.home, '.pixel-agents', 'role-kits'));
+    expect(path.basename(pluginDir)).toMatch(/^devsecops-engineer-[0-9a-f]{12}$/);
+    expect(
+      JSON.parse(fs.readFileSync(path.join(pluginDir, '.claude-plugin', 'plugin.json'), 'utf8'))
+        .name,
+    ).toBe('devsecops-engineer');
+    expect(fs.readdirSync(path.join(pluginDir, 'skills')).sort()).toEqual([
+      'pipeline-hardening',
+      'pipeline-troubleshooting',
+      'supply-chain-audit',
+    ]);
+    const troubleshooting = fs.readFileSync(
+      path.join(pluginDir, 'skills', 'pipeline-troubleshooting', 'SKILL.md'),
+      'utf8',
+    );
+    expect(troubleshooting).toMatch(/^---\nname: pipeline-troubleshooting\ndescription: /);
+    expect(troubleshooting).toContain('gh run view');
+    // Its instructions name each one the way the CLI lists it, with its Contract.
+    const prompt = fs.readFileSync(promptFile('devsecops-engineer'), 'utf8');
+    expect(prompt).toContain('## Your contract');
+    expect(prompt).toContain('`devsecops-engineer:pipeline-troubleshooting`');
+
+    const colleague = await launched(engineer.client, {
+      directory: 'proj',
+      role: 'devsecops-engineer',
+    });
+    const colleagueArgs = startOf(colleague.session_id).args;
+    expect(colleagueArgs[colleagueArgs.indexOf('--plugin-dir') + 1]).toBe(pluginDir);
+
+    // A Role with no Playbook, and an agent with no Role: no plugin at all.
+    const developer = await launched(engineer.client, { directory: 'proj', role: 'developer' });
+    expect(startOf(developer.session_id).args).not.toContain('--plugin-dir');
+    const plain = await launched(engineer.client, { directory: 'proj' });
+    expect(startOf(plain.session_id).args).not.toContain('--plugin-dir');
+    // The Developer still knows what its colleague can run.
+    expect(fs.readFileSync(promptFile('developer'), 'utf8')).toContain(
+      'Playbooks: Pipeline troubleshooting, Pipeline hardening, Supply chain audit.',
+    );
   });
 
   it('refuses a Role the office does not have, naming the ones it has, and launches nothing', async () => {

@@ -13,6 +13,23 @@ import type { AgentRole, Role, RoleColor, RoleSource } from './messages.js';
 
 export type { AgentRole, Role, RoleColor, RoleSource };
 
+/**
+ * One Playbook of a Role (CONTEXT.md "Playbook"): a job the Role does the same
+ * way every time, as an ordered run of named tools. Its agents are handed it
+ * as a skill of the coding agent's, by the id it has within its Role.
+ */
+export interface PlaybookDefinition {
+  /** Permanent within its Role: what the skill is called. */
+  id: string;
+  name: string;
+  /** What it is for and when to run it: what the coding agent picks it by. */
+  description: string;
+  /** The tools its steps run, by the names their commands go by. */
+  tools: string[];
+  /** The steps, as its agent reads them. */
+  instructions: string;
+}
+
 /** A Role as the catalog holds it: what the office shows plus what the host
  *  applies at launch. */
 export interface RoleDefinition {
@@ -26,6 +43,12 @@ export interface RoleDefinition {
   /** The model agents of this Role run on, in the CLI's own names and aliases.
    *  Absent = whatever the CLI would use. */
   model?: string;
+  /** The Role's Contract (CONTEXT.md "Contract"): what a request to it must
+   *  bring, what it delivers, when its work is done, what it never does and
+   *  whom it hands over to. Absent = a Role with none (the host's own Roles). */
+  contract?: string;
+  /** The Role's Playbooks, in the order its agents are told them. */
+  playbooks?: PlaybookDefinition[];
 }
 
 /** A catalog entry with where it came from. */
@@ -69,6 +92,15 @@ export const MAX_ROLE_OVERRIDES = 50;
 export const MAX_ROLE_NAME_CHARS = 40;
 export const MAX_ROLE_DESCRIPTION_CHARS = 200;
 export const MAX_ROLE_PROMPT_CHARS = 20_000;
+/** A Role's folder (server/src/roles/kitFormat.ts): its Contract and Playbooks. */
+export const MAX_ROLE_CONTRACT_CHARS = 8_000;
+export const MAX_ROLE_PLAYBOOKS = 12;
+export const MAX_PLAYBOOK_NAME_CHARS = 60;
+/** A Playbook's description is the description of the skill it becomes: one
+ *  line the coding agent decides by, so it must say when to run it. */
+export const MAX_PLAYBOOK_DESCRIPTION_CHARS = 400;
+export const MAX_PLAYBOOK_CHARS = 20_000;
+export const MAX_PLAYBOOK_TOOLS = 20;
 
 export const isRoleId = (value: unknown): value is string =>
   typeof value === 'string' && ROLE_ID_RE.test(value);
@@ -214,14 +246,17 @@ export function mergeRoleCatalog(
   return { roles, problems };
 }
 
-/** A catalog Role as the office lists it (no prompt, no model). */
+/** A catalog Role as the office lists it (no prompt, no model, no Contract;
+ *  of its Playbooks, their names). */
 export function roleListing(role: CatalogRole): Role {
+  const playbooks = (role.playbooks ?? []).map((playbook) => playbook.name);
   return {
     id: role.id,
     name: role.name,
     description: role.description,
     color: role.color,
     source: role.source,
+    ...(playbooks.length > 0 ? { playbooks } : {}),
   };
 }
 
@@ -238,10 +273,16 @@ export function agentRoleOf(role: RoleDefinition): AgentRole {
 export function parseRoleListing(value: unknown): Role | undefined {
   const role = parseAgentRole(value);
   if (!role || !isRecord(value)) return undefined;
+  const playbooks = Array.isArray(value.playbooks)
+    ? value.playbooks
+        .filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+        .slice(0, MAX_ROLE_PLAYBOOKS)
+    : [];
   return {
     ...role,
     description: typeof value.description === 'string' ? value.description : '',
     source: value.source === 'user' ? 'user' : 'builtin',
+    ...(playbooks.length > 0 ? { playbooks } : {}),
   };
 }
 

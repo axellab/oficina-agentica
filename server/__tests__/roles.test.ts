@@ -265,11 +265,16 @@ describe('BUILTIN_ROLES', () => {
   // The built-in Roles go through none of roles.json's checks at runtime, so
   // they are held to them here: what a user may not write, we may not ship.
   it('passes every rule a roles.json entry is held to', () => {
-    const { overrides, problems } = parseRoleOverrides({
-      roles: BUILTIN_ROLES.map((role) => ({ ...role })),
-    });
+    // What roles.json can say of a Role: its Contract and Playbooks are its
+    // folder's (roleKits.test.ts holds those to their own rules).
+    const entries = BUILTIN_ROLES.map(
+      ({ contract: _contract, playbooks: _playbooks, ...entry }) => ({
+        ...entry,
+      }),
+    );
+    const { overrides, problems } = parseRoleOverrides({ roles: entries });
     expect(problems).toEqual([]);
-    expect(overrides).toEqual(BUILTIN_ROLES.map((role) => ({ ...role })));
+    expect(overrides).toEqual(entries);
     for (const role of BUILTIN_ROLES) {
       expect(role.id).toMatch(ROLE_ID_RE);
       expect(ROLE_COLORS).toContain(role.color);
@@ -397,8 +402,13 @@ describe('the host catalog', () => {
     expect(message.type).toBe('rolesLoaded');
     expect(message.roles).toHaveLength(BUILTIN_ROLES.length);
     for (const role of message.roles) {
-      expect(Object.keys(role).sort()).toEqual(['color', 'description', 'id', 'name', 'source']);
+      // Of its Playbooks, an office is told the names; of its Contract, nothing.
+      const { playbooks, ...shown } = role;
+      expect(Object.keys(shown).sort()).toEqual(['color', 'description', 'id', 'name', 'source']);
+      const own = BUILTIN_ROLES.find((builtin) => builtin.id === role.id)?.playbooks ?? [];
+      expect(playbooks ?? []).toEqual(own.map((playbook) => playbook.name));
     }
+    expect(JSON.stringify(message)).not.toContain('### Accepts');
   });
 
   describe('prepareRoleLaunch', () => {

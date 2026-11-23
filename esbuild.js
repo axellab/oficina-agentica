@@ -52,6 +52,24 @@ function copyWardrobeArt() {
 }
 
 /**
+ * Copy the built-in Roles' folders (roles/: each Role's ROLE.md, CONTRACT.md, playbooks and
+ * workflows) to dist/assets/roles, where the server reads them from (server/src/roles/roleKits.ts).
+ * Runs after copyAssets, which replaces dist/assets. Markdown only: a README or a stray file
+ * beside them is not shipped.
+ */
+function copyRoleKits() {
+  const srcDir = path.join(__dirname, 'roles');
+  const dstDir = path.join(__dirname, 'dist', 'assets', 'roles');
+  fs.rmSync(dstDir, { recursive: true, force: true });
+  fs.cpSync(srcDir, dstDir, {
+    recursive: true,
+    filter: (src) =>
+      fs.statSync(src).isDirectory() || (src.endsWith('.md') && path.basename(src) !== 'README.md'),
+  });
+  console.log('✓ Copied roles/ → dist/assets/roles/');
+}
+
+/**
  * Bundle hook scripts (TypeScript) to dist/hooks via esbuild.
  * Produces a self-contained CJS file with shebang for Claude Code to execute.
  */
@@ -120,6 +138,7 @@ async function main() {
     // Copy assets and hooks after build
     copyAssets();
     copyWardrobeArt();
+    copyRoleKits();
     buildHooks();
     await buildCli();
     await buildPtyHost();

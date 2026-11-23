@@ -3410,6 +3410,14 @@ components:
           $ref: '#/components/schemas/RoleColor'
         source:
           $ref: '#/components/schemas/RoleSource'
+        playbooks:
+          type: array
+          description: |
+            The names of the Role's Playbooks: the jobs its agents run the same
+            way every time, each an ordered run of named tools. Absent or empty
+            = it has none. What each one does stays on the host.
+          items:
+            type: string
 
     RoleSource:
       description: |

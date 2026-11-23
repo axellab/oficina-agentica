@@ -18,6 +18,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import type { RolesLoaded } from '../../../core/src/messages.js';
+import type { SkillPackaging } from '../../../core/src/provider.js';
 import {
   type AgentRole,
   agentRoleOf,
@@ -30,11 +31,17 @@ import {
 import {
   CREW_PROMPT_FILE_STEM,
   PIXEL_AGENTS_DIR,
+  ROLE_KITS_DIR_NAME,
   ROLE_PROMPTS_DIR_NAME,
   ROLES_FILE_NAME,
 } from '../constants.js';
 import { BUILTIN_ROLES } from './builtinRoles.js';
-import { composeCrewPrompt, composeRolePrompt, type CrewTerms } from './rolePrompt.js';
+import {
+  composeCrewPrompt,
+  composeRolePrompt,
+  type CrewTerms,
+  type PlaybookSkillName,
+} from './rolePrompt.js';
 
 const LOG_PREFIX = '[Pixel Agents] Roles:';
 
@@ -44,6 +51,10 @@ function rolesFilePath(): string {
 
 function rolePromptsDir(): string {
   return path.join(os.homedir(), PIXEL_AGENTS_DIR, ROLE_PROMPTS_DIR_NAME);
+}
+
+function roleKitsDir(): string {
+  return path.join(os.homedir(), PIXEL_AGENTS_DIR, ROLE_KITS_DIR_NAME);
 }
 
 /** What the catalog was last built from: the file's path and, when it exists,
@@ -144,8 +155,45 @@ function writeRolePrompt(
   role: CatalogRole,
   catalog: readonly CatalogRole[],
   crew?: CrewTerms,
+  playbookSkill?: PlaybookSkillName,
 ): string {
-  return writePrompt(crew ? `${role.id}.crew` : role.id, composeRolePrompt(role, catalog, crew));
+  return writePrompt(
+    crew ? `${role.id}.crew` : role.id,
+    composeRolePrompt(role, catalog, crew, playbookSkill),
+  );
+}
+
+/**
+ * The Role's Playbooks where the coding agent loads them from: one skill each,
+ * in a plugin named after the Role, in the provider's own layout. The folder
+ * is named by what it holds (`<role id>-<hash>`), so a Role whose Playbooks
+ * changed gets a folder of its own and a running agent keeps reading the ones
+ * it was launched with: nothing here is ever rewritten with other content, or
+ * removed. Undefined for a Role with no Playbooks. Throws when it can't be
+ * written.
+ */
+export function writeRolePlaybooks(skills: SkillPackaging, role: CatalogRole): string | undefined {
+  const playbooks = role.playbooks ?? [];
+  if (playbooks.length === 0) return undefined;
+  const hash = crypto
+    .createHash('sha256')
+    .update(JSON.stringify([role.id, role.name, role.description, playbooks]))
+    .digest('hex')
+    .slice(0, 12);
+  const dir = path.join(roleKitsDir(), `${role.id}-${hash}`);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  let folder = dir;
+  for (const playbook of playbooks) {
+    folder = skills.write(dir, {
+      plugin: role.id,
+      pluginDescription: `${role.name}: ${role.description}`,
+      id: playbook.id,
+      description: playbook.description,
+      title: playbook.name,
+      instructions: playbook.instructions,
+    });
+  }
+  return folder;
 }
 
 /** What launching an agent as a Role adds to the launch. */
@@ -157,6 +205,10 @@ export interface RoleLaunch {
   appendSystemPromptFile: string;
   /** The model the Role runs on, when it names one. */
   model?: string;
+  /** The plugin folder holding the Role's Playbooks as skills
+   *  (`buildLaunchCommand`'s `pluginDirs`), when it has any and the coding
+   *  agent takes skills. */
+  pluginDir?: string;
 }
 
 /**
@@ -166,9 +218,16 @@ export interface RoleLaunch {
  * remembers), or its instructions could not be written. The last two are
  * logged; the agent still launches, plainly without a Role, which the office
  * shows -- refusing the launch would show nothing at all. With `crew`, the
- * instructions are the ones of that Role in a Crew.
+ * instructions are the ones of that Role in a Crew. With `skills` (how the
+ * coding agent is handed a skill), the Role's Playbooks are written as skills
+ * and its instructions name them; Playbooks that could not be written are
+ * logged and left out, and the agent launches as the Role without them.
  */
-export function prepareRoleLaunch(roleId: unknown, crew?: CrewTerms): RoleLaunch | undefined {
+export function prepareRoleLaunch(
+  roleId: unknown,
+  crew?: CrewTerms,
+  skills?: SkillPackaging,
+): RoleLaunch | undefined {
   if (roleId === undefined || roleId === null) return undefined;
   if (!isRoleId(roleId)) {
     console.warn(`${LOG_PREFIX} launch named an invalid role id; launching without a role`);
@@ -180,12 +239,27 @@ export function prepareRoleLaunch(roleId: unknown, crew?: CrewTerms): RoleLaunch
     console.warn(`${LOG_PREFIX} no role "${roleId}" on this host; launching without a role`);
     return undefined;
   }
+  // The Playbooks first: the instructions name them only once they are there.
+  let pluginDir: string | undefined;
+  let playbookSkill: PlaybookSkillName | undefined;
+  if (skills) {
+    try {
+      pluginDir = writeRolePlaybooks(skills, role);
+      playbookSkill = (plugin, id) => skills.skillName(plugin, id);
+    } catch (err) {
+      console.error(
+        `${LOG_PREFIX} cannot write the playbooks of "${roleId}"; launching without them:`,
+        err,
+      );
+    }
+  }
   try {
     const launch: RoleLaunch = {
       role: agentRoleOf(role),
-      appendSystemPromptFile: writeRolePrompt(role, catalog, crew),
+      appendSystemPromptFile: writeRolePrompt(role, catalog, crew, playbookSkill),
     };
     if (role.model !== undefined) launch.model = role.model;
+    if (pluginDir !== undefined) launch.pluginDir = pluginDir;
     return launch;
   } catch (err) {
     console.error(
@@ -201,10 +275,12 @@ export function prepareRoleLaunch(roleId: unknown, crew?: CrewTerms): RoleLaunch
  * the Crew's terms), written where the coding agent reads them: the path, or
  * undefined when they could not be written (logged; the agent still launches
  * and the server still holds it to the Crew's limits, it is only not told them).
+ * `playbooks`: the Roles are handed theirs (the coding agent takes skills), so
+ * the roster says which each one runs.
  */
-export function prepareCrewPrompt(crew: CrewTerms): string | undefined {
+export function prepareCrewPrompt(crew: CrewTerms, playbooks = false): string | undefined {
   try {
-    return writePrompt(CREW_PROMPT_FILE_STEM, composeCrewPrompt(roleCatalog(), crew));
+    return writePrompt(CREW_PROMPT_FILE_STEM, composeCrewPrompt(roleCatalog(), crew, playbooks));
   } catch (err) {
     console.error(`${LOG_PREFIX} cannot write a Crew's instructions:`, err);
     return undefined;
