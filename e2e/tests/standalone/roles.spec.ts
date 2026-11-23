@@ -98,13 +98,15 @@ test.describe('Standalone / roles', () => {
     // No Role until one is picked: a plain launch stays what it always was.
     await expect(rolePicker(drawer)).toHaveAccessibleName('Role: None');
 
-    // The Role row swaps the Directories for the Roles: "None", then the team.
+    // The Role row swaps the Directories for the Roles: "None", then the team
+    // (a Role added beside the team's, `npm run new-role`, is listed after it).
     await rolePicker(drawer).click();
-    await expect(drawer.getByTestId('role-option')).toHaveCount(BUILTIN_ROLE_NAMES.length + 1);
-    await expect(drawer.getByTestId('role-option-name')).toHaveText([
-      'None',
-      ...BUILTIN_ROLE_NAMES,
-    ]);
+    const listed = ['None', ...BUILTIN_ROLE_NAMES];
+    await expect
+      .poll(async () =>
+        (await drawer.getByTestId('role-option-name').allTextContents()).slice(0, listed.length),
+      )
+      .toEqual(listed);
     await rolePicker(drawer).click();
 
     await pickRole(drawer, 'QA Engineer');
@@ -168,11 +170,16 @@ test.describe('Standalone / roles', () => {
 
     const drawer = await openLaunchDrawer(page);
     await rolePicker(drawer).click();
-    await expect(drawer.getByTestId('role-option-name')).toHaveText([
+    const names = drawer.getByTestId('role-option-name');
+    const team = [
       'None',
       ...BUILTIN_ROLE_NAMES.map((name) => (name === 'Developer' ? 'Rust Developer' : name)),
-      'Technical Writer',
-    ]);
+    ];
+    await expect
+      .poll(async () => (await names.allTextContents()).slice(0, team.length))
+      .toEqual(team);
+    // The user's own Role is listed after every built-in one.
+    await expect(names.last()).toHaveText('Technical Writer');
     // A Role of the user's own has no Playbooks and says nothing of them; a
     // built-in one they changed keeps its own.
     const writer = drawer.locator('[data-testid="role-option"][data-role-id="technical-writer"]');
@@ -245,15 +252,13 @@ test.describe('Standalone / roles', () => {
       'title',
       /\nPlaybooks: Safe refactor, Dependency upgrade\.$/,
     );
-    await expect(drawer.getByTestId('role-playbooks')).toHaveText([
-      '2',
-      '2',
-      '2',
-      '3',
-      '2',
-      '2',
-      '2',
-    ]);
+    // In the team's order (a Role added beside the team's counts its own after these).
+    const counts = ['2', '2', '2', '3', '2', '2', '2'];
+    await expect
+      .poll(async () =>
+        (await drawer.getByTestId('role-playbooks').allTextContents()).slice(0, counts.length),
+      )
+      .toEqual(counts);
     await rolePicker(drawer).click();
 
     await pickRole(drawer, 'DevSecOps Engineer');

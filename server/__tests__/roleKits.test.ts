@@ -29,12 +29,14 @@ import {
   parseRoleFile,
   parseWorkflowFile,
 } from '../src/roles/kitFormat.js';
+import { roleKitProblems } from '../src/roles/kitRules.js';
 import { prepareRoleLaunch } from '../src/roles/roleCatalog.js';
 import { builtinRoleKits, findRoleKitsDir, readRoleKits } from '../src/roles/roleKits.js';
 import { composeCrewPrompt, composeRolePrompt } from '../src/roles/rolePrompt.js';
 import { FEATURE_GUIDE } from '../src/tutorial/featureGuide.js';
 import { BUILTIN_WORKFLOWS } from '../src/workflows/builtinWorkflows.js';
 import { clearTestHome, removeTempDir } from './helpers/removeTempDir.js';
+import { isTeamRole, TEAM_ROLE_IDS } from './helpers/teamRoles.js';
 
 /**
  * A Role's folder: its definition, its Contract, its Playbooks and the
@@ -461,15 +463,12 @@ describe('the Roles that ship', () => {
   });
 
   it('are the seven of the team, in the order the office lists them', () => {
-    expect(BUILTIN_ROLES.map((role) => role.id)).toEqual([
-      'architect',
-      'developer',
-      'qa-engineer',
-      'devsecops-engineer',
-      'security-engineer',
-      'cloud-engineer',
-      'agile-project-manager',
-    ]);
+    expect(BUILTIN_ROLES.map((role) => role.id).filter(isTeamRole)).toEqual(TEAM_ROLE_IDS);
+  });
+
+  it('are built by the house rules, every one and any Role added beside them', () => {
+    // No list of Roles here: a folder added under roles/ is held to the same.
+    expect(roleKitProblems(builtinRoleKits())).toEqual([]);
   });
 
   it('each has a Contract: what it accepts, delivers, when it is done, what it never does, whom it hands to', () => {
@@ -510,7 +509,7 @@ describe('the Roles that ship', () => {
   });
 
   it('every Role has its Playbooks, each naming the tools it runs and saying when to run it', () => {
-    const table = BUILTIN_ROLES.flatMap((role) =>
+    const table = BUILTIN_ROLES.filter((role) => isTeamRole(role.id)).flatMap((role) =>
       (role.playbooks ?? []).map((p) => [role.id, p.id, p.name, p.tools]),
     );
     expect(table).toEqual([
@@ -685,7 +684,9 @@ describe('the Roles that ship', () => {
   it('are in the feature guide: the Contract, and every Playbook by name', () => {
     const topic = FEATURE_GUIDE.find((candidate) => candidate.id === 'roles')!;
     expect(topic.body).toContain('Contract');
-    for (const role of BUILTIN_ROLES) {
+    // The guide is prose about the team that ships: a Role added beside it is
+    // listed by list_roles, with its Playbooks.
+    for (const role of BUILTIN_ROLES.filter((candidate) => isTeamRole(candidate.id))) {
       for (const { name } of role.playbooks ?? []) expect(topic.body).toContain(name);
     }
     expect(topic.body).toContain('/devsecops-engineer:pipeline-troubleshooting');

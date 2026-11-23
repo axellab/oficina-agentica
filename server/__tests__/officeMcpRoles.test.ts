@@ -17,6 +17,7 @@ import { getCharacterProfiles } from '../src/characterProfilesStore.js';
 import { agentLabel, messageTag } from '../src/mcp/agentLabel.js';
 import { BUILTIN_ROLES } from '../src/roles/builtinRoles.js';
 import { type Json, useStandaloneOffice, waitFor } from './helpers/officeMcpHarness.js';
+import { isTeamRole, TEAM_ROLE_IDS } from './helpers/teamRoles.js';
 
 const ESC = '\x1b';
 const RESUMED = '3b1d5c7e-2a4f-4e6b-9c8d-0f1e2d3c4b5a';
@@ -83,15 +84,7 @@ describe('Roles through the Pixel Office MCP (composed server, mock-claude in a 
     const plain = await fromDrawer();
 
     const listed = await roles(manager.client);
-    expect(listed.map((role) => role.id)).toEqual([
-      'architect',
-      'developer',
-      'qa-engineer',
-      'devsecops-engineer',
-      'security-engineer',
-      'cloud-engineer',
-      'agile-project-manager',
-    ]);
+    expect(listed.map((role) => role.id).filter(isTeamRole)).toEqual(TEAM_ROLE_IDS);
     const byId = new Map(listed.map((role) => [role.id as string, role]));
     expect(byId.get('agile-project-manager')).toEqual({
       id: 'agile-project-manager',
@@ -170,7 +163,9 @@ describe('Roles through the Pixel Office MCP (composed server, mock-claude in a 
     const topic = await h.callJson(caller.client, 'get_feature_guide', { topic: 'roles' });
     expect(topic.title).toMatch(/^Roles/);
     // The guide is prose, the catalog is data: a Role added to the team must be added here too.
-    for (const role of BUILTIN_ROLES) expect(topic.body).toContain(role.name);
+    for (const role of BUILTIN_ROLES.filter((candidate) => isTeamRole(candidate.id))) {
+      expect(topic.body).toContain(role.name);
+    }
     for (const tool of ['list_roles', 'list_agents', 'send_message', 'launch_agent']) {
       expect(topic.body).toContain(tool);
     }

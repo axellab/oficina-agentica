@@ -116,8 +116,9 @@ test.describe('Standalone / workflows', () => {
     await workflowPicker(drawer).click();
     const options = drawer.getByTestId('workflow-option');
     // "None", then the Workflows the office ships with, under the Role that
-    // leads each: the coordinator's first, then each Role's own.
-    await expect(options).toHaveText([
+    // leads each: the coordinator's first, then each Role's own (a Role added
+    // beside the team's, `npm run new-role`, lists its own after these).
+    const shipped = [
       'None',
       'New feature',
       'Bug fix',
@@ -137,8 +138,11 @@ test.describe('Standalone / workflows', () => {
       'Vulnerability review',
       'Infrastructure review',
       'Cost review',
-    ]);
-    await expect(drawer.getByTestId('workflow-group-lead')).toHaveText([
+    ];
+    await expect
+      .poll(async () => (await options.allTextContents()).slice(0, shipped.length))
+      .toEqual(shipped);
+    const leads = [
       'Agile Project Manager',
       'Architect',
       'Developer',
@@ -146,7 +150,12 @@ test.describe('Standalone / workflows', () => {
       'DevSecOps Engineer',
       'Security Engineer',
       'Cloud Engineer',
-    ]);
+    ];
+    await expect
+      .poll(async () =>
+        (await drawer.getByTestId('workflow-group-lead').allTextContents()).slice(0, leads.length),
+      )
+      .toEqual(leads);
     await drawer.locator('[data-testid="workflow-option"][data-workflow-id="bug-fix"]').click();
     await expect(workflowPicker(drawer)).toHaveAccessibleName('Workflow: Bug fix');
 

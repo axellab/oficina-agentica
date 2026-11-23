@@ -339,6 +339,8 @@ Run your Pipeline troubleshooting playbook, steps 1 to 4. ... Closed when all of
 
 A stage's heading is `## <step>. <Title> (<role id>)`: stages with the same step number run at the same time, and steps count up from 1 without a gap. The stage's id is its title in lower case with hyphens (`pipeline-change`), or the one the heading gives at its end (`{#pipeline}`). The limits are the same as in `workflows.json` below, which is also how you replace one of these or add your own without touching the repository.
 
+A Role added to the repository with `npm run new-role` starts with a Workflow of its own, in its folder ([Adding a Role](roles.md#adding-a-role)). `npm run check-roles` holds every Workflow in `roles/` to the same rules: each stage owned by a Role there is, each saying what closes it, and a last stage that is its lead's report.
+
 ## Your own Workflows: `workflows.json`
 
 Create `~/.pixel-agents/workflows.json` to add a Workflow or replace a built-in one.

@@ -48,6 +48,7 @@ import {
 import { initialStages, isRunFinished, moveStage } from '../src/workflows/workflowProgress.js';
 import { Workflows } from '../src/workflows/workflows.js';
 import { clearTestHome } from './helpers/removeTempDir.js';
+import { isTeamRole } from './helpers/teamRoles.js';
 
 const ROLE_IDS = new Set(BUILTIN_ROLES.map((role) => role.id));
 
@@ -246,7 +247,9 @@ describe('the built-in Workflows', () => {
   });
 
   it('each other Role leads the Workflows that are its own job', () => {
-    const own = BUILTIN_WORKFLOWS.filter((w) => w.lead !== 'agile-project-manager');
+    const own = BUILTIN_WORKFLOWS.filter(
+      (w) => w.lead !== 'agile-project-manager' && isTeamRole(w.lead),
+    );
     expect(own.map((w) => [w.lead, w.id, w.name])).toEqual([
       ['architect', 'architecture-review', 'Architecture review'],
       ['architect', 'technical-design', 'Technical design'],
@@ -301,10 +304,11 @@ describe('the built-in Workflows', () => {
   it('are all in the feature guide, stage by stage', () => {
     const topic = FEATURE_GUIDE.find((candidate) => candidate.id === 'workflows')!;
     expect(topic.title).toMatch(/^Workflows/);
-    // The guide is prose, the catalog is data: a Workflow or a stage added
-    // here must be added there too.
+    // The guide is prose, the catalog is data: a Workflow or a stage added to
+    // the team's must be added there too (one a Role added beside the team
+    // leads is listed by the office, not by the guide).
     const body = topic.body.toLowerCase();
-    for (const workflow of BUILTIN_WORKFLOWS) {
+    for (const workflow of BUILTIN_WORKFLOWS.filter((w) => isTeamRole(w.lead))) {
       expect(topic.body).toContain(workflow.name);
       for (const stage of workflow.stages) expect(body).toContain(stage.title.toLowerCase());
     }
