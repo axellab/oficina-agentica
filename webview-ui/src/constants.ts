@@ -378,8 +378,15 @@ export const CARD_ROLE_STRIP_HEIGHT_PX = 3;
 // ── Crews ───────────────────────────────────────────────────────
 /** The Crew panel's width once opened, in CSS px (the tutorial checklist's). */
 export const CREW_PANEL_WIDTH_PX = 280;
-/** Space between the tutorial's checklist and the Crew panel under it, in CSS px. */
-export const CREW_PANEL_GAP_PX = 4;
+/** Space between the office's top-right panels (the tutorial's checklist, the Crews), in CSS px. */
+export const OFFICE_PANELS_GAP_PX = 4;
+/** Space between those panels and the office's right edge, in CSS px. */
+export const OFFICE_PANELS_EDGE_PX = 8;
+/** Room their column leaves at the office's foot, in CSS px: clear of the
+ *  toolbar and the radio there, which would cover a panel's last buttons. */
+export const OFFICE_PANELS_FOOT_ROOM_PX = 72;
+/** Room kept inside their scrolling column for a panel's hard shadow, in CSS px. */
+export const OFFICE_PANELS_SHADOW_PX = 2;
 /** How far an agent is set in under the one that launched it, per level, in CSS px. */
 export const CREW_MEMBER_INDENT_PX = 10;
 /** The deepest level drawn set in: a longer chain stays at this one. */

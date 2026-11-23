@@ -52,8 +52,19 @@ export interface CrewLaunch {
 /** A place in a Crew held for a launch under way. */
 export interface CrewPlace {
   launch: CrewLaunch;
-  /** The launch settled, its agent in the office or not: the place is no longer held. */
+  /**
+   * The launch is over. A place is the agent's own from the moment it joins
+   * the office (counted once, as a member), so this gives back only the place
+   * of a launch that brought no agent into the Crew: call it when the launch
+   * itself has ended, not when its caller stopped waiting for it.
+   */
   done(): void;
+}
+
+/** A place held for a launch that has not brought its agent yet. */
+interface HeldPlace {
+  /** Who asked for the launch: what its agent will carry. */
+  launchedBy: number | undefined;
 }
 
 /** What one agent of a Crew does to another agent. */
@@ -66,8 +77,9 @@ interface CrewRecord {
   ended: boolean;
   /** Its agents in the office. */
   members: Set<number>;
-  /** Launches under way that will add an agent. */
-  pending: number;
+  /** The places of launches under way, oldest first: each becomes its agent's
+   *  when the agent joins, or is given back when its launch brought none. */
+  places: HeldPlace[];
   events: CrewEvent[];
 }
 
@@ -183,7 +195,7 @@ export class Crews {
           'The user ended your Crew, so you can no longer launch agents. Tell the user what you need: they can launch it from the office.',
       };
     }
-    const size = this.membersOf(record).length + record.pending;
+    const size = this.membersOf(record).length + record.places.length;
     if (size >= this.maxAgents) {
       return {
         ok: false,
@@ -238,8 +250,19 @@ export class Crews {
   promptProblem(caller: number, target: number): string | null {
     const { store } = this.deps;
     if (!store.get(caller)?.crew) return null;
-    if (!store.get(target)?.permissionSent) return null;
-    return `Agent ${target} is waiting for the user to allow something. Only the user answers that: leave it, and carry on with what does not depend on it.`;
+    const leaveIt =
+      'Only the user answers that: leave it, and carry on with what does not depend on it.';
+    if (store.get(target)?.permissionSent) {
+      return `Agent ${target} is waiting for the user to allow something. ${leaveIt}`;
+    }
+    // A Teammate's prompt opens in its Lead's terminal, and it is the Teammate
+    // that is marked as waiting (hookEventHandler's handlePermissionRequest).
+    for (const [id, agent] of store) {
+      if (agent.leadAgentId === target && agent.permissionSent) {
+        return `Agent ${target}'s terminal is where its Teammate, agent ${id}, is waiting for the user to allow something. ${leaveIt}`;
+      }
+    }
+    return null;
   }
 
   // ── The panel's events ────────────────────────────────────
@@ -312,7 +335,7 @@ export class Crews {
       order: this.nextOrder++,
       ended,
       members: new Set(),
-      pending: 0,
+      places: [],
       events: [],
     };
     this.records.set(id, record);
@@ -320,17 +343,17 @@ export class Crews {
   }
 
   private hold(record: CrewRecord, launchedBy: number | undefined): CrewPlace {
-    record.pending++;
-    let held = true;
+    const place: HeldPlace = { launchedBy };
+    record.places.push(place);
     return {
       launch: {
         crew: launchedBy === undefined ? { id: record.id } : { id: record.id, launchedBy },
         maxAgents: this.maxAgents,
       },
       done: () => {
-        if (!held) return;
-        held = false;
-        record.pending--;
+        const at = record.places.indexOf(place);
+        if (at < 0) return; // Its agent took it, or it was given back already.
+        record.places.splice(at, 1);
         this.forgetIfEmpty(record);
       },
     };
@@ -346,6 +369,11 @@ export class Crews {
     if (crew.ended && !record.ended) record.ended = true;
     if (record.ended && !crew.ended) agent.crew = { ...crew, ended: true };
     record.members.add(id);
+    // The place its launch held is the agent itself from here on: counted once,
+    // whatever its launch still waits for (two launches by one agent are told
+    // apart by nothing that matters to the count, so the oldest goes).
+    const held = record.places.findIndex((place) => place.launchedBy === crew.launchedBy);
+    if (held >= 0) record.places.splice(held, 1);
     return true;
   }
 
@@ -360,6 +388,6 @@ export class Crews {
 
   /** A Crew is kept until its last agent left (and no launch is bringing one). */
   private forgetIfEmpty(record: CrewRecord): void {
-    if (record.pending === 0 && record.members.size === 0) this.records.delete(record.id);
+    if (record.places.length === 0 && record.members.size === 0) this.records.delete(record.id);
   }
 }

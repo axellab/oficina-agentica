@@ -276,7 +276,7 @@ This section is auto-generated. Do not edit between the markers; CI fails on dri
 - `e2e/standalone/conversations.spec.ts:231` — a Directory added or deleted gains or loses its section at once, no reload (Standalone / conversation sidebar)
 - `e2e/standalone/conversations.spec.ts:260` — the sidebar starts shut, opens from its button and stays as it was left (Standalone / conversation sidebar, as a new browser finds it)
 - `e2e/standalone/crews.spec.ts:54` — a Crew: its first agent launches a colleague without asking, the office marks both and says who launched whom, and End Crew stops it (Standalone / crews)
-- `e2e/standalone/crews.spec.ts:182` — the Crew switch stays off and says what it needs; the launch is a plain agent (Standalone / crews without the Pixel Office MCP)
+- `e2e/standalone/crews.spec.ts:188` — the Crew switch stays off and says what it needs; the launch is a plain agent (Standalone / crews without the Pixel Office MCP)
 - `e2e/standalone/directory-modal.spec.ts:45` — Enter on Cancel cancels and Enter on an Area toggles it; neither saves (Standalone / Directory modal keyboard)
 - `e2e/standalone/directory-modal.spec.ts:79` — Enter in the path field saves (Standalone / Directory modal keyboard)
 - `e2e/standalone/directory-modal.spec.ts:100` — an unnamed Directory keeps its Area under the name the host gave it (Standalone / Directory Area mapping)

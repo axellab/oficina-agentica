@@ -16,10 +16,6 @@ interface TutorialPanelProps {
   onSkip: (questId: string) => void;
   /** End the run (the server closes the Guide's session). */
   onQuit: () => void;
-  /** Pixels kept clear at the office's right edge (the desktop card bar overlaps it). */
-  rightInset: number;
-  /** Pixels from the office's top. */
-  top: number;
 }
 
 /** The panel's border (pixel-panel: 2px), inside the card's height. */
@@ -54,13 +50,13 @@ function QuestBox({ state }: { state: string }) {
 type Phase = 'shown' | 'fading' | 'gone';
 
 /**
- * The tutorial's checklist, top-right of the office while a run is under way:
- * its few first steps, in any order. Pressing one shows what to do and Skip;
+ * The tutorial's checklist, first of the office's top-right panels
+ * (`OfficePanels`) while a run is under way: its few first steps, in any order. Pressing one shows what to do and Skip;
  * Quit is asked once, since it closes the Guide's session. Collapsed to its
  * header until opened: the tour itself is the Guide's conversation. Once every
  * quest is done or skipped it says so, then fades away; the Guide stays.
  */
-export function TutorialPanel({ run, onSkip, onQuit, rightInset, top }: TutorialPanelProps) {
+export function TutorialPanel({ run, onSkip, onQuit }: TutorialPanelProps) {
   const [collapsed, setCollapsed] = useState(true);
   const [confirmQuit, setConfirmQuit] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -86,12 +82,10 @@ export function TutorialPanel({ run, onSkip, onQuit, rightInset, top }: Tutorial
 
   return (
     <div
-      className="absolute z-20 pixel-panel px-10 text-sm"
+      className="shrink-0 pointer-events-auto pixel-panel px-10 text-sm"
       style={{
-        top,
-        right: 8 + rightInset,
         width: 280,
-        maxWidth: 'calc(100% - 32px)',
+        maxWidth: '100%',
         opacity: phase === 'fading' ? 0 : 1,
         transition: `opacity ${TUTORIAL_COMPLETE_FADE_MS}ms`,
       }}

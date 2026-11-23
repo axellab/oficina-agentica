@@ -15,7 +15,10 @@
  * On every surface, an agent of a Crew (server/src/crews.ts) reads and
  * messages only its Crew's agents, and never types into one waiting on a
  * permission prompt: its send_message runs without the user being asked, so
- * the user's own answers are kept out of its reach here.
+ * the user's own answers are kept out of its reach here. Both are looked at
+ * again at every write (`Withheld`): a Message waits its turn behind another
+ * and its keys land one at a time, and the user may end the Crew, or a prompt
+ * may open, meanwhile.
  */
 
 import type { AgentMessageShow } from '../../../core/src/messages.js';
@@ -125,6 +128,9 @@ export function turnGuard(
   };
 }
 
+/** A write a Crew's limits stopped: its message is the refusal, as it is. */
+class Withheld extends Error {}
+
 /** Why an agent's terminal can't be read or typed into. */
 function noTerminalReason(agent: AgentState): string {
   if (agent.leadAgentId !== undefined) {
@@ -185,20 +191,38 @@ export function createMessaging(
     return oneAtATime(id, async () => {
       const checked = await guard.check(to, content);
       if (!checked.ok) return refused(checked.reason, checked.screen);
-      const usersToAnswer = crews.promptProblem(from, id);
-      if (usersToAnswer) return refused(usersToAnswer);
-      const write = (bytes: string) => terminals.write(id, bytes);
+      // What a Crew's agent is held to, as it stands NOW: asked again here (the
+      // Message may have waited behind another) and before every write below.
+      const withheld = (): string | null =>
+        crews.reachProblem(from, id, 'message') ?? crews.promptProblem(from, id);
+      const stopped = withheld();
+      if (stopped) return refused(stopped);
+      let writes = 0;
+      const write = (bytes: string): void => {
+        const notNow = withheld();
+        if (notNow) throw new Withheld(notNow);
+        terminals.write(id, bytes);
+        writes++;
+      };
       const typed = async (input: Parameters<typeof typeInto>[1]): Promise<string | null> => {
         try {
           await typeInto(write, input, checked.modes);
           return null;
         } catch (err) {
+          if (err instanceof Withheld) return err.message;
           return `Typing into agent ${id}'s terminal failed (${String(err)}): it may have just exited. Check list_agents and try again.`;
         }
       };
       if (!('text' in content)) {
         const failed = await typed(content);
-        return failed ? refused(failed) : { id, delivered: true };
+        if (!failed) return { id, delivered: true };
+        // Keys land one write each: say how far they got before they stopped.
+        const total = content.keys.length;
+        return refused(
+          writes > 0 && writes < total
+            ? `${failed} (${writes} of your ${total} keys were typed before that.)`
+            : failed,
+        );
       }
       const sender = store.get(from);
       const failed = await typed({
@@ -209,7 +233,7 @@ export function createMessaging(
       if (!content.submit) return { id, delivered: true };
       // Its own write, after the paste has landed: see MESSAGE_SUBMIT_DELAY_MS.
       await pause(MESSAGE_SUBMIT_DELAY_MS);
-      const notNow = guard.beforeSubmit(id) ?? crews.promptProblem(from, id);
+      const notNow = guard.beforeSubmit(id) ?? withheld();
       if (notNow) {
         return refused(`Your text was typed into agent ${id}'s input but not submitted: ${notNow}`);
       }

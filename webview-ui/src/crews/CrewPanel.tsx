@@ -20,24 +20,21 @@ interface CrewPanelProps {
   maxAgents: number;
   /** End a Crew. Absent where this office may not (a view-only one). */
   onEnd?: (crewId: string) => void;
-  /** Pixels kept clear at the office's right edge (the desktop card bar overlaps it). */
-  rightInset: number;
-  /** Pixels from the office's top. */
-  top: number;
 }
 
 /** The panel's border (pixel-panel: 2px), inside the card's height. */
 const BORDER_PX = 2;
 
 /**
- * The Crews, top-right of the office while one has agents: who is in each
- * (every agent under the one that launched it), what they did to each other
- * lately, and End Crew, asked once since it cannot be taken back. Collapsed to
- * its header until opened, when it is as tall as an agent card, like the
- * tutorial's checklist it sits under. The office itself shows the rest: a
- * launch and a Message are a walk over to the other agent's desk.
+ * The Crews, among the office's top-right panels (`OfficePanels`) while one
+ * has agents: who is in each (every agent under the one that launched it),
+ * what they did to each other lately, and End Crew, asked once since it cannot
+ * be taken back. Collapsed to its header until opened, when it is as tall as
+ * an agent card, like the tutorial's checklist it sits under. The office
+ * itself shows the rest: a launch and a Message are a walk over to the other
+ * agent's desk.
  */
-export function CrewPanel({ crews, maxAgents, onEnd, rightInset, top }: CrewPanelProps) {
+export function CrewPanel({ crews, maxAgents, onEnd }: CrewPanelProps) {
   const [collapsed, setCollapsed] = useState(true);
   if (crews.length === 0) return null;
   const single = crews.length === 1 ? crews[0] : undefined;
@@ -45,13 +42,8 @@ export function CrewPanel({ crews, maxAgents, onEnd, rightInset, top }: CrewPane
 
   return (
     <div
-      className="absolute z-19 pixel-panel px-10 text-sm"
-      style={{
-        top,
-        right: 8 + rightInset,
-        width: collapsed ? undefined : CREW_PANEL_WIDTH_PX,
-        maxWidth: 'calc(100% - 32px)',
-      }}
+      className="shrink-0 pointer-events-auto pixel-panel px-10 text-sm"
+      style={{ width: collapsed ? undefined : CREW_PANEL_WIDTH_PX, maxWidth: '100%' }}
       data-testid="crew-panel"
     >
       <div

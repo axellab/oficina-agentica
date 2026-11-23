@@ -155,9 +155,15 @@ test.describe('Standalone / crews', () => {
     await expect(launched).toContainText('launched');
     await expect(launched).toContainText(firstMessage);
 
-    // End Crew is asked once; the agents stay, without the mark.
+    // End Crew stays within reach in an office too short for the opened panel:
+    // the panels' column ends above the toolbar at the office's foot, and scrolls.
+    const viewport = page.viewportSize()!;
+    await page.setViewportSize({ width: viewport.width, height: 200 });
     await panel.getByRole('button', { name: 'End Crew' }).click();
     await expect(panel).toContainText('End this Crew?');
+    await page.setViewportSize(viewport);
+
+    // It is asked once; the agents stay, without the mark.
     await panel.getByRole('button', { name: 'End Crew' }).click();
     await expect(panel.getByTestId('crew')).toHaveAttribute('data-ended', 'true');
     await expect(page.getByTestId('card-crew')).toHaveCount(0);

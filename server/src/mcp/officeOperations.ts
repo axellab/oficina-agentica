@@ -407,7 +407,16 @@ export interface AgentLaunch extends Omit<
 }
 
 /** How the surface's launch went: the agent, joined, or why not. */
-export type AgentLaunchOutcome = { ok: true; id: number } | { ok: false; reason: string };
+export type AgentLaunchOutcome =
+  | { ok: true; id: number }
+  | {
+      ok: false;
+      reason: string;
+      /** Set when the answer did not wait for the launch to end (it outlived
+       *  its deadline): the launch itself, which may still bring its agent.
+       *  Settles, never rejecting, once it has or has given up. */
+      underway?: Promise<void>;
+    };
 
 /** What launch_agent answers. */
 export type OfficeLaunchResult =

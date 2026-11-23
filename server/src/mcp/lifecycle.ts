@@ -85,7 +85,8 @@ export function createLaunching(
             notes.push(`Seat ${request.seat} is agent ${holder}'s, so the office picked another.`);
         }
       }
-      // Last, once the launch is known to be askable: the place is held until it settles.
+      // Last, once the launch is known to be askable: the place is held until
+      // its agent takes it, or the launch ends without one.
       const joining = crews.joinFor(caller);
       if (!joining.ok) return joining;
       const {
@@ -103,6 +104,7 @@ export function createLaunching(
           ? undefined
           : messageTag(caller, sender ? agentLabel(sender) : null, sender?.role?.name) +
             asks.firstMessage;
+      const release = (): void => joining.place?.done();
       let outcome: AgentLaunchOutcome;
       try {
         outcome = await launch({
@@ -112,10 +114,19 @@ export function createLaunching(
           crew: joining.place?.launch,
           asks: { ...asks, firstMessage, seatId },
         });
-      } finally {
-        joining.place?.done();
+      } catch (err) {
+        release();
+        throw err;
       }
-      if (!outcome.ok) return outcome;
+      if (!outcome.ok) {
+        // A launch that outlived its answer may still bring its agent: its
+        // place stays held until it has, or has not, so no other launch takes
+        // it meanwhile and the Crew never ends up over its limit.
+        if (outcome.underway) void outcome.underway.finally(release);
+        else release();
+        return { ok: false, reason: outcome.reason };
+      }
+      release();
       const agent = store.get(outcome.id);
       const role = agent ? roleOf(agent) : null;
       if (roleId !== undefined && role?.id !== roleId) {

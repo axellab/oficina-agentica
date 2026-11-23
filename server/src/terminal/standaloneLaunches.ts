@@ -277,12 +277,20 @@ export async function launchForOffice(
 ): Promise<AgentLaunchOutcome> {
   const deadline = Date.now() + timeoutMs;
   const seconds = Math.round(timeoutMs / 1000);
-  const late = (): AgentLaunchOutcome => ({
-    ok: false,
-    reason: `The launch didn't finish within ${seconds} s. It may still join: check list_agents.`,
-  });
-  const launched = await beforeDeadline(launchOrResume(deps, request), deadline);
-  if (launched === null) return late();
+  const launching = launchOrResume(deps, request);
+  const launched = await beforeDeadline(launching, deadline);
+  if (launched === null) {
+    return {
+      ok: false,
+      reason: `The launch didn't finish within ${seconds} s. It may still join: check list_agents.`,
+      // Whoever holds something for this launch (its place in a Crew) keeps it
+      // until the launch itself is over.
+      underway: launching.then(
+        () => undefined,
+        (err) => console.error('[Pixel Agents] Terminal: a launch failed after its reply:', err),
+      ),
+    };
+  }
   if (!launched.ok) return { ok: false, reason: launched.reason };
   const session = deps.ptyManager.get(launched.id);
   if (!session) return { ok: false, reason: `Agent ${launched.id}'s terminal is gone.` };

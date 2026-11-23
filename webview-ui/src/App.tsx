@@ -16,6 +16,7 @@ import { IntroDialog } from './components/IntroDialog.js';
 import { LoadingScene } from './components/LoadingScene.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { NewWorktreeModal } from './components/NewWorktreeModal.js';
+import { OfficePanels } from './components/OfficePanels.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { TerminalDrawer } from './components/TerminalDrawer.js';
 import { TerminalHideRibbon } from './components/TerminalHideRibbon.js';
@@ -27,10 +28,7 @@ import {
 import { WorktreeRejectedModal } from './components/WorktreeRejectedModal.js';
 import { MobileZoomLevel, ZoomControls } from './components/ZoomControls.js';
 import {
-  AGENT_CARD_HEIGHT_PX,
-  CARD_BAR_TOP_PX,
   CONVERSATION_SIDEBAR_WIDTH_PX,
-  CREW_PANEL_GAP_PX,
   OFFICE_CANVAS_TEST_ID,
   TERMINAL_SIDEBAR_WIDTH_PX,
 } from './constants.js';
@@ -376,6 +374,10 @@ function App() {
   // The Crews: the agents the user set free to work together (crewStore).
   const crews = useCrews();
   const endCrew = useCallback((crewId: string) => transport.send({ type: 'endCrew', crewId }), []);
+  // The office's top-right panels (OfficePanels): the tutorial's checklist
+  // while a run is under way, the Crews while one has agents.
+  const tutorialRun = officeReadOnly ? undefined : tutorial.status?.run;
+  const shownCrews = crews && crews.crews.length > 0 ? crews : undefined;
   // What was on as the Intro's asks arrived (first run, Settings → Replay the
   // Intro): the choices' boxes start there.
   const [introReplay, setIntroReplay] = useState<{
@@ -764,34 +766,23 @@ function App() {
             />
           )}
 
-          {/* The tutorial's quest log, top-right (clear of the desktop card
-              bar, which overlaps the office's right edge), while a run is under way. */}
-          {tutorial.status?.run && !officeReadOnly && (
-            <TutorialPanel
-              run={tutorial.status.run}
-              onSkip={tutorial.skip}
-              onQuit={tutorial.quit}
-              rightInset={isMobile || isDebugMode ? 0 : TERMINAL_SIDEBAR_WIDTH_PX}
-              top={CARD_BAR_TOP_PX}
-            />
-          )}
-
-          {/* The Crews, top-right while one has agents: under the tutorial's
-              checklist where a run shows one (its header is a card tall). A
-              view-only office sees them and ends none. */}
-          {crews && crews.crews.length > 0 && (
-            <CrewPanel
-              crews={crews.crews}
-              maxAgents={crews.maxAgents}
-              onEnd={officeReadOnly ? undefined : endCrew}
-              rightInset={isMobile || isDebugMode ? 0 : TERMINAL_SIDEBAR_WIDTH_PX}
-              top={
-                CARD_BAR_TOP_PX +
-                (tutorial.status?.run && !officeReadOnly
-                  ? AGENT_CARD_HEIGHT_PX + CREW_PANEL_GAP_PX
-                  : 0)
-              }
-            />
+          {/* The top-right panels, one under the other (clear of the desktop
+              card bar, which overlaps the office's right edge): the tutorial's
+              quest log while a run is under way, then the Crews while one has
+              agents. A view-only office sees the Crews and ends none. */}
+          {(tutorialRun || shownCrews) && (
+            <OfficePanels rightInset={isMobile || isDebugMode ? 0 : TERMINAL_SIDEBAR_WIDTH_PX}>
+              {tutorialRun && (
+                <TutorialPanel run={tutorialRun} onSkip={tutorial.skip} onQuit={tutorial.quit} />
+              )}
+              {shownCrews && (
+                <CrewPanel
+                  crews={shownCrews.crews}
+                  maxAgents={shownCrews.maxAgents}
+                  onEnd={officeReadOnly ? undefined : endCrew}
+                />
+              )}
+            </OfficePanels>
           )}
 
           {/* Vignette overlay */}
