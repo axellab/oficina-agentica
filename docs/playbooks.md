@@ -2,13 +2,25 @@
 
 A Playbook is a procedure of a [Role](roles.md)'s: named tools run with exact commands, in order, towards one result. Where a Role's instructions say what the agent is for, a Playbook says how it does one job of its own: which commands to run, what to read in their output, what to decide from it and what to report.
 
-The DevSecOps Engineer has three today. The other Roles get theirs next.
+Every built-in Role has its own:
 
-| Playbook                     | For                                                                                                             | Tools it runs                                     |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| **Pipeline troubleshooting** | Why a GitHub Actions run fails, above all one that used to pass.                                                | `gh`, `git`, Pipeline Doctor                      |
-| **Pipeline hardening**       | Mistakes in the CI workflows and ways they could be abused, fixed on a branch.                                  | `git`, `gh`, `actionlint`, `zizmor`               |
-| **Supply chain audit**       | What the repository is built from: known vulnerabilities, unpinned dependencies, secrets in it and its history. | `git`, `osv-scanner`, `gitleaks`, `trivy`, `syft` |
+| Role                  | Playbook                     | For                                                                                                               | Tools it runs                                        |
+| --------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Architect             | **Architecture review**      | How a system is really structured against how it is meant to be: layering, coupling, the parts hardest to change. | `git`, `dependency-cruiser`                          |
+| Architect             | **Technical design**         | A goal turned into a design: the options weighed, the decision recorded as an ADR, a plan in steps.               | `git`                                                |
+| Developer             | **Safe refactor**            | The structure of code changed without changing what it does, in small steps, with tests pinning it first.         | `git`                                                |
+| Developer             | **Dependency upgrade**       | One dependency at a time, what changed between the two versions read, the checks proving nothing broke.           | `git`, `gh`, `osv-scanner`                           |
+| QA Engineer           | **Full regression**          | Every suite run the way the pipeline runs it, each failure classified against the last green run.                 | `git`, `gh`                                          |
+| QA Engineer           | **Flaky test hunt**          | The tests that pass and fail without the code changing: reproduced, their cause named, fixed at the cause.        | `git`, `gh`                                          |
+| DevSecOps Engineer    | **Pipeline troubleshooting** | Why a GitHub Actions run fails, above all one that used to pass.                                                  | `gh`, `git`, Pipeline Doctor                         |
+| DevSecOps Engineer    | **Pipeline hardening**       | Mistakes in the CI workflows and ways they could be abused, fixed on a branch.                                    | `git`, `gh`, `actionlint`, `zizmor`                  |
+| DevSecOps Engineer    | **Supply chain audit**       | What the repository is built from: known vulnerabilities, unpinned dependencies, secrets in it and its history.   | `git`, `osv-scanner`, `gitleaks`, `trivy`, `syft`    |
+| Security Engineer     | **Threat model**             | How a system, a design or a change could be attacked: assets, trust boundaries, threats ranked, their controls.   | `git`                                                |
+| Security Engineer     | **Vulnerability review**     | Static analysis and a reading of every entry point, each result judged for whether it can be exploited here.      | `git`, `semgrep`, `gitleaks`, `osv-scanner`, `trivy` |
+| Cloud Engineer        | **Infrastructure review**    | Infrastructure as code checked for mistakes, insecure settings and unreliable design. Nothing is applied.         | `git`, `terraform`, `tflint`, `checkov`, `trivy`     |
+| Cloud Engineer        | **Cost review**              | What the infrastructure in the repository costs per month, what a change adds, where money is wasted.             | `git`, `infracost`                                   |
+| Agile Project Manager | **Daily**                    | The team's daily from evidence: what each Role finished, what is next, what is blocked and who owns it.           | `git`, `gh`                                          |
+| Agile Project Manager | **Sprint planning**          | A goal and a backlog turned into stories with acceptance criteria, an owner and a size, agreed with you.          | `git`, `gh`                                          |
 
 ## How an agent gets them
 
@@ -20,11 +32,11 @@ The folder's name carries a hash of what it holds: a Playbook that changes gets 
 
 ## Running one
 
-- **Ask for the result.** "The CI run on main is red, find out why" is enough for the DevSecOps Engineer to pick up its Pipeline troubleshooting Playbook.
-- **Or name it.** In the agent's terminal, type its command: `/devsecops-engineer:pipeline-troubleshooting`, `/devsecops-engineer:pipeline-hardening` or `/devsecops-engineer:supply-chain-audit`.
-- **Or start the Workflow.** Each of the three has a [Workflow](workflows.md#the-devsecops-engineers-workflows) of the same name, led by the DevSecOps Engineer: its stages tell their owner which steps of the Playbook to run, and bring in the Developer, the QA Engineer or the Security Engineer for what is theirs.
+- **Ask for the result.** "The CI run on main is red, find out why" is enough for the DevSecOps Engineer to pick up its Pipeline troubleshooting Playbook, and "what would this change cost us per month?" for the Cloud Engineer to pick up its Cost review.
+- **Or name it.** In the agent's terminal, type its command, `/<role id>:<playbook id>`: `/devsecops-engineer:pipeline-troubleshooting`, `/security-engineer:threat-model`, `/qa-engineer:flaky-test-hunt`. The Playbook's id is its file's name.
+- **Or start the Workflow.** Every Playbook but the Daily has a [Workflow](workflows.md#the-built-in-workflows) of the same name, led by its Role: its stages tell their owner which steps of the Playbook to run, and bring in the other Roles for what is theirs. The Agile Project Manager's general Workflows send their stages' owners to Playbooks too (the Design stage of New feature to the Architect's Technical design, for one).
 
-In the launch drawer, a Role with Playbooks shows how many it has beside its name, and hovering it names them.
+In the launch drawer, each Role shows how many Playbooks it has beside its name, and hovering it names them.
 
 ![The office during a Pipeline troubleshooting run: the DevSecOps Engineer closed Evidence and Diagnosis with what it found, skipped the pipeline change, and handed the fix to the Developer it launched](images/playbook-office.png)
 
@@ -42,22 +54,56 @@ They are part of the agent's instructions, whatever the Playbook:
 
 A Playbook grants nothing: what an agent may run is still Claude Code's own permissions and your answers to its prompts.
 
+## Where a Playbook stops
+
+Beyond those rules, each Playbook that could do harm says where it stops and whose word it needs:
+
+- **Infrastructure review** never runs `terraform apply`, `destroy`, `import`, `taint` or a `state` command that writes. A `terraform plan` reads your real cloud account with your credentials, so the agent asks first, naming the account and the environment, and without your yes in so many words it reviews from the code alone.
+- **Cost review** needs no cloud credentials. Infracost needs an API key of yours: the agent never gets one for you (that opens an account), and tells you once what the tool sends before its first run.
+- **Vulnerability review** and **Threat model** look only at your own system, attack nothing and never touch production or real user data. The review runs its secret scanner redacted: a secret is reported by its file and line.
+- **Sprint planning** writes to your tracker only in its last step, and only the plan you agreed to. The **Daily** writes its notes only where you already agreed they go.
+- **Full regression** and **Flaky test hunt** never add a retry, a longer timeout or a skip to get a suite green. A full run says how long it expects to take before it starts, and the hunt asks before re-running jobs on your pipeline, which spends its minutes.
+- **Dependency upgrade** changes versions only through the package manager, one dependency per commit, and reads what a new version brings before it is installed.
+- **Safe refactor** and **Technical design** work on a branch of their own. Nothing is merged for you.
+
 ## What you need installed
 
 The agent uses what is on your `PATH`, signed in as you. None of these is installed for you.
 
-| Tool          | What the Playbooks use it for                                                | Where it comes from                     |
-| ------------- | ---------------------------------------------------------------------------- | --------------------------------------- |
-| `git`         | History, branches, what changed between two commits.                         | <https://git-scm.com>                   |
-| `gh`          | GitHub's CLI: runs, jobs, logs, pull requests. Sign in with `gh auth login`. | <https://cli.github.com>                |
-| `actionlint`  | Lints GitHub Actions workflow files.                                         | <https://github.com/rhysd/actionlint>   |
-| `zizmor`      | Audits GitHub Actions workflows for ways they can be abused.                 | <https://github.com/zizmorcore/zizmor>  |
-| `osv-scanner` | Known vulnerabilities in the dependencies, from the lock files.              | <https://github.com/google/osv-scanner> |
-| `gitleaks`    | Secrets in the files and in the history.                                     | <https://github.com/gitleaks/gitleaks>  |
-| `trivy`       | Misconfiguration, container images and licences.                             | <https://github.com/aquasecurity/trivy> |
-| `syft`        | A bill of materials (SBOM) of what the build contains.                       | <https://github.com/anchore/syft>       |
+| Tool                 | What the Playbooks use it for                                                        | Where it comes from                              |
+| -------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| `git`                | History, branches, what changed between two commits.                                 | <https://git-scm.com>                            |
+| `gh`                 | GitHub's CLI: runs, jobs, logs, pull requests, issues. Sign in with `gh auth login`. | <https://cli.github.com>                         |
+| `actionlint`         | Lints GitHub Actions workflow files.                                                 | <https://github.com/rhysd/actionlint>            |
+| `zizmor`             | Audits GitHub Actions workflows for ways they can be abused.                         | <https://github.com/zizmorcore/zizmor>           |
+| `osv-scanner`        | Known vulnerabilities in the dependencies, from the lock files.                      | <https://github.com/google/osv-scanner>          |
+| `gitleaks`           | Secrets in the files and in the history.                                             | <https://github.com/gitleaks/gitleaks>           |
+| `trivy`              | Misconfiguration, container images and licences.                                     | <https://github.com/aquasecurity/trivy>          |
+| `syft`               | A bill of materials (SBOM) of what the build contains.                               | <https://github.com/anchore/syft>                |
+| `semgrep`            | Static analysis of the code for vulnerable patterns.                                 | <https://github.com/semgrep/semgrep>             |
+| `dependency-cruiser` | The dependency rules and measures of a JavaScript or TypeScript project.             | <https://github.com/sverweij/dependency-cruiser> |
+| `terraform`          | Format and validation of infrastructure code; a plan only with your go-ahead.        | <https://developer.hashicorp.com/terraform>      |
+| `tflint`             | Lints Terraform code.                                                                | <https://github.com/terraform-linters/tflint>    |
+| `checkov`            | Insecure settings in infrastructure code.                                            | <https://github.com/bridgecrewio/checkov>        |
+| `infracost`          | A monthly cost estimate from Terraform code.                                         | <https://github.com/infracost/infracost>         |
 
-Pipeline troubleshooting needs only `git` and `gh`. Pipeline Doctor is not a program on your machine: see below.
+`git` is all the Threat model, the Technical design and the Safe refactor need; Pipeline troubleshooting, the Full regression, the Flaky test hunt, the Daily and the Sprint planning need `git` and `gh`. Pipeline Doctor is not a program on your machine: see below. `dependency-cruiser` is used only where the project already has it installed (`npx --no-install`), never downloaded. Where a project uses OpenTofu, `tofu` takes the same commands as `terraform`.
+
+### What reaches outside your machine
+
+Most steps read the files of your checkout. These are the ones that, as the Playbooks run them, go further:
+
+| Tool          | What it reaches                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gh`          | GitHub, signed in as you: it reads runs, logs, pull requests and issues. It writes only where a step says so (a re-run, the issues of an agreed sprint plan).                                                                                                                                                                                                                   |
+| `osv-scanner` | Looks your dependencies up in the OSV database by package name and version.                                                                                                                                                                                                                                                                                                     |
+| `trivy`       | Downloads its own database and checks, then scans locally.                                                                                                                                                                                                                                                                                                                      |
+| `semgrep`     | Fetches the two rule packs it runs from Semgrep's registry. Your code is analysed on your machine, and it is run with `--metrics=off`.                                                                                                                                                                                                                                          |
+| `terraform`   | Validation downloads the providers your lock file pins into the module's `.terraform` folder, and reaches no cloud account and no state. It does not fetch modules, whose sources may be private and would be read with your credentials: where they are not installed yet, validation waits. A plan does reach your account, and fetches the modules: only with your go-ahead. |
+| `checkov`     | Run with `--skip-download` and no API key, so it fetches nothing from its vendor's platform and uploads nothing.                                                                                                                                                                                                                                                                |
+| `infracost`   | Needs your API key, and prices by asking its vendor's pricing service. According to the vendor it is sent what the code declares (resource types, sizes, regions), not credentials or secrets.                                                                                                                                                                                  |
+
+Each tool's own documentation is the authority on what your version does.
 
 ## Pipeline troubleshooting and Pipeline Doctor
 

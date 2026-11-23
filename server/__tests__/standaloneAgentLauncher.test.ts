@@ -52,6 +52,12 @@ interface PtyHarness {
   spawnArgs: Array<{ file: string; args: string[]; options: PtySpawnOptions }>;
 }
 
+/** A Role's Playbooks as its agents are handed them: a folder named by the Role and a hash of its content. */
+function roleKitFolder(roleId: string): RegExp {
+  const folder = path.join(os.homedir(), '.pixel-agents', 'role-kits', `${roleId}-`);
+  return new RegExp(`^${folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[0-9a-f]{12}$`);
+}
+
 function workingPtyManager(): PtyHarness {
   const spawned: FakePty[] = [];
   const spawnArgs: PtyHarness['spawnArgs'] = [];
@@ -140,11 +146,14 @@ describe('launchStandaloneAgent', () => {
     const agent = store.get(id!);
     expect(agent?.role).toEqual({ id: 'qa-engineer', name: 'QA Engineer', color: 'green' });
     const promptFile = path.join(os.homedir(), '.pixel-agents', 'role-prompts', 'qa-engineer.md');
+    // Every built-in Role has Playbooks: its launch names the folder they were written to.
     expect(harness.spawnArgs[0].args).toEqual([
       '--session-id',
       agent?.sessionId,
       '--append-system-prompt-file',
       promptFile,
+      '--plugin-dir',
+      expect.stringMatching(roleKitFolder('qa-engineer')),
     ]);
     // Written before the process that reads it starts.
     expect(fs.readFileSync(promptFile, 'utf-8')).toContain('## Your role: QA Engineer');
@@ -174,6 +183,8 @@ describe('launchStandaloneAgent', () => {
         'opus',
         '--append-system-prompt-file',
         path.join(os.homedir(), '.pixel-agents', 'role-prompts', 'architect.md'),
+        '--plugin-dir',
+        expect.stringMatching(roleKitFolder('architect')),
       ]);
     } finally {
       fs.rmSync(rolesFile);

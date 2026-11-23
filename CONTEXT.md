@@ -69,7 +69,7 @@ The agents the user set free to work together. The user starts one from the offi
 _Avoid_: team, squad, swarm, free run, autonomous mode (a Crew frees agents towards each other, never from a CLI's own permission prompts)
 
 **Workflow**:
-How one kind of request is handled: an ordered list of stages, each owned by a Role, led by one Role. The built-in ones belong to the Role that leads them: New feature, Bug fix, Deep security analysis and Deep quality analysis are the Agile Project Manager's, and a Role may lead Workflows of its own (the DevSecOps Engineer's Pipeline troubleshooting); the user's `workflows.json` replaces them or adds others. A stage says what its owner does and what closes it; stages marked parallel run at the same time as the stage listed before them. A Workflow is a description, like a Role: it does nothing until the user starts a run of it.
+How one kind of request is handled: an ordered list of stages, each owned by a Role, led by one Role. The built-in ones belong to the Role that leads them: the general ones (New feature, Bug fix, Deep security analysis, Deep quality analysis, Sprint planning) are the Agile Project Manager's, and every other Role leads Workflows of its own (the DevSecOps Engineer's Pipeline troubleshooting, the Security Engineer's Threat model); the user's `workflows.json` replaces them or adds others. A stage says what its owner does and what closes it; stages marked parallel run at the same time as the stage listed before them. A Workflow is a description, like a Role: it does nothing until the user starts a run of it.
 _Avoid_: pipeline (that's CI), process, playbook (that's one Role's procedure), plan (an agent's own plan for its turn)
 
 **Workflow run**:

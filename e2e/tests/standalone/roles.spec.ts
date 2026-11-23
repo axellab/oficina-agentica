@@ -173,6 +173,16 @@ test.describe('Standalone / roles', () => {
       ...BUILTIN_ROLE_NAMES.map((name) => (name === 'Developer' ? 'Rust Developer' : name)),
       'Technical Writer',
     ]);
+    // A Role of the user's own has no Playbooks and says nothing of them; a
+    // built-in one they changed keeps its own.
+    const writer = drawer.locator('[data-testid="role-option"][data-role-id="technical-writer"]');
+    await expect(writer.getByTestId('role-playbooks')).toHaveCount(0);
+    await expect(writer).toHaveAttribute('title', 'Keeps the docs true.');
+    await expect(
+      drawer
+        .locator('[data-testid="role-option"][data-role-id="developer"]')
+        .getByTestId('role-playbooks'),
+    ).toHaveText('2');
     await rolePicker(drawer).click();
 
     await arrangeNextClaudeInvocation(
@@ -229,10 +239,21 @@ test.describe('Standalone / roles', () => {
       'title',
       /\nPlaybooks: Pipeline troubleshooting, Pipeline hardening, Supply chain audit\.$/,
     );
-    // A Role with none says nothing of them.
+    // Every Role of the team has its own.
     const developer = drawer.locator('[data-testid="role-option"][data-role-id="developer"]');
-    await expect(developer.getByTestId('role-playbooks')).toHaveCount(0);
-    await expect(developer).not.toHaveAttribute('title', /Playbooks/);
+    await expect(developer).toHaveAttribute(
+      'title',
+      /\nPlaybooks: Safe refactor, Dependency upgrade\.$/,
+    );
+    await expect(drawer.getByTestId('role-playbooks')).toHaveText([
+      '2',
+      '2',
+      '2',
+      '3',
+      '2',
+      '2',
+      '2',
+    ]);
     await rolePicker(drawer).click();
 
     await pickRole(drawer, 'DevSecOps Engineer');

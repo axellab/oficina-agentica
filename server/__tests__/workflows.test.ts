@@ -233,13 +233,14 @@ describe('the built-in Workflows', () => {
     expect(mergeWorkflowCatalog(BUILTIN_WORKFLOWS, [], ROLE_IDS).problems).toEqual([]);
   });
 
-  it('cover a new feature, a bug fix and the two deep analyses, led by the coordinator and listed first', () => {
+  it('cover a new feature, a bug fix, the two deep analyses and the sprint plan, led by the coordinator and listed first', () => {
     const coordinated = BUILTIN_WORKFLOWS.filter((w) => w.lead === 'agile-project-manager');
     expect(coordinated.map((w) => [w.id, w.name])).toEqual([
       ['new-feature', 'New feature'],
       ['bug-fix', 'Bug fix'],
       ['security-review', 'Deep security analysis'],
       ['quality-review', 'Deep quality analysis'],
+      ['sprint-planning', 'Sprint planning'],
     ]);
     expect(BUILTIN_WORKFLOWS.slice(0, coordinated.length)).toEqual(coordinated);
   });
@@ -247,10 +248,22 @@ describe('the built-in Workflows', () => {
   it('each other Role leads the Workflows that are its own job', () => {
     const own = BUILTIN_WORKFLOWS.filter((w) => w.lead !== 'agile-project-manager');
     expect(own.map((w) => [w.lead, w.id, w.name])).toEqual([
+      ['architect', 'architecture-review', 'Architecture review'],
+      ['architect', 'technical-design', 'Technical design'],
+      ['developer', 'safe-refactor', 'Safe refactor'],
+      ['developer', 'dependency-upgrade', 'Dependency upgrade'],
+      ['qa-engineer', 'full-regression', 'Full regression'],
+      ['qa-engineer', 'flaky-test-hunt', 'Flaky test hunt'],
       ['devsecops-engineer', 'pipeline-troubleshooting', 'Pipeline troubleshooting'],
       ['devsecops-engineer', 'pipeline-hardening', 'Pipeline hardening'],
       ['devsecops-engineer', 'supply-chain-audit', 'Supply chain audit'],
+      ['security-engineer', 'threat-model', 'Threat model'],
+      ['security-engineer', 'vulnerability-review', 'Vulnerability review'],
+      ['cloud-engineer', 'infrastructure-review', 'Infrastructure review'],
+      ['cloud-engineer', 'cost-review', 'Cost review'],
     ]);
+    // Every Role of the team leads at least one.
+    expect(new Set(BUILTIN_WORKFLOWS.map((w) => w.lead))).toEqual(ROLE_IDS);
   });
 
   it('every one ends on the report of the Role that leads it, and every stage says what closes it', () => {
@@ -266,7 +279,15 @@ describe('the built-in Workflows', () => {
   });
 
   it('the analyses change nothing and never copy a secret into a finding', () => {
-    for (const id of ['security-review', 'quality-review', 'supply-chain-audit']) {
+    for (const id of [
+      'security-review',
+      'quality-review',
+      'supply-chain-audit',
+      'threat-model',
+      'architecture-review',
+      'infrastructure-review',
+      'cost-review',
+    ]) {
       const workflow = BUILTIN_WORKFLOWS.find((w) => w.id === id)!;
       expect(workflow.brief).toMatch(/This is an analysis: nobody changes product code/);
     }

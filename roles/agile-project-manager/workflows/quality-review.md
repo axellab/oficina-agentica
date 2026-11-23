@@ -26,7 +26,7 @@ Assess the code: the hardest parts to change and why (size, complexity, duplicat
 
 ## 2. Architecture (architect)
 
-Assess the structure: boundaries that leak, dependencies that point the wrong way, modules that change together and should be one (or the reverse), and decisions the code has outgrown. Closed when each finding has its evidence.
+Run your Architecture review playbook: boundaries that leak, dependencies that point the wrong way, modules that change together and should be one (or the reverse), and decisions the code has outgrown. Closed when each finding has its evidence.
 
 ## 2. Build and pipeline (devsecops-engineer) {#pipeline}
 

@@ -14,19 +14,19 @@ A secret found in the code or its history is reported by where it is, never copi
 
 ## 1. Threat model (security-engineer)
 
-Set the scope from the request and model the threats: what is worth protecting, who could want it, the trust boundaries and entry points, and the paths an attacker would try first. Closed when the model says where the next stages should look hardest.
+Run your Threat model playbook on the scope the request sets: what is worth protecting, who could want it, the trust boundaries and entry points, and the paths an attacker would try first. Closed when the model says where the next stages should look hardest.
 
 ## 2. Code review (security-engineer)
 
-Review the code along the threat model: how every input is validated, authentication and authorization on every path, session and secret handling, cryptography, injection, unsafe deserialization, error messages that say too much. Closed when every entry point of the model was read and each finding has its evidence.
+Run your Vulnerability review playbook along the threat model: how every input is validated, authentication and authorization on every path, session and secret handling, cryptography, injection, unsafe deserialization, error messages that say too much. Closed when every entry point of the model was read and each finding has its evidence.
 
 ## 2. Dependencies and pipeline (devsecops-engineer) {#supply-chain}
 
-Review what the code is built from and how: dependencies with known vulnerabilities or no maintainer, pinned versions and lock files, secrets in the repository and its history, what the pipeline runs with which permissions, and how a release is made and signed. Closed when each finding has its evidence.
+Run your Supply chain audit playbook, and review how the code is built: dependencies with known vulnerabilities or no maintainer, pinned versions and lock files, secrets in the repository and its history, what the pipeline runs with which permissions, and how a release is made and signed. Closed when each finding has its evidence.
 
 ## 2. Infrastructure (cloud-engineer)
 
-Review where it runs, from what the repository holds (infrastructure as code, deployment and container files): identities and their permissions, what is reachable from the network, encryption in transit and at rest, logging and backups. Skip it, with a note, when the repository describes no infrastructure. Closed when each finding has its evidence.
+Run your Infrastructure review playbook on what the repository holds (infrastructure as code, deployment and container files), from the code alone, with no plan: identities and their permissions, what is reachable from the network, encryption in transit and at rest, logging and backups. Skip it, with a note, when the repository describes no infrastructure. Closed when each finding has its evidence.
 
 ## 2. Architecture (architect)
 
