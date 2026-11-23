@@ -922,3 +922,4 @@ Supporting: `wall-tile-editor.html` (wall sprite editing), `jsonl-viewer.html` (
 - npm package: `pixel-agents` (CLI bin: `pixel-agents`)
 - GitHub: `https://github.com/pixel-agents-hq/pixel-agents`
 - License: MIT
+- This fork goes by **Agent Office** (`https://github.com/axellab/oficina-agentica`) in its README, banner included (`docs/images/agent-office-banner.png`). Only the README carries that name: the code, the CLI, the extension id, `~/.pixel-agents` and the Pixel Office MCP keep Pixel Agents' names, and the lines above are the base project's.
