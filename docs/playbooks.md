@@ -203,4 +203,4 @@ Everything after the front matter is the procedure, up to 20,000 characters, as 
 
 A file with a mistake (an unknown field, no name or description, an empty procedure) is left out and the rest still load; the host's log says what was wrong. The folders that ship are held to "no mistake at all" by the test suite.
 
-The Roles you add in [`roles.json`](roles.md#your-own-roles-rolesjson) have no Playbooks yet: a Playbook today is one of a built-in Role's, changed in a checkout of the repository.
+The Roles you add in [`roles.json`](roles.md#your-own-roles-rolesjson) have no Playbooks: a Playbook is a file in a Role's folder, in a checkout of the repository. A Role you add there with `npm run new-role` starts with a first Playbook to make its own ([Adding a Role](roles.md#adding-a-role)), and `npm run check-roles` says whether every Playbook says when to run it and numbers its steps.

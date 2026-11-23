@@ -26,6 +26,7 @@ import { BUILTIN_ROLES } from '../src/roles/builtinRoles.js';
 import { prepareRoleLaunch, roleCatalog, rolesLoadedMessage } from '../src/roles/roleCatalog.js';
 import { composeRolePrompt } from '../src/roles/rolePrompt.js';
 import { clearTestHome } from './helpers/removeTempDir.js';
+import { isTeamRole, TEAM_ROLE_IDS } from './helpers/teamRoles.js';
 
 /**
  * Roles: the parts of a delivery team an agent can be launched as. Three
@@ -251,15 +252,7 @@ describe('parseRoleListing', () => {
 
 describe('BUILTIN_ROLES', () => {
   it('is the delivery team, in the order the office lists it', () => {
-    expect(BUILTIN_ROLES.map((role) => role.id)).toEqual([
-      'architect',
-      'developer',
-      'qa-engineer',
-      'devsecops-engineer',
-      'security-engineer',
-      'cloud-engineer',
-      'agile-project-manager',
-    ]);
+    expect(BUILTIN_ROLES.map((role) => role.id).filter(isTeamRole)).toEqual(TEAM_ROLE_IDS);
   });
 
   // The built-in Roles go through none of roles.json's checks at runtime, so

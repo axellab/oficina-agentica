@@ -28,6 +28,12 @@ import {
 } from '../../../core/src/roles.js';
 import { parseWorkflows, type WorkflowDefinition } from '../../../core/src/workflows.js';
 
+/** The names a Role's folder gives its files and folders. */
+export const ROLE_FILE = 'ROLE.md';
+export const CONTRACT_FILE = 'CONTRACT.md';
+export const PLAYBOOKS_DIR = 'playbooks';
+export const WORKFLOWS_DIR = 'workflows';
+
 /** The sections a Contract holds, in this order, each a `### ` heading. */
 export const CONTRACT_SECTIONS = [
   'Accepts',
@@ -61,7 +67,7 @@ function normalize(text: string): string {
  * `\"` and `\\`, single quotes with `''`), as YAML writes one that holds a
  * colon. Undefined when a quote is never closed.
  */
-function unquote(raw: string): string | undefined {
+export function unquote(raw: string): string | undefined {
   const quote = raw[0];
   if (quote !== '"' && quote !== "'") return raw;
   if (raw.length < 2 || raw[raw.length - 1] !== quote) return undefined;
@@ -236,8 +242,9 @@ export function parsePlaybookFile(id: string, text: string): KitPlaybook | strin
  *  title's own words would not make its id, the id (`{#id}`). */
 const STAGE_HEADING_RE = /^## (\d{1,2})\. (.+?) \(([a-z][a-z0-9-]*)\)(?: \{#([a-z][a-z0-9-]*)\})?$/;
 
-/** A stage's id from its title: its words in lower case, joined by hyphens. */
-function slugOf(title: string): string {
+/** An id from a title: its words in lower case, joined by hyphens (a stage's
+ *  id from its heading, a Playbook's from the name a new Role gives it). */
+export function slugOf(title: string): string {
   return title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')

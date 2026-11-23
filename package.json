@@ -108,6 +108,8 @@
     "lint": "eslint adapters/vscode server core e2e && cd webview-ui && eslint .",
     "lint:fix": "eslint adapters/vscode server core e2e --fix && cd webview-ui && eslint . --fix",
     "import-tileset": "tsx scripts/import-tileset-cli.ts",
+    "new-role": "tsx scripts/role-kit.ts new",
+    "check-roles": "tsx scripts/role-kit.ts check",
     "format": "prettier --write \"adapters/vscode/**/*.ts\" \"server/**/*.ts\" \"core/src/**/*.ts\" \"webview-ui/src/**/*.{ts,tsx,css}\" \"*.{js,mjs}\" \"webview-ui/*.{js,ts}\"",
     "format:check": "prettier --check \"adapters/vscode/**/*.ts\" \"server/**/*.ts\" \"core/src/**/*.ts\" \"webview-ui/src/**/*.{ts,tsx,css}\" \"*.{js,mjs}\" \"webview-ui/*.{js,ts}\"",
     "test:webview": "cd webview-ui && npm test",

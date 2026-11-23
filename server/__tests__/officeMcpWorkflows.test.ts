@@ -12,8 +12,10 @@ import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
 import { CREW_PREAPPROVED_TOOLS } from '../src/constants.js';
+import { BUILTIN_WORKFLOWS } from '../src/workflows/builtinWorkflows.js';
 import { WORKFLOW_FIRST_MESSAGE } from '../src/workflows/workflowCopy.js';
 import { type Json, useStandaloneOffice, waitFor } from './helpers/officeMcpHarness.js';
+import { isTeamRole } from './helpers/teamRoles.js';
 
 describe('Workflows through the Pixel Office MCP (composed server, mock-claude in a PTY)', () => {
   const h = useStandaloneOffice({
@@ -85,7 +87,9 @@ describe('Workflows through the Pixel Office MCP (composed server, mock-claude i
 
   it('an office is listed the Workflows, and a start launches the lead Role into a new Crew, sent to the tool', async () => {
     await waitFor(() => loaded()?.available === true, 'the office to be told a run can start');
-    expect((loaded().workflows as Json[]).map((w) => [w.id, w.name, w.leadRoleName])).toEqual([
+    // The team's own: a Role added beside the team lists its Workflows after these.
+    const listed = (loaded().workflows as Json[]).filter((w) => isTeamRole(w.leadRoleId));
+    expect(listed.map((w) => [w.id, w.name, w.leadRoleName])).toEqual([
       ['new-feature', 'New feature', 'Agile Project Manager'],
       ['bug-fix', 'Bug fix', 'Agile Project Manager'],
       ['security-review', 'Deep security analysis', 'Agile Project Manager'],
@@ -345,7 +349,7 @@ describe('Workflows through the Pixel Office MCP (composed server, mock-claude i
     await waitFor(() => loaded()?.available === false, 'the office to be told');
     expect(loaded().unavailableReason).toMatch(/read-only in Settings/);
     // The Workflows are still listed: the drawer says why none can start.
-    expect(loaded().workflows as Json[]).toHaveLength(18);
+    expect(loaded().workflows as Json[]).toHaveLength(BUILTIN_WORKFLOWS.length);
 
     const before = h.starts().length;
     h.send({

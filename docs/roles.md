@@ -57,7 +57,7 @@ Every Role has its Contract. Its Playbooks and the Workflows it leads:
 | Cloud Engineer        | Infrastructure review, Cost review                               | Infrastructure review, Cost review                                                   |
 | Agile Project Manager | Daily, Sprint planning                                           | New feature, Bug fix, Deep security analysis, Deep quality analysis, Sprint planning |
 
-The files are read when the office starts. A file with a mistake is left out and the rest still load; the host's log says what was wrong. The folders that ship are held to "no mistake at all" by the test suite.
+The files are read when the office starts. A file with a mistake is left out and the rest still load; the host's log says what was wrong. The folders that ship are held to "no mistake at all" by the test suite, and `npm run check-roles` prints the same for the folders as they stand. To add a folder of your own, see [Adding a Role](#adding-a-role).
 
 `ROLE.md` looks like this:
 
@@ -152,9 +152,87 @@ To hand a Crew one request and have it worked stage by stage (a new feature, a b
 
 An agent with the office's tools can also explain all of this to you: the office's feature guide (`get_feature_guide`) has a topic on Roles.
 
+## Adding a Role
+
+A Role nobody foresaw (a Data Engineer, a Technical Writer, a Release Manager) is added in one of two ways:
+
+|                 | From the template: `npm run new-role`                                                | In [`roles.json`](#your-own-roles-rolesjson)                  |
+| --------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| What it has     | Its definition, its Contract, a Playbook and a Workflow it leads, like the built-ins | A name, a colour and its instructions                         |
+| Where it lives  | `roles/<role id>/` in the repository, versioned and built into the office            | `~/.pixel-agents/roles.json`, on one machine                  |
+| What it takes   | A checkout of the repository and a build                                             | Nothing: the next launch reads the file                       |
+| When to pick it | The Role is part of your team: it has its own tools, its own requests, its own rules | You want to try a Role, or change what a built-in one is told |
+
+### From the template
+
+In a checkout of the repository:
+
+```bash
+npm run new-role -- data-engineer "Data Engineer" --description "Builds and checks the data pipelines."
+```
+
+That writes the Role's whole folder from [`role-template/`](../role-template), built like the Roles that ship:
+
+```
+roles/data-engineer/
+  ROLE.md                              its definition: name, description, colour, standing instructions
+  CONTRACT.md                          its Contract, the five sections
+  playbooks/data-engineer-review.md    a first Playbook: read one piece of the repository, report findings
+  workflows/data-engineer-review.md    the Workflow that runs it: scope, findings, a second look, report
+```
+
+| Argument            | Meaning                                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `<id>`              | Required. The folder's name and the Role's id: lower-case letters, digits and hyphens, starting with a letter (up to 40). |
+| `"Name"`            | The name the office shows. Absent = the id's words, capitalized (`data-engineer` gives Data Engineer).                    |
+| `--description "…"` | One line on what it does: what the other Roles are told of it. Absent = a stand-in for you to replace.                    |
+| `--color <name>`    | One of the [colours](#your-own-roles-rolesjson). Absent = the first one no Role has yet (gray once all are taken).        |
+| `--playbook "Name"` | The name of its first Playbook and of the Workflow that runs it. Absent = `<Name> review`.                                |
+
+The command fills in the rest: the Role is listed after the ones that are there (`order`), and its files name the colleagues it hands work to (the QA Engineer for a second look, the Agile Project Manager for anything that changes the plan). It writes nothing unless every file reads back with no problem, and it never writes over a folder that is already there.
+
+The new Role works as it is: after `npm run build`, the office lists it in the launch drawer, the other Roles are told of it in their instructions, and its Workflow can be started.
+
+![The launch drawer's Role row, open: under the seven built-in Roles, the Data Engineer the command made, with its one Playbook](images/new-role-drawer.png)
+
+![The start dialog of the new Role's Workflow, Data Engineer review: Scope, Findings and Report are the Data Engineer's stages, the Second look is the QA Engineer's](images/new-role-workflow.png)
+
+_Both as the command left them, before a line was edited._
+
+What its files say is the template's, written to be true of any Role. Make them this Role's own, in this order:
+
+1. **`ROLE.md`**: what it does, how it works, where its work ends and another Role's begins. Keep it to what an agent of this Role must know every time.
+2. **`CONTRACT.md`**: what a request must bring, what it hands back, when it is done, what it never does and whom it hands over to. Keep the five headings.
+3. **`playbooks/`**: the tools this Role really runs, with the exact commands, one file per procedure ([how a Playbook is written](playbooks.md#where-they-live)). Rename the first one or add more.
+4. **`workflows/`**: the stages of the requests it leads, and the Role that owns each ([how a Workflow is written](workflows.md#where-the-built-in-workflows-live)). A stage sends its owner to a Playbook with "Run your <Name> playbook".
+
+Everything after a file's front matter is told to the Role's agents as written, so leave no note to yourself in it.
+
+Then check your work:
+
+```bash
+npm run check-roles
+```
+
+It reads `roles/` as the office does and prints what is wrong with a file, what a Role is missing by the house rules below, and which files still hold lines exactly as the template wrote them (a reminder, not a mistake). It exits with an error when there is a problem, so it can run in a pipeline.
+
+### The house rules
+
+Every Role in `roles/` is built the same way, and `npm run check-roles`, the command above and the test suite hold all of them, yours included, to one set of rules:
+
+- A **Role** has a Contract, at least one Playbook, and leads at least one Workflow.
+- A **Playbook** says when to run it (a sentence starting "Use when" in its description, which is what Claude Code picks the skill by) and numbers its steps from `## 1.`.
+- A **Workflow** tells its lead what the run is for before the first stage; gives every stage to a Role there is; says in each stage what its owner does and what closes it; sends a stage's owner only to a Playbook that Role has; sends its lead to one of its own Playbooks (the coordinator's Workflows hand every stage to someone else, so they need not); and ends on its lead's report, a last stage `## <step>. Report (<role id>)`.
+
+A Role added this way needs no change to the code or to the tests: the tests name the seven Roles that ship and hold any Role beside them to these rules. If your Role is meant to ship with the project rather than stay in your fork, also add it to the tables in this page, in [Playbooks](playbooks.md) and in [Workflows](workflows.md), and to the office's feature guide (`server/src/tutorial/featureGuide.ts`), which names the team in prose.
+
+### Changing the template
+
+[`role-template/`](../role-template) is four Markdown files, laid out like a Role's folder, with `{{placeholders}}` the command fills in (its `README.md` lists them). Change them to what your team expects of every Role (a rule in every Contract, a step in every first Playbook) and each Role you add from then on starts with it. The command refuses a template that asks for a placeholder it does not have, or whose result would break a house rule, and says which.
+
 ## Your own Roles: `roles.json`
 
-Create `~/.pixel-agents/roles.json` to change a built-in Role or add your own. Both the VS Code extension and the standalone office read it.
+Create `~/.pixel-agents/roles.json` to change a built-in Role or add your own without touching the repository. Both the VS Code extension and the standalone office read it.
 
 ```json
 {
@@ -189,7 +267,7 @@ Create `~/.pixel-agents/roles.json` to change a built-in Role or add your own. B
 | `prompt`      | The Role's instructions, up to 20,000 characters: one string, or a list of lines. Required for a new Role.                                           |
 | `model`       | The model its agents run on, as Claude Code's `--model` takes it (`opus`, `sonnet`, a full model id). Absent = your Claude Code default.             |
 
-An entry with a built-in id replaces only the fields it gives; the rest stay as built in, its Contract and its Playbooks included. New Roles are listed after the built-in ones, in the file's order, and have no Contract or Playbooks of their own yet (`roles.json` takes neither). Up to 50 entries are read.
+An entry with a built-in id replaces only the fields it gives; the rest stay as built in, its Contract and its Playbooks included. New Roles are listed after the built-in ones, in the file's order, and have no Contract or Playbooks of their own (`roles.json` takes neither: a Role with both is [a folder in the repository](#adding-a-role)). Up to 50 entries are read.
 
 The built-in ids are `architect`, `developer`, `qa-engineer`, `devsecops-engineer`, `security-engineer`, `cloud-engineer` and `agile-project-manager`.
 

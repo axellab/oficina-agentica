@@ -26,20 +26,19 @@ import {
 } from '../../../core/src/workflows.js';
 import { ROLE_KITS_DIST_DIR } from '../constants.js';
 import {
+  CONTRACT_FILE,
   type KitPlaybook,
   type KitWorkflow,
   parseContract,
   parsePlaybookFile,
   parseRoleFile,
   parseWorkflowFile,
+  PLAYBOOKS_DIR,
+  ROLE_FILE,
+  WORKFLOWS_DIR,
 } from './kitFormat.js';
 
 const LOG_PREFIX = '[Pixel Agents] Roles:';
-
-export const ROLE_FILE = 'ROLE.md';
-export const CONTRACT_FILE = 'CONTRACT.md';
-export const PLAYBOOKS_DIR = 'playbooks';
-export const WORKFLOWS_DIR = 'workflows';
 
 /** The repository's folder of Roles, from a checkout's root. */
 const SOURCE_DIR = 'roles';
