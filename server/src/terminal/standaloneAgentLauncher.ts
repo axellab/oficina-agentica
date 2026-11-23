@@ -25,18 +25,20 @@ import type { AgentRuntime } from '../agentRuntime.js';
 import { createAgentState } from '../agentState.js';
 import type { AgentStateStore } from '../agentStateStore.js';
 import {
+  CREW_PREAPPROVED_TOOLS,
   JSONL_POLL_INTERVAL_MS,
   OFFICE_MCP_SERVER_NAME,
   RESUME_FALLBACK_POLLS,
 } from '../constants.js';
 import { clearContextUsage } from '../contextUsage.js';
+import type { CrewLaunch } from '../crews.js';
 import { transcriptSuffix } from '../directorySuggestions.js';
 import { reassignAgentToFile, startFileWatching } from '../fileWatcher.js';
 import { directoryNameFor } from '../hostDirectory.js';
 import type { AgentMcpAccess } from '../mcp/officeMcp.js';
 import { assignPaletteIfNeeded } from '../paletteAssigner.js';
 import { resumedTranscript } from '../resumedTranscript.js';
-import { prepareRoleLaunch } from '../roles/roleCatalog.js';
+import { prepareCrewPrompt, prepareRoleLaunch } from '../roles/roleCatalog.js';
 import type { AgentState } from '../types.js';
 import { retireWorktreesLeftBy } from '../worktreeLeave.js';
 import type { CheckedLaunchAsks } from './launchAsks.js';
@@ -88,6 +90,10 @@ export interface LaunchStandaloneAgentOptions {
   preapprovedMcpTools?: readonly string[];
   /** A plugin folder this session alone loads (the tutorial's onboarding skill). */
   pluginDir?: string;
+  /** The Crew it launches into (server/src/crews.ts): it carries the Crew, is
+   *  told its terms and calls the team tools without a permission prompt. Only
+   *  with the MCP given: a Crew works through its tools. */
+  crew?: CrewLaunch;
   cols?: number;
   rows?: number;
 }
@@ -134,8 +140,19 @@ export function launchStandaloneAgent(
   // token minted for this agent alone (the path on the command line, never
   // the token). Launches and resumes alike.
   const mcpConfig = deps.mcp?.configFor(id);
-  // The Role's instructions are written before the command that names them.
-  const roleLaunch = prepareRoleLaunch(options.roleId);
+  // A Crew works through the MCP's tools: without them the agent launches
+  // like any other, and the office shows it in no Crew.
+  const crew = mcpConfig ? options.crew : undefined;
+  if (options.crew && !crew) {
+    console.warn(`[Pixel Agents] Terminal: Agent ${id} - no Pixel Office MCP, launched in no Crew`);
+  }
+  const crewTerms = crew && { maxAgents: crew.maxAgents };
+  // The instructions are written before the command that names them: the
+  // Role's (in a Crew, with its terms), else a Crew's own.
+  const roleLaunch = prepareRoleLaunch(options.roleId, crewTerms);
+  const preapprovedTools = [
+    ...new Set([...(options.preapprovedMcpTools ?? []), ...(crew ? CREW_PREAPPROVED_TOOLS : [])]),
+  ];
   const launch = provider.buildLaunchCommand(sessionId, cwd, {
     bypassPermissions: options.asks?.bypassPermissions,
     resume: options.resume !== undefined,
@@ -143,11 +160,12 @@ export function launchStandaloneAgent(
     permissionMode: options.asks?.permissionMode,
     // A model the launch asks for by name wins over its Role's usual one.
     model: options.asks?.model ?? roleLaunch?.model,
-    appendSystemPromptFile: roleLaunch?.appendSystemPromptFile,
+    appendSystemPromptFile:
+      roleLaunch?.appendSystemPromptFile ?? (crewTerms && prepareCrewPrompt(crewTerms)),
     prompt: options.asks?.firstMessage,
     preapprovedMcpTools:
-      mcpConfig && options.preapprovedMcpTools
-        ? { server: OFFICE_MCP_SERVER_NAME, tools: options.preapprovedMcpTools }
+      mcpConfig && preapprovedTools.length > 0
+        ? { server: OFFICE_MCP_SERVER_NAME, tools: preapprovedTools }
         : undefined,
     pluginDirs: options.pluginDir ? [options.pluginDir] : undefined,
   });
@@ -170,6 +188,7 @@ export function launchStandaloneAgent(
     providerId: provider.id,
     seatId: options.asks?.seatId ?? options.resume?.seatId,
     role: roleLaunch?.role,
+    crew: crew?.crew,
     worktree: options.worktree,
     nickname: options.asks?.nickname,
     // Where its session runs: a hook naming this folder is no move.

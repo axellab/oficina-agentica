@@ -27,9 +27,14 @@ import {
   parseRoleOverrides,
   roleListing,
 } from '../../../core/src/roles.js';
-import { PIXEL_AGENTS_DIR, ROLE_PROMPTS_DIR_NAME, ROLES_FILE_NAME } from '../constants.js';
+import {
+  CREW_PROMPT_FILE_STEM,
+  PIXEL_AGENTS_DIR,
+  ROLE_PROMPTS_DIR_NAME,
+  ROLES_FILE_NAME,
+} from '../constants.js';
 import { BUILTIN_ROLES } from './builtinRoles.js';
-import { composeRolePrompt } from './rolePrompt.js';
+import { composeCrewPrompt, composeRolePrompt, type CrewTerms } from './rolePrompt.js';
 
 const LOG_PREFIX = '[Pixel Agents] Roles:';
 
@@ -104,15 +109,15 @@ export function rolesLoadedMessage(): RolesLoaded {
 }
 
 /**
- * Write the instructions of `role` where the coding agent reads them, and
- * return the path. Rewritten only when the text changed; atomically (tmp +
- * rename), since an agent launching at that moment reads it. Owner-only: a
- * host's own Roles may say things about its systems.
+ * Write a launch's instructions where the coding agent reads them
+ * (`<stem>.md`), and return the path. Rewritten only when the text changed;
+ * atomically (tmp + rename), since an agent launching at that moment reads it.
+ * Owner-only: a host's own Roles may say things about its systems.
  */
-function writeRolePrompt(role: CatalogRole, catalog: readonly CatalogRole[]): string {
+function writePrompt(stem: string, prompt: string): string {
   const dir = rolePromptsDir();
-  const file = path.join(dir, `${role.id}.md`);
-  const text = `${composeRolePrompt(role, catalog)}\n`;
+  const file = path.join(dir, `${stem}.md`);
+  const text = `${prompt}\n`;
   try {
     if (fs.readFileSync(file, 'utf-8') === text) return file;
   } catch {
@@ -128,6 +133,19 @@ function writeRolePrompt(role: CatalogRole, catalog: readonly CatalogRole[]): st
     throw err;
   }
   return file;
+}
+
+/**
+ * The file holding the instructions of `role`: `<id>.md`, or, for an agent of
+ * a Crew, `<id>.crew.md` (a file of its own, so a Crew's launch and a plain
+ * one of the same Role never rewrite each other's; a Role id holds no dot).
+ */
+function writeRolePrompt(
+  role: CatalogRole,
+  catalog: readonly CatalogRole[],
+  crew?: CrewTerms,
+): string {
+  return writePrompt(crew ? `${role.id}.crew` : role.id, composeRolePrompt(role, catalog, crew));
 }
 
 /** What launching an agent as a Role adds to the launch. */
@@ -147,9 +165,10 @@ export interface RoleLaunch {
  * list, a Role since deleted from roles.json that a resumed conversation
  * remembers), or its instructions could not be written. The last two are
  * logged; the agent still launches, plainly without a Role, which the office
- * shows -- refusing the launch would show nothing at all.
+ * shows -- refusing the launch would show nothing at all. With `crew`, the
+ * instructions are the ones of that Role in a Crew.
  */
-export function prepareRoleLaunch(roleId: unknown): RoleLaunch | undefined {
+export function prepareRoleLaunch(roleId: unknown, crew?: CrewTerms): RoleLaunch | undefined {
   if (roleId === undefined || roleId === null) return undefined;
   if (!isRoleId(roleId)) {
     console.warn(`${LOG_PREFIX} launch named an invalid role id; launching without a role`);
@@ -164,7 +183,7 @@ export function prepareRoleLaunch(roleId: unknown): RoleLaunch | undefined {
   try {
     const launch: RoleLaunch = {
       role: agentRoleOf(role),
-      appendSystemPromptFile: writeRolePrompt(role, catalog),
+      appendSystemPromptFile: writeRolePrompt(role, catalog, crew),
     };
     if (role.model !== undefined) launch.model = role.model;
     return launch;
@@ -173,6 +192,21 @@ export function prepareRoleLaunch(roleId: unknown): RoleLaunch | undefined {
       `${LOG_PREFIX} cannot write the instructions of "${roleId}"; launching without a role:`,
       err,
     );
+    return undefined;
+  }
+}
+
+/**
+ * The instructions of a Crew's agent launched with no Role (the charter and
+ * the Crew's terms), written where the coding agent reads them: the path, or
+ * undefined when they could not be written (logged; the agent still launches
+ * and the server still holds it to the Crew's limits, it is only not told them).
+ */
+export function prepareCrewPrompt(crew: CrewTerms): string | undefined {
+  try {
+    return writePrompt(CREW_PROMPT_FILE_STEM, composeCrewPrompt(roleCatalog(), crew));
+  } catch (err) {
+    console.error(`${LOG_PREFIX} cannot write a Crew's instructions:`, err);
     return undefined;
   }
 }

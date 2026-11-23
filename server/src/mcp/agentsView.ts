@@ -19,6 +19,13 @@ export function statusOf(
   return agent.permissionSent ? 'permission request' : agent.turnStatus;
 }
 
+/** An agent's Crew as the tools report it, or null. */
+export function crewOf(agent: Pick<AgentState, 'crew'>): OfficeAgent['crew'] {
+  const crew = agent.crew;
+  if (!crew) return null;
+  return { id: crew.id, launchedBy: crew.launchedBy ?? null, ended: crew.ended === true };
+}
+
 /** The character an agent wears: the roster label and palette index (plus which copy). */
 export function characterOf(agent: AgentState): OfficeAgent['character'] {
   if (agent.palette === undefined) return null;
@@ -98,6 +105,7 @@ export function createAgentsView(
           id,
           nickname: agent.nickname ?? null,
           role: roleOf(agent),
+          crew: crewOf(agent),
           directory,
           workingDirectory: agent.cwd ?? agent.worktree?.path ?? directory?.path ?? null,
           worktree: agent.worktree

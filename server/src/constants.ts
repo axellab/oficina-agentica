@@ -275,6 +275,33 @@ export const ROLES_FILE_NAME = 'roles.json';
  *  read at launch (one `<role id>.md` per Role), in the persistence dir. */
 export const ROLE_PROMPTS_DIR_NAME = 'role-prompts';
 
+// ── Crews (server/src/crews.ts) ──────────────────────────────
+/** How many agents one Crew holds at a time. Its agents launch each other
+ *  without asking, and every one of them runs on the user's plan: the cap is
+ *  what keeps a Crew from growing past what the user would expect. */
+export const CREW_MAX_AGENTS = 8;
+/** How many of a Crew's events (launches, Messages, closes between its agents)
+ *  are kept for its panel: the newest. */
+export const CREW_EVENTS_KEPT = 30;
+/** The Pixel Office MCP tools a Crew's agent calls without a permission prompt:
+ *  what working together takes (seeing who is there, launching, messaging,
+ *  reading an answer, closing a colleague whose part is done, walking over).
+ *  Everything else the MCP offers still asks, as for any agent. */
+export const CREW_PREAPPROVED_TOOLS: readonly string[] = [
+  'list_agents',
+  'list_roles',
+  'list_directories',
+  'launch_agent',
+  'send_message',
+  'read_agent_terminal',
+  'close_agent',
+  'visit',
+];
+/** The file name (no extension) of the instructions a Crew's agent with no
+ *  Role is given, in the Role prompts folder. Not a Role id (those start with
+ *  a letter), so no Role's file can take its place. */
+export const CREW_PROMPT_FILE_STEM = '_crew';
+
 // ── Recent conversations (the sidebar) ──────────────────────
 /** What each conversation's agent wore and where it sat, in the persistence dir. */
 export const CONVERSATIONS_FILE_NAME = 'conversations.json';

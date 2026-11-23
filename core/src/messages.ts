@@ -59,6 +59,7 @@ export type ServerMessage =
   | DirectoryRejected
   | DirectorySuggestions
   | RolesLoaded
+  | CrewsLoaded
   | ConversationsLoaded
   | ConversationSearchResults
   | WorktreeRejected
@@ -104,6 +105,7 @@ export type ClientMessage =
   | StartTutorial
   | SkipTutorialQuest
   | QuitTutorial
+  | EndCrew
   | SetWatchAllSessions
   | ExportLayout
   | ImportLayout
@@ -692,6 +694,40 @@ export interface Role {
 
 export type RoleSource = 'builtin' | 'user';
 
+export interface CrewsLoaded {
+  type: 'crewsLoaded';
+  available: boolean;
+  unavailableReason?: string;
+  maxAgents: number;
+  crews: Crew[];
+}
+
+export interface Crew {
+  id: string;
+  ended: boolean;
+  members: CrewMember[];
+  events: CrewEvent[];
+}
+
+export interface CrewMember {
+  agentId: number;
+  label: string;
+  roleName?: string;
+  launchedBy?: number;
+}
+
+export interface CrewEvent {
+  at: number;
+  kind: CrewEventKind;
+  fromId: number;
+  from: string;
+  toIds: number[];
+  to: string[];
+  gist?: string;
+}
+
+export type CrewEventKind = 'launched' | 'messaged' | 'closed';
+
 export interface ConversationsLoaded {
   type: 'conversationsLoaded';
   directories: DirectoryConversations[];
@@ -858,6 +894,7 @@ export interface LaunchAgent {
   directoryPath?: string;
   palette?: number;
   roleId?: string;
+  crew?: boolean;
   worktree?: boolean;
   worktreeName?: string;
   worktreeFrom?: WorktreeBranch;
@@ -1008,6 +1045,11 @@ export interface SkipTutorialQuest {
 
 export interface QuitTutorial {
   type: 'quitTutorial';
+}
+
+export interface EndCrew {
+  type: 'endCrew';
+  crewId: string;
 }
 
 export interface SetWatchAllSessions {

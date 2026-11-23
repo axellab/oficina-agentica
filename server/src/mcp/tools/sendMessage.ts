@@ -17,6 +17,8 @@ export const sendMessage = defineTool({
     'Each recipient is reported on its own (delivered, or refused and why). `gist` (at most ' +
     `${MESSAGE_GIST_MAX_LENGTH} characters) is what the office shows over your character as you ` +
     'walk over. Agents without a terminal of this office (headless, adopted) cannot be messaged. ' +
+    'An agent of a Crew messages only the agents of its Crew, never one waiting on a permission ' +
+    "prompt (that answer is the user's), and no one once the user ended the Crew. " +
     "In an office whose terminals can't be read (VS Code), no token is needed: text only, typed " +
     'only into agents that are done or active; keys are refused.',
   input: {

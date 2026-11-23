@@ -5,14 +5,22 @@
  * drawer's); a close through the card's × rules (closeAgentAsking), the
  * surface ending the terminal. An agent closing itself is ended once its turn
  * is over (closeAfterTurn), so its CLI records the turn that closed it.
+ *
+ * An agent of a Crew (server/src/crews.ts) launches into its Crew, while the
+ * Crew has room and the user has not ended it, and closes only its Crew's
+ * agents. Whoever launches, the new agent's first message arrives tagged with
+ * the launcher's name, as a Message is, and the office shows the launcher
+ * walking over to it.
  */
 
 import type { AgentStateStore } from '../agentStateStore.js';
-import { SELF_CLOSE_FALLBACK_MS } from '../constants.js';
+import { MESSAGE_GIST_MAX_LENGTH, SELF_CLOSE_FALLBACK_MS } from '../constants.js';
+import type { Crews } from '../crews.js';
 import type { AgentTerminals } from '../terminal/agentTerminals.js';
 import type { AgentTurnStatus } from '../types.js';
 import { closeAgentAsking } from '../worktreeLeave.js';
-import { characterOf } from './agentsView.js';
+import { agentLabel, messageTag } from './agentLabel.js';
+import { characterOf, crewOf } from './agentsView.js';
 import { paletteOf } from './charactersView.js';
 import { type OfficeFacts, officeSnapshot } from './officeFacts.js';
 import type {
@@ -20,20 +28,33 @@ import type {
   AgentLaunchOutcome,
   Closing,
   Launching,
+  MessageShow,
   OfficeCloseOutcome,
 } from './officeOperations.js';
 import { noAgentReason } from './officeOperations.js';
 import { roleNamed, roleOf } from './rolesView.js';
 
+/** A first message as the office shows it over its sender: one line, cut to a gist's length. */
+function gistOf(text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  return line.length <= MESSAGE_GIST_MAX_LENGTH
+    ? line
+    : `${line.slice(0, MESSAGE_GIST_MAX_LENGTH - 1).trimEnd()}…`;
+}
+
 export function createLaunching(
   facts: OfficeFacts,
   /** The surface's launch, waiting until the agent has joined. */
   launch: (request: AgentLaunch) => Promise<AgentLaunchOutcome>,
+  crews: Crews,
+  /** Show the launcher walking over to the agent it launched (messaging's show). */
+  show: (show: MessageShow) => void,
 ): Launching {
   const { store } = facts;
   return {
     async launchAgent(request) {
       const notes: string[] = [];
+      const { caller } = request;
       let palette: number | undefined;
       if (request.character !== undefined) {
         const picked = paletteOf(request.character);
@@ -64,8 +85,36 @@ export function createLaunching(
             notes.push(`Seat ${request.seat} is agent ${holder}'s, so the office picked another.`);
         }
       }
-      const { character: _character, seat: _seat, role: _role, asks, ...where } = request;
-      const outcome = await launch({ ...where, palette, roleId, asks: { ...asks, seatId } });
+      // Last, once the launch is known to be askable: the place is held until it settles.
+      const joining = crews.joinFor(caller);
+      if (!joining.ok) return joining;
+      const {
+        caller: _caller,
+        character: _character,
+        seat: _seat,
+        role: _role,
+        asks,
+        ...where
+      } = request;
+      // A colleague's words, not the user's: tagged as its Messages are.
+      const sender = store.get(caller);
+      const firstMessage =
+        asks.firstMessage === undefined
+          ? undefined
+          : messageTag(caller, sender ? agentLabel(sender) : null, sender?.role?.name) +
+            asks.firstMessage;
+      let outcome: AgentLaunchOutcome;
+      try {
+        outcome = await launch({
+          ...where,
+          palette,
+          roleId,
+          crew: joining.place?.launch,
+          asks: { ...asks, firstMessage, seatId },
+        });
+      } finally {
+        joining.place?.done();
+      }
       if (!outcome.ok) return outcome;
       const agent = store.get(outcome.id);
       const role = agent ? roleOf(agent) : null;
@@ -75,12 +124,26 @@ export function createLaunching(
           `It launched without the Role ${roleId}: the Role's instructions could not be prepared (the office's log says why). Close it and launch again, or tell it its part yourself.`,
         );
       }
+      const crew = agent ? crewOf(agent) : null;
+      if (joining.place && !crew) {
+        notes.push(
+          'It launched outside your Crew: the office could not give it the Pixel Office MCP, so it has none of its tools.',
+        );
+      }
+      if (agent) {
+        const gist = asks.firstMessage
+          ? gistOf(asks.firstMessage)
+          : `Welcome${role ? `, ${role.name}` : ''}!`;
+        crews.note('launched', caller, [outcome.id], { gist });
+        show({ fromId: caller, toIds: [outcome.id], gist });
+      }
       return {
         ok: true,
         id: outcome.id,
         seat: officeSnapshot(facts).seatOf(outcome.id) ?? null,
         character: agent ? characterOf(agent) : null,
         role,
+        crew,
         session: agent?.sessionId ?? '',
         notes,
       };
@@ -132,6 +195,7 @@ export function createClosing(
   close: (id: number) => void,
   /** Its agents' terminals: one without a terminal of ours is only dismissed. */
   terminals: Pick<AgentTerminals, 'has'>,
+  crews: Crews,
 ): ClosingHandle {
   const { store } = facts;
   const selfCloses = new Set<() => void>();
@@ -152,6 +216,8 @@ export function createClosing(
           reason: `Agent ${id} is a Teammate${agent.agentName ? ` (${agent.agentName})` : ''} of agent ${lead}: it is part of its lead's work and ends with it. Close agent ${lead} to end both, or leave it.`,
         };
       }
+      const outsideCrew = crews.reachProblem(caller, id, 'close');
+      if (outsideCrew) return { ok: false, reason: outsideCrew };
       if (worktreeChoice === 'discard' && confirmedFiles === undefined) {
         return {
           ok: false,
@@ -176,8 +242,11 @@ export function createClosing(
             selfCloses.add(cancel);
           }
         : close;
+      // Named before it leaves: its Crew's panel says who closed whom.
+      const closedName = crews.nameOf(id);
       const attempt = await closeAgentAsking(store, id, { worktreeChoice, confirmedFiles }, end);
       if (attempt.closed) {
+        if (id !== caller) crews.note('closed', caller, [id], { toNames: [closedName] });
         const answered = attempt.answered;
         return {
           ok: true,

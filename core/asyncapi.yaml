@@ -145,6 +145,8 @@ components:
         - $ref: '#/components/schemas/DirectorySuggestions'
         # Roles (what an agent can be launched as)
         - $ref: '#/components/schemas/RolesLoaded'
+        # Crews (agents the user set free to work together)
+        - $ref: '#/components/schemas/CrewsLoaded'
         - $ref: '#/components/schemas/ConversationsLoaded'
         - $ref: '#/components/schemas/ConversationSearchResults'
         # Worktrees
@@ -196,6 +198,7 @@ components:
         - $ref: '#/components/schemas/StartTutorial'
         - $ref: '#/components/schemas/SkipTutorialQuest'
         - $ref: '#/components/schemas/QuitTutorial'
+        - $ref: '#/components/schemas/EndCrew'
         - $ref: '#/components/schemas/SetWatchAllSessions'
         - $ref: '#/components/schemas/ExportLayout'
         - $ref: '#/components/schemas/ImportLayout'
@@ -1697,6 +1700,113 @@ components:
           items:
             $ref: '#/components/schemas/Role'
 
+    CrewEventKind:
+      description: |
+        What one agent of a Crew did to others: `launched` them, `messaged`
+        them, or `closed` them.
+      type: string
+      enum: [launched, messaged, closed]
+
+    CrewEvent:
+      description: |
+        One thing that happened between a Crew's agents, as its panel lists
+        it. The labels are the agents' as they were then (Nickname, else
+        character, else Directory, with the Role in brackets), so the line
+        still reads after an agent left.
+      type: object
+      additionalProperties: false
+      required: [at, kind, fromId, from, toIds, to]
+      properties:
+        at:
+          type: number
+          description: When, in milliseconds since the epoch.
+        kind:
+          $ref: '#/components/schemas/CrewEventKind'
+        fromId:
+          type: integer
+        from:
+          type: string
+        toIds:
+          type: array
+          items:
+            type: integer
+        to:
+          type: array
+          items:
+            type: string
+        gist:
+          type: string
+          description: A message's gist, or a launch's first message cut short.
+
+    CrewMember:
+      description: |
+        An agent of a Crew: its label (as in `CrewEvent`), its Role's name when
+        it has one, and the agent that launched it (absent for the one the
+        user started the Crew with).
+      type: object
+      additionalProperties: false
+      required: [agentId, label]
+      properties:
+        agentId:
+          type: integer
+        label:
+          type: string
+        roleName:
+          type: string
+        launchedBy:
+          type: integer
+
+    Crew:
+      description: |
+        A Crew: the agents the user set free to work together. `ended` once
+        the user ended it: its agents run on, but may no longer launch,
+        message or close each other. A Crew is listed until its last agent
+        leaves.
+      type: object
+      additionalProperties: false
+      required: [id, ended, members, events]
+      properties:
+        id:
+          type: string
+        ended:
+          type: boolean
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/CrewMember'
+        events:
+          type: array
+          description: Oldest first; only the newest few are kept.
+          items:
+            $ref: '#/components/schemas/CrewEvent'
+
+    CrewsLoaded:
+      description: |
+        Every Crew of the office, the whole list: who is in each, who launched
+        whom, and what its agents last did to each other. `available` says
+        whether a launch may start one (`launchAgent.crew`), else
+        `unavailableReason` in plain words; `maxAgents` is how many agents one
+        Crew may hold at a time. Sent on `webviewReady` by a server whose
+        Pixel Office MCP can launch agents, and broadcast after every change.
+        Memory only on the client: a reconnect takes the new list as the whole
+        truth.
+      type: object
+      additionalProperties: false
+      required: [type, available, maxAgents, crews]
+      properties:
+        type:
+          const: crewsLoaded
+        available:
+          type: boolean
+        unavailableReason:
+          type: string
+        maxAgents:
+          type: integer
+        crews:
+          type: array
+          items:
+            $ref: '#/components/schemas/Crew'
+
     ConversationsLoaded:
       description: |
         The sidebar's recent conversations: for each Directory, the ones an
@@ -2018,6 +2128,15 @@ components:
           description: >-
             The Role to launch the agent as (a `rolesLoaded` id). Absent, or an
             id the host does not know, launches an agent with no Role.
+        crew:
+          type: boolean
+          description: >-
+            Start a Crew with this agent: it, and every agent launched from it
+            through the Pixel Office MCP, may launch, message and close each
+            other without asking the user first (`crewsLoaded` says who they
+            are). Only an office starts one, never an agent. Where no Crew can
+            be started (`crewsLoaded.available` false) the agent launches
+            without one.
         worktree:
           type: boolean
           description: >-
@@ -2388,6 +2507,21 @@ components:
       properties:
         type:
           const: quitTutorial
+
+    EndCrew:
+      description: |
+        The user ended a Crew (its panel's End): its agents keep running, but
+        from now on their launches, Messages and closes of each other are
+        refused. Answered with a `crewsLoaded` broadcast. There is no way back:
+        a new Crew is started with a new launch.
+      type: object
+      additionalProperties: false
+      required: [type, crewId]
+      properties:
+        type:
+          const: endCrew
+        crewId:
+          type: string
 
     OfficeMcpChoice:
       description: |

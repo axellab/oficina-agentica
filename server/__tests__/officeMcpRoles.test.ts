@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import { normalizeProjectPath } from '../../core/src/normalizeProjectPath.js';
 import { getCharacterProfiles } from '../src/characterProfilesStore.js';
-import { messageTag } from '../src/mcp/agentLabel.js';
+import { agentLabel, messageTag } from '../src/mcp/agentLabel.js';
 import { BUILTIN_ROLES } from '../src/roles/builtinRoles.js';
 import { type Json, useStandaloneOffice, waitFor } from './helpers/officeMcpHarness.js';
 
@@ -179,7 +179,13 @@ describe('Roles through the Pixel Office MCP (composed server, mock-claude in a 
     // The CLI was started with the Role's instructions, as a file, and its first message last.
     const { args } = startOf(reply.session_id);
     expect(rolePromptOf(reply.session_id)).toBe(promptFile('developer'));
-    expect(args.slice(-2)).toEqual(['--', 'Pick up story 1: the plan is in docs/plan.md']);
+    // Tagged as a Message from its launcher is: a colleague's request, not the user's.
+    const tag = messageTag(
+      manager.id,
+      agentLabel(h.store.get(manager.id)!),
+      'Agile Project Manager',
+    );
+    expect(args.slice(-2)).toEqual(['--', `${tag}Pick up story 1: the plan is in docs/plan.md`]);
     const prompt = fs.readFileSync(promptFile('developer'), 'utf8');
     expect(prompt).toContain('yours is Developer');
     expect(prompt).toContain('- Agile Project Manager:');

@@ -11,6 +11,7 @@
  */
 
 import type { FurnitureCatalog, OfficeLayout } from '../../../core/src/layout/index.js';
+import type { CrewLaunch } from '../crews.js';
 import type { MessageKey, ShellKey, TypedInput } from '../terminal/agentTerminals.js';
 import type { LaunchAsks } from '../terminal/launchAsks.js';
 import type { TutorialSkipOutcome, TutorialView } from '../tutorial/tutorial.js';
@@ -40,6 +41,10 @@ export interface OfficeAgent {
   /** The Role it was launched as (list_roles), or null: an agent launched without
    *  one, or one the office adopted. */
   role: { id: string; name: string } | null;
+  /** The Crew it is in, or null: the Crew's id, the agent that launched it into
+   *  it (null for the one the user started the Crew with), and whether the user
+   *  ended that Crew. */
+  crew: { id: string; launchedBy: number | null; ended: boolean } | null;
   /** The Directory it was launched into or adopted from: its name, and its path when the
    *  office knows that Directory. */
   directory: { name: string; path: string | null } | null;
@@ -134,8 +139,9 @@ export interface LayoutOps {
 
 /** Messages: reading agents' terminals and typing into them. */
 export interface Messaging {
-  /** An agent's status, and its terminal screen when the office can show one. */
-  readAgentTerminal(id: number): Promise<AgentTerminalRead>;
+  /** An agent's status, and its terminal screen when the office can show one.
+   *  `caller` is the agent asking: a Crew's agent is shown only its Crew's screens. */
+  readAgentTerminal(id: number, caller?: number): Promise<AgentTerminalRead>;
   /** Type a Message into each recipient's terminal, each checked by the surface's
    *  delivery guard; one refusal never blocks the others. */
   sendMessage(message: OfficeMessage): Promise<MessageDelivery[]>;
@@ -365,6 +371,9 @@ export type OfficeOperations = Pick<
 
 /** A launch as an agent asks for it: only `directory` is required. */
 export interface OfficeLaunchRequest {
+  /** The agent asking: an agent of a Crew launches into its Crew, and the
+   *  first message arrives tagged with its name. */
+  caller: number;
   /** A Directory's name, or a folder's path. */
   directory: string;
   /** A character id, exact name or palette index (charactersView's resolver). */
@@ -385,8 +394,10 @@ export interface OfficeLaunchRequest {
 /** What the surface's launch gets, character, seat and Role already checked. */
 export interface AgentLaunch extends Omit<
   OfficeLaunchRequest,
-  'character' | 'seat' | 'role' | 'asks'
+  'caller' | 'character' | 'seat' | 'role' | 'asks'
 > {
+  /** The Crew it launches into (its launcher's), a place held for it. */
+  crew?: CrewLaunch;
   /** The palette the agent wears (absent = the Directory's defaults, else random). */
   palette?: number;
   /** The id of the Role it launches as (absent = none; a resume = the one it had). */
@@ -408,6 +419,8 @@ export type OfficeLaunchResult =
       character: OfficeAgent['character'];
       /** The Role it launched as, or null. */
       role: OfficeAgent['role'];
+      /** The Crew it launched into (its launcher's), or null. */
+      crew: OfficeAgent['crew'];
       /** Its CLI session id. */
       session: string;
       /** Anything the launch did differently from what was asked. */
@@ -461,7 +474,8 @@ export interface AgentScreen {
 export interface AgentTerminalRead {
   status: OfficeAgentStatus;
   screen: AgentScreen | null;
-  /** Why there is no screen (no terminal of ours, or none this surface can read). */
+  /** Why there is no screen (no terminal of ours, none this surface can read,
+   *  or one the asking agent's Crew does not reach). */
   noScreen?: string;
 }
 

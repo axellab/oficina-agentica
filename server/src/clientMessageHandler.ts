@@ -271,14 +271,20 @@ export function handleClientMessage(
       // persisted per-host setting, never a per-launch field: the client sends
       // only where to launch (no directoryPath = the server cwd).
       if (!runtime || !ctx.ptyManager) break;
+      // `crew`: the user starts a Crew with this agent (never an agent's word:
+      // this message is a privileged office's). Its place is held until the
+      // launch settled, so a Crew whose launch failed is forgotten.
+      const crewPlace = msg.crew === true ? ctx.officeMcp?.startCrew() : undefined;
       void launchIntoDirectory(launchDepsFor(ctx, runtime, ctx.ptyManager), {
         directoryPath: msg.directoryPath as string | undefined,
         palette: rosterPick(msg.palette, getPaletteCount()),
         worktree: msg.worktree === true ? launchWorktreeChoices(msg) : undefined,
         roleId: msg.roleId,
+        crew: crewPlace?.launch,
       })
         .then((outcome) => answerRejected(outcome, send))
-        .catch((err: unknown) => console.error('[Pixel Agents] Launch failed:', err));
+        .catch((err: unknown) => console.error('[Pixel Agents] Launch failed:', err))
+        .finally(() => crewPlace?.done());
       break;
     }
 
@@ -399,8 +405,9 @@ export function handleClientMessage(
     case 'startTutorial':
     case 'skipTutorialQuest':
     case 'quitTutorial':
+    case 'endCrew':
       // The Pixel Office MCP's consent, its switches, the editing lock and undo,
-      // and the tutorial that runs on it.
+      // and what runs on it: the tutorial, and a Crew's end.
       ctx.officeMcp?.handleMessage(msg, ctx.client, (m) => send({ ...m }));
       break;
 
@@ -850,6 +857,10 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   if (ctx.privileged) {
     ctx.officeMcp?.handshake((m) => send({ ...m }), Promise.allSettled(hookAsks));
   }
+
+  // 4a-ter-bis. Crews: who is in each, for every office (a view-only one sees
+  // the agents and their Messages already; it can end none).
+  ctx.officeMcp?.crewsSnapshot((m) => send({ ...m }));
 
   // 4a-quater. Usage bars: the operator's account usage, privileged clients only.
   if (ctx.privileged) {

@@ -8,6 +8,11 @@ function describeAgent(agent: OfficeAgent, caller: number): Record<string, unkno
     ...(agent.id === caller ? { you: true } : {}),
     nickname: agent.nickname,
     role: agent.role,
+    crew: agent.crew && {
+      id: agent.crew.id,
+      launched_by: agent.crew.launchedBy,
+      ended: agent.crew.ended,
+    },
     directory: agent.directory,
     working_directory: agent.workingDirectory,
     worktree: agent.worktree,
@@ -37,6 +42,9 @@ export const listAgents = defineTool({
   description:
     'List every agent in the Pixel Agents office (you included, marked `you: true`): id, nickname, ' +
     'Role (the part of the team it was launched as: list_roles describes them; null for none), ' +
+    'Crew (`crew`: the Crew it is in, the agent that launched it into it, and whether the user ended ' +
+    'it; null for none. Agents of one Crew launch, message and close each other without asking the ' +
+    'user, and reach no agent outside it), ' +
     'Directory and working directory, Worktree, status (active / done / waiting for input / ' +
     'permission request), current activity, sub-agents running, context left, conversation title, ' +
     'transcript path, lead and teammates, seat (with its tile and Area), whether it is at its desk ' +

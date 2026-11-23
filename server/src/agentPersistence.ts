@@ -1,5 +1,6 @@
 import * as path from 'path';
 
+import { parseAgentCrew } from '../../core/src/crews.js';
 import { parseAgentRole } from '../../core/src/roles.js';
 import type { PersistedAgent } from '../../core/src/schemas.js';
 import type { AgentStateInit } from './agentState.js';
@@ -42,6 +43,7 @@ export function toPersistedAgent(agent: AgentState): PersistedAgent | null {
     role: agent.role,
     worktree: agent.worktree && { ...agent.worktree },
     nickname: agent.nickname,
+    crew: agent.crew && { ...agent.crew },
   };
 }
 
@@ -83,6 +85,7 @@ export function restoredAgentInit(p: PersistedAgent): Omit<AgentStateInit, 'isEx
     role: parseAgentRole(p.role),
     worktree: persistedWorktree(p.worktree),
     nickname: typeof p.nickname === 'string' && p.nickname ? p.nickname : undefined,
+    crew: parseAgentCrew(p.crew),
     // A Worktree's folder is where its session last ran; elsewhere is
     // unknown until a signal says (the first hook then reads it once).
     cwd: persistedWorktree(p.worktree)?.path,

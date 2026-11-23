@@ -133,8 +133,11 @@ describe('launch_agent (composed server, mock-claude in a PTY)', () => {
     expect(h.store.get(byPath.agent_id)!.directoryName).toBe('proj');
   });
 
+  /** The tag a first message from agent `id` arrives with: a colleague's words, not the user's. */
+  const tagOf = (id: number): string => messageTag(id, agentLabel(h.store.get(id)!));
+
   it('first message, model and permission mode reach the CLI as argv; character and nickname are worn', async () => {
-    const { client } = await caller();
+    const { id: callerId, client } = await caller();
     const label = getCharacterProfiles()[2].name!;
     const message = `--help is not a flag here; "quote" $HOME \`tick\` 'x'\nsecond line`;
     const reply = await launched(client, {
@@ -147,8 +150,8 @@ describe('launch_agent (composed server, mock-claude in a PTY)', () => {
     });
 
     const { args } = startOf(reply.session_id);
-    // The prompt is the last argv entry, after `--`, byte for byte.
-    expect(args.slice(-2)).toEqual(['--', message]);
+    // The prompt is the last argv entry, after `--`, byte for byte, tagged with its sender.
+    expect(args.slice(-2)).toEqual(['--', tagOf(callerId) + message]);
     expect(args[args.indexOf('--model') + 1]).toBe('opus');
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('plan');
     expect(args).not.toContain('--dangerously-skip-permissions');
@@ -269,7 +272,7 @@ describe('launch_agent (composed server, mock-claude in a PTY)', () => {
   });
 
   it('resumes a past conversation of the Directory, and refuses one already in the office', async () => {
-    const { client } = await caller();
+    const { id: callerId, client } = await caller();
     const projectDir = path.join(h.home, '.claude', 'projects', normalizeProjectPath(h.workspace));
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(
@@ -285,7 +288,7 @@ describe('launch_agent (composed server, mock-claude in a PTY)', () => {
     expect(reply.session_id).toBe(RESUMED);
     const { args } = startOf(RESUMED);
     expect(args.slice(0, 2)).toEqual(['--resume', RESUMED]);
-    expect(args.slice(-2)).toEqual(['--', 'carry on']);
+    expect(args.slice(-2)).toEqual(['--', `${tagOf(callerId)}carry on`]);
 
     const again = await launch(client, { directory: 'proj', resume_session_id: RESUMED });
     expect(again.isError).toBe(true);
