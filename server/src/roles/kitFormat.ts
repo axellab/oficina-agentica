@@ -45,7 +45,8 @@ export const CONTRACT_SECTIONS = [
 
 /** Where a file with no `order` goes: after the ones that give one. */
 const DEFAULT_ORDER = 1000;
-const MAX_ORDER = 9999;
+/** The last `order` a file may give. */
+export const MAX_ORDER = 9999;
 
 /** A tool as a Playbook names it: the word its command goes by, or the name
  *  of the service (letters, digits, spaces and . _ + -). */

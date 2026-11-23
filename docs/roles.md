@@ -189,7 +189,7 @@ roles/data-engineer/
 | `--color <name>`    | One of the [colours](#your-own-roles-rolesjson). Absent = the first one no Role has yet (gray once all are taken).        |
 | `--playbook "Name"` | The name of its first Playbook and of the Workflow that runs it. Absent = `<Name> review`.                                |
 
-The command fills in the rest: the Role is listed after the ones that are there (`order`), and its files name the colleagues it hands work to (the QA Engineer for a second look, the Agile Project Manager for anything that changes the plan). It writes nothing unless every file reads back with no problem, and it never writes over a folder that is already there.
+The command fills in the rest: the Role is listed after the ones that are there (`order`), and its files name the colleagues it hands work to (the QA Engineer for a second look, the Agile Project Manager for anything that changes the plan). It writes nothing unless every file reads back with no problem, it never writes into a folder that is already there, and it writes the whole Role or nothing: a write that fails takes back the files it made.
 
 The new Role works as it is: after `npm run build`, the office lists it in the launch drawer, the other Roles are told of it in their instructions, and its Workflow can be started.
 
@@ -221,14 +221,14 @@ It reads `roles/` as the office does and prints what is wrong with a file, what 
 Every Role in `roles/` is built the same way, and `npm run check-roles`, the command above and the test suite hold all of them, yours included, to one set of rules:
 
 - A **Role** has a Contract, at least one Playbook, and leads at least one Workflow.
-- A **Playbook** says when to run it (a sentence starting "Use when" in its description, which is what Claude Code picks the skill by) and numbers its steps from `## 1.`.
-- A **Workflow** tells its lead what the run is for before the first stage; gives every stage to a Role there is; says in each stage what its owner does and what closes it; sends a stage's owner only to a Playbook that Role has; sends its lead to one of its own Playbooks (the coordinator's Workflows hand every stage to someone else, so they need not); and ends on its lead's report, a last stage `## <step>. Report (<role id>)`.
+- A **Playbook** says when to run it (a sentence starting "Use when" in its description, which is what Claude Code picks the skill by), and its sections are its steps: `## 1. …`, `## 2. …` and on, each the next number, with no other `##` section among them (a Workflow's stage names a step by its number). A `###` heading inside a step is fine, and so is whatever a code block holds.
+- A **Workflow** tells its lead what the run is for before the first stage; gives every stage to a Role there is; says in each stage what its owner does and what closes it; sends a stage's owner only to Playbooks that Role has, every one the stage names; sends its lead to one of its own Playbooks (the coordinator's Workflows hand every stage to someone else, so they need not); and ends on its lead's report, a last stage `## <step>. Report (<role id>)`.
 
 A Role added this way needs no change to the code or to the tests: the tests name the seven Roles that ship and hold any Role beside them to these rules. If your Role is meant to ship with the project rather than stay in your fork, also add it to the tables in this page, in [Playbooks](playbooks.md) and in [Workflows](workflows.md), and to the office's feature guide (`server/src/tutorial/featureGuide.ts`), which names the team in prose.
 
 ### Changing the template
 
-[`role-template/`](../role-template) is four Markdown files, laid out like a Role's folder, with `{{placeholders}}` the command fills in (its `README.md` lists them). Change them to what your team expects of every Role (a rule in every Contract, a step in every first Playbook) and each Role you add from then on starts with it. The command refuses a template that asks for a placeholder it does not have, or whose result would break a house rule, and says which.
+[`role-template/`](../role-template) is four Markdown files, laid out like a Role's folder, with `{{placeholders}}` the command fills in (its `README.md` lists them). Change them to what your team expects of every Role (a rule in every Contract, a step in every first Playbook) and each Role you add from then on starts with it. The command refuses a template that asks for a placeholder it does not have, or whose result would break a house rule, and says which. Anything in double braces is read as a placeholder, so a misspelt one (`{{Name}}`) is refused rather than left in the text for the Role's agents to read.
 
 ## Your own Roles: `roles.json`
 

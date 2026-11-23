@@ -14,14 +14,18 @@
  *   A Role       has a Contract, at least one Playbook, and leads at least one
  *                Workflow.
  *   A Playbook   says when to run it (". Use when " in its description, which
- *                is what the coding agent picks the skill by) and numbers its
- *                steps from 1.
+ *                is what the coding agent picks the skill by) and its sections
+ *                are its steps, numbered from 1 with none skipped ("## 1. …",
+ *                "## 2. …": a step is how a stage or a colleague names a part
+ *                of it, so a section with no number is a step nobody can ask
+ *                for).
  *   A Workflow   says something to its lead before the first stage, gives
  *                every stage to a Role there is, says in each stage what its
  *                owner does and what closes it, sends a stage's owner only to
- *                a Playbook that Role has, sends its lead to one of its own
- *                (the coordinator's hand every stage to someone else, so they
- *                are let off), and ends on its lead's report.
+ *                Playbooks that Role has (every one a stage names), sends its
+ *                lead to one of its own (the coordinator's hand every stage to
+ *                someone else, so they are let off), and ends on its lead's
+ *                report.
  */
 
 import type { RoleDefinition } from '../../../core/src/roles.js';
@@ -31,11 +35,17 @@ import { CONTRACT_FILE, PLAYBOOKS_DIR, WORKFLOWS_DIR } from './kitFormat.js';
 /** What a Playbook's description must hold: when to run it. */
 const PLAYBOOK_SAYS_WHEN_RE = /\. Use when /;
 
-/** A Playbook's first step. */
-const FIRST_STEP_RE = /^## 1\. /m;
+/** A section of a Playbook: its heading's text. */
+const SECTION_RE = /^## +(.*)$/;
+
+/** A step's heading, after the "## ": its number, then what it is. */
+const STEP_RE = /^(\d+)\. +\S/;
+
+/** A code block's fence: three or more backticks or tildes. */
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 
 /** How a stage sends its owner to a Playbook, by the Playbook's name. */
-const STAGE_PLAYBOOK_RE = /Run your (.+?) playbook/;
+const STAGE_PLAYBOOK_RE = /Run your (.+?) playbook/g;
 
 /** The id of the stage every Workflow ends on. */
 const REPORT_STAGE_ID = 'report';
@@ -49,6 +59,49 @@ export interface KitsToCheck {
   workflows: readonly WorkflowDefinition[];
 }
 
+/**
+ * A Playbook's sections, by their headings' text, in the order it has them.
+ * Not the lines inside its code blocks: a command's output, or a file a step
+ * shows, may hold a line that looks like a heading.
+ */
+function sectionsOf(instructions: string): string[] {
+  const sections: string[] = [];
+  /** The fence of the code block the line is in, when it is in one. */
+  let fence: string | undefined;
+  for (const line of instructions.split(/\r?\n/)) {
+    const mark = FENCE_RE.exec(line)?.[1];
+    if (fence === undefined) {
+      if (mark !== undefined) fence = mark;
+      else {
+        const heading = SECTION_RE.exec(line)?.[1];
+        if (heading !== undefined) sections.push(heading.trim());
+      }
+    } else if (
+      // A block ends on a fence of its own kind, at least as long, alone on its line.
+      mark !== undefined &&
+      mark[0] === fence[0] &&
+      mark.length >= fence.length &&
+      line.trim() === mark
+    ) {
+      fence = undefined;
+    }
+  }
+  return sections;
+}
+
+/**
+ * What is wrong with a Playbook's steps, if anything: its sections must be
+ * "## 1. …", "## 2. …" and on, each the next number. The first one out of
+ * place is named, since the ones after it are counted from it.
+ */
+function stepsProblem(instructions: string): string | undefined {
+  const sections = sectionsOf(instructions);
+  if (sections.length === 0) return 'its steps must be numbered sections, from "## 1. "';
+  const odd = sections.findIndex((heading, at) => STEP_RE.exec(heading)?.[1] !== String(at + 1));
+  if (odd < 0) return undefined;
+  return `its steps must be numbered sections, from "## 1. " and each the next number: "## ${sections[odd]}" stands where "## ${odd + 1}. " is expected`;
+}
+
 function playbookProblems(role: RoleDefinition): string[] {
   const problems: string[] = [];
   for (const playbook of role.playbooks ?? []) {
@@ -58,11 +111,15 @@ function playbookProblems(role: RoleDefinition): string[] {
         `${at}: its description must say when to run it (a sentence that starts "Use when ")`,
       );
     }
-    if (!FIRST_STEP_RE.test(playbook.instructions)) {
-      problems.push(`${at}: its steps must be numbered sections, from "## 1. "`);
-    }
+    const steps = stepsProblem(playbook.instructions);
+    if (steps !== undefined) problems.push(`${at}: ${steps}`);
   }
   return problems;
+}
+
+/** The Playbooks a stage's brief sends its owner to, by name, each once. */
+function playbooksNamed(brief: string): string[] {
+  return [...new Set([...brief.matchAll(STAGE_PLAYBOOK_RE)].map((match) => match[1]))];
 }
 
 function workflowProblems(
@@ -85,15 +142,17 @@ function workflowProblems(
         `${at}: stage "${stage.title}" must say what its owner does and what closes it`,
       );
     }
-    const named = STAGE_PLAYBOOK_RE.exec(stage.brief)?.[1];
-    if (named !== undefined && !(owner.playbooks ?? []).some((p) => p.name === named)) {
-      problems.push(
-        `${at}: stage "${stage.title}" sends the ${owner.name} to a "${named}" playbook it does not have`,
-      );
+    // Every one the brief names: a stage may send its owner to several.
+    for (const named of playbooksNamed(stage.brief)) {
+      if (!(owner.playbooks ?? []).some((p) => p.name === named)) {
+        problems.push(
+          `${at}: stage "${stage.title}" sends the ${owner.name} to a "${named}" playbook it does not have`,
+        );
+      }
     }
   }
   const sendsItsLead = workflow.stages.some(
-    (stage) => stage.role === workflow.lead && STAGE_PLAYBOOK_RE.test(stage.brief),
+    (stage) => stage.role === workflow.lead && playbooksNamed(stage.brief).length > 0,
   );
   if (workflow.lead !== DEFAULT_WORKFLOW_LEAD && roles.has(workflow.lead) && !sendsItsLead) {
     problems.push(

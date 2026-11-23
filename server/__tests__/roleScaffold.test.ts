@@ -111,6 +111,49 @@ describe('the house rules', () => {
     ]);
   });
 
+  it("a Playbook's sections are its steps, each the next number, whatever its code blocks hold", () => {
+    const steps = (instructions: string): string[] =>
+      roleKitProblems({
+        roles: [role('release-manager', { playbooks: [playbook({ instructions })] })],
+        workflows: [workflow('release-manager')],
+      });
+    const problem = (found: string, expected: number) => [
+      `release-manager/playbooks/cut-release.md: its steps must be numbered sections, from "## 1. " and each the next number: "## ${found}" stands where "## ${expected}. " is expected`,
+    ];
+    const one = '## 1. Check\n\nRun `git status`.\n\n';
+
+    expect(
+      steps(`Tag a release.\n\n${one}## 2. Tag\n\nTag it.\n\n## 3. Report\n\nSay so.`),
+    ).toEqual([]);
+    // No section at all is no step at all.
+    expect(steps('Run `git status`, then tag it.')).toEqual([
+      'release-manager/playbooks/cut-release.md: its steps must be numbered sections, from "## 1. "',
+    ]);
+    // Out of order, one skipped, one that lost its number, one before the first.
+    expect(steps(`${one}## 3. Report\n\nSay so.\n\n## 2. Tag\n\nTag it.`)).toEqual(
+      problem('3. Report', 2),
+    );
+    expect(steps(`${one}## 3. Report\n\nSay so.`)).toEqual(problem('3. Report', 2));
+    expect(steps(`${one}## Tag\n\nTag it.\n\n## 3. Report\n\nSay so.`)).toEqual(problem('Tag', 2));
+    expect(steps(`## Before you start\n\nRead this.\n\n${one}`)).toEqual(
+      problem('Before you start', 1),
+    );
+    expect(steps(`${one}## 2.\n\nA number and nothing after it.`)).toEqual(problem('2.', 2));
+    // A smaller heading is part of its step.
+    expect(steps(`${one}### If it is dirty\n\nStop.\n\n## 2. Tag\n\nTag it.`)).toEqual([]);
+
+    // A line of a code block is not a section, in either kind of fence, and a
+    // fence inside a longer one does not end it.
+    const fenced = (open: string, close = open): string =>
+      `${one}${open}markdown\n## 7. A file the step shows\n\`\`\`\n## Not a section\n${close}\n\n## 2. Tag\n\nTag it.`;
+    expect(steps(fenced('````'))).toEqual([]);
+    expect(steps(fenced('~~~'))).toEqual([]);
+    // And a step missing after the block is still found.
+    expect(steps(`${one}\`\`\`bash\n## 2. In a script\n\`\`\`\n\n## 3. Report\n\nSay so.`)).toEqual(
+      problem('3. Report', 2),
+    );
+  });
+
   it('a Workflow briefs its lead, and each stage has an owner there is and says what closes it', () => {
     const kits = sound();
     kits.workflows[0] = workflow('release-manager', {
@@ -140,6 +183,42 @@ describe('the house rules', () => {
       expect.stringMatching(
         /^qa-engineer\/workflows\/qa-engineer-release\.md: stage "work" sends the qa-engineer to a "Cut a release" playbook it does not have$/,
       ),
+    ]);
+
+    // Every Playbook a stage names is looked for, not only the first.
+    const sent = (brief: string): string[] =>
+      roleKitProblems({
+        roles: sound().roles,
+        workflows: [
+          workflow('release-manager', {
+            stages: [
+              stage('work', 'release-manager', brief),
+              stage('report', 'release-manager', REPORT),
+            ],
+          }),
+          workflow('agile-project-manager'),
+        ],
+      });
+    const missing = (name: string) =>
+      expect.stringMatching(
+        new RegExp(
+          `stage "work" sends the release-manager to a "${name}" playbook it does not have$`,
+        ),
+      );
+    expect(
+      sent('Run your Cut a release playbook. Then run it again: Run your Cut a release playbook.'),
+    ).toEqual([]);
+    expect(sent('Run your Cut a release playbook. Run your Announce playbook, step 1.')).toEqual([
+      missing('Announce'),
+    ]);
+    expect(
+      sent(
+        'Run your Notes playbook, then Run your Cut a release playbook. Run your Notes playbook.',
+      ),
+    ).toEqual([missing('Notes')]);
+    expect(sent('Run your Notes playbook to the end. Run your Announce playbook.')).toEqual([
+      missing('Notes'),
+      missing('Announce'),
     ]);
 
     // Sending nobody anywhere is fine for the coordinator, whose stages are
@@ -437,13 +516,68 @@ describe('a new Role, made from the template', () => {
     });
   });
 
-  it('never writes over a file that is there', () => {
+  it('is listed after every Role there is, by the order the office reads of each', () => {
+    besideTheTeam();
+    const withOrder = (id: string, order: string | undefined): void => {
+      const file = path.join(rolesDir, id, 'ROLE.md');
+      const line = order === undefined ? '' : `order: ${order}\n`;
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').replace(/^order: .*\n/m, line));
+    };
+    const nextOrder = (): string =>
+      /^order: (.*)$/m.exec(planned({ id: 'data-engineer' }).files[0].text)![1];
+    expect(nextOrder()).toBe('80');
+
+    // A quoted order is an order like any other.
+    withOrder('qa-engineer', "'200'");
+    expect(nextOrder()).toBe('210');
+    // A Role that writes none is listed after the ones that do: the new Role
+    // goes after it too.
+    withOrder('developer', undefined);
+    expect(nextOrder()).toBe('1010');
+    writeNewRole(rolesDir, planned({ id: 'data-engineer' }));
+    const kits = readRoleKits(rolesDir);
+    expect(kits.problems).toEqual([]);
+    expect(kits.roles.map((r) => r.id).slice(-3)).toEqual([
+      'qa-engineer',
+      'developer',
+      'data-engineer',
+    ]);
+
+    // There is no order after the last one.
+    withOrder('architect', '9995');
+    expect(/^order: (.*)$/m.exec(planned({ id: 'ml-engineer' }).files[0].text)![1]).toBe('9999');
+  });
+
+  it('never writes into a folder that is there: one that appeared since the plan is left as it was', () => {
     const plan = planned({ id: 'data-engineer' });
     fs.mkdirSync(path.join(rolesDir, 'data-engineer'));
     fs.writeFileSync(path.join(rolesDir, 'data-engineer', 'CONTRACT.md'), 'mine');
 
     expect(() => writeNewRole(rolesDir, plan)).toThrow(/EEXIST/);
+    // Not a file of the plan beside it: the next run is told the folder is there.
+    expect(filesIn(rolesDir)).toEqual(['data-engineer/CONTRACT.md']);
     expect(text('data-engineer/CONTRACT.md')).toBe('mine');
+
+    // An empty folder is somebody's too, and stays empty.
+    const other = planned({ id: 'ml-engineer' });
+    fs.mkdirSync(path.join(rolesDir, 'ml-engineer'));
+    expect(() => writeNewRole(rolesDir, other)).toThrow(/EEXIST/);
+    expect(fs.readdirSync(path.join(rolesDir, 'ml-engineer'))).toEqual([]);
+  });
+
+  it('writes the whole Role or nothing: a write that fails takes back what it made', () => {
+    besideTheTeam();
+    const before = filesIn(rolesDir);
+    const plan = planned({ id: 'data-engineer' });
+    // The last file cannot be written: its name is taken by the one before it.
+    const broken: NewRolePlan = { ...plan, files: [...plan.files, plan.files.at(-1)!] };
+
+    expect(() => writeNewRole(rolesDir, broken)).toThrow(/EEXIST/);
+    expect(fs.existsSync(path.join(rolesDir, 'data-engineer'))).toBe(false);
+    expect(filesIn(rolesDir)).toEqual(before);
+    // So the same command, run again, makes the Role.
+    expect(writeNewRole(rolesDir, planned({ id: 'data-engineer' }))).toHaveLength(4);
+    expect(readRoleKits(rolesDir).problems).toEqual([]);
   });
 
   describe('from a template someone changed', () => {
@@ -478,6 +612,22 @@ describe('a new Role, made from the template', () => {
       ]);
       expect(fs.existsSync(path.join(rolesDir, 'data-engineer'))).toBe(false);
     });
+
+    it.each(['{{Name}}', '{{role_name}}', '{{ name }}', '{{name.upper}}', '{{}}'])(
+      'makes no Role when the template holds %s: a misspelt placeholder never reaches an agent',
+      (misspelt) => {
+        changed('playbooks/playbook.md', (was) => `${was}\nAsk ${misspelt} for the rest.\n`);
+        const inBraces = misspelt.slice(2, -2).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        expect(refused({ id: 'data-engineer' }, templateDir)).toEqual([
+          expect.stringMatching(
+            new RegExp(
+              `^the template's playbooks/playbook\\.md asks for \\{\\{${inBraces}\\}\\}, which nothing gives`,
+            ),
+          ),
+        ]);
+        expect(fs.existsSync(path.join(rolesDir, 'data-engineer'))).toBe(false);
+      },
+    );
 
     it('makes no Role when what it would write cannot be read, or breaks a house rule', () => {
       changed('CONTRACT.md', (was) => was.replace('### Never', '### Never ever'));

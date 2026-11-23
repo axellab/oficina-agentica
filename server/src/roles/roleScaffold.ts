@@ -6,12 +6,14 @@
  *
  * Nothing is written unless everything it would write reads back with no
  * problem: each file through the reader the office uses (kitFormat.ts), the
- * whole through the house rules (kitRules.ts). A file is never overwritten.
+ * whole through the house rules (kitRules.ts). A file is never overwritten,
+ * and a Role is written whole or not at all (`writeNewRole`).
  *
  * The template's files are Markdown with `{{placeholders}}` (PLACEHOLDERS says
- * which). What they say is true of any Role, so a Role launched before anyone
- * edited it is told nothing wrong; `templateLeftovers` counts the lines still
- * as the template wrote them, for whoever reviews it.
+ * which; anything else in double braces is refused, so a misspelt one never
+ * reaches an agent). What they say is true of any Role, so a Role launched
+ * before anyone edited it is told nothing wrong; `templateLeftovers` counts
+ * the lines still as the template wrote them, for whoever reviews it.
  */
 
 import * as fs from 'fs';
@@ -32,6 +34,7 @@ import {
 } from '../../../core/src/workflows.js';
 import {
   CONTRACT_FILE,
+  MAX_ORDER,
   parseContract,
   parsePlaybookFile,
   parseRoleFile,
@@ -69,9 +72,13 @@ const REVIEWER_ROLE = 'qa-engineer';
 
 /** How far apart the Roles' `order` values are written. */
 const ORDER_STEP = 10;
-const MAX_ORDER = 9999;
 
-const PLACEHOLDER_RE = /\{\{([a-z-]+)\}\}/g;
+/**
+ * Anything in double braces, whatever it holds: a name nothing gives
+ * (`{{Name}}`, `{{role_name}}`, `{{ name }}`) must be found and refused, not
+ * left in the text for the Role's agents to read.
+ */
+const PLACEHOLDER_RE = /\{\{([^{}]*)\}\}/g;
 
 /** What `npm run new-role` was asked for. Only the id is needed. */
 export interface NewRoleAsk {
@@ -201,15 +208,20 @@ function render(template: string, values: ReadonlyMap<Placeholder, string>): str
   return out.join('\n');
 }
 
-/** The `order` the next Role takes: after the last one that gives one. */
+/**
+ * The `order` the next Role takes: after every Role there is, each by the
+ * order the office reads of it (kitFormat.ts: a quoted one counts, and a Role
+ * that writes none has the reader's own, after the ones that do). Beside a
+ * Role already at the last order there is nothing after: the two share it, and
+ * the office lists them by id.
+ */
 function nextOrder(rolesDir: string, roles: readonly RoleDefinition[]): number {
   let last = 0;
   for (const role of roles) {
     try {
       const text = fs.readFileSync(path.join(rolesDir, role.id, ROLE_FILE), 'utf-8');
-      // Only an `order` the file writes: a Role with none is listed after them all.
-      const written = /^order:\s*(\d{1,4})\s*$/m.exec(text.split(/^---\s*$/m)[1] ?? '');
-      if (written) last = Math.max(last, Number(written[1]));
+      const parsed = parseRoleFile(role.id, text);
+      if (typeof parsed !== 'string') last = Math.max(last, parsed.order);
     } catch {
       // A Role whose file went missing meanwhile gives no order.
     }
@@ -385,17 +397,61 @@ export function planNewRole(rolesDir: string, templateDir: string, ask: NewRoleA
 }
 
 /**
- * Write a plan's files under `rolesDir`, answering the paths written. A file
- * that is already there stops it (and is left as it is): the plan was made for
- * a folder that did not exist.
+ * Write a plan's files under `rolesDir`, answering the paths written. The
+ * whole Role or nothing:
+ *
+ * - The Role's folder is made first, by itself. The plan was made for a folder
+ *   that did not exist, so one that is there now (a second run, a hand) stops
+ *   the write before anything in it is touched.
+ * - A write that fails after that takes back what this call made, its own
+ *   files and the folders it made for them, and nothing else: half a Role
+ *   would be refused as "already there" by the next run.
+ *
+ * It throws what stopped it.
  */
 export function writeNewRole(rolesDir: string, plan: NewRolePlan): string[] {
+  const folder = path.join(rolesDir, plan.id);
+  fs.mkdirSync(folder);
+  const folders = [folder];
   const written: string[] = [];
-  for (const file of plan.files) {
-    const target = path.join(rolesDir, ...file.path.split('/'));
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, file.text, { encoding: 'utf-8', flag: 'wx' });
-    written.push(target);
+  /** The file being written, which is this call's unless it was there already. */
+  let writing: string | undefined;
+  try {
+    for (const file of plan.files) {
+      const target = path.join(rolesDir, ...file.path.split('/'));
+      const parent = path.dirname(target);
+      if (!folders.includes(parent)) {
+        fs.mkdirSync(parent);
+        folders.push(parent);
+      }
+      writing = target;
+      fs.writeFileSync(target, file.text, { encoding: 'utf-8', flag: 'wx' });
+      written.push(target);
+      writing = undefined;
+    }
+  } catch (err) {
+    // A file cut short (a full disk) is this call's too. One that was there
+    // already is not: it is what stopped the write.
+    if (writing !== undefined && (err as NodeJS.ErrnoException).code !== 'EEXIST') {
+      written.push(writing);
+    }
+    for (const target of written) {
+      try {
+        fs.unlinkSync(target);
+      } catch {
+        // Gone already: nothing to take back.
+      }
+    }
+    // Innermost first. A folder someone else put a file in meanwhile is not
+    // empty, so it stays, with what is theirs.
+    for (const made of folders.reverse()) {
+      try {
+        fs.rmdirSync(made);
+      } catch {
+        // Not empty, or gone already.
+      }
+    }
+    throw err;
   }
   return written;
 }

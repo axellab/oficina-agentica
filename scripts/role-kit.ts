@@ -54,8 +54,17 @@ function newRole(args: string[]): number {
     return 1;
   }
   const { plan } = result;
-  const written = writeNewRole(ROLES_DIR, plan);
   const folder = `roles/${plan.id}`;
+  let written: string[];
+  try {
+    written = writeNewRole(ROLES_DIR, plan);
+  } catch (err) {
+    // The folder appeared since the plan was made, or the disk refused a file:
+    // either way the write took back what it made.
+    const why = err instanceof Error ? err.message : String(err);
+    console.error(`No Role was made: ${folder}/ could not be written (${why})`);
+    return 1;
+  }
   console.log(
     [
       `Made the ${plan.name} (${plan.color}) in ${folder}/:`,

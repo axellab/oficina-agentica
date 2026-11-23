@@ -199,8 +199,8 @@ Diagnose one failed run of a GitHub Actions pipeline.
 | `tools`       | The tools its steps run, separated by commas (up to 20). The agent checks them before it starts.                                       |
 | `order`       | Where it is listed among the Role's Playbooks, lowest first. Absent = after the ones that have one, by id.                             |
 
-Everything after the front matter is the procedure, up to 20,000 characters, as the agent reads it. A Role has at most 12 Playbooks.
+Everything after the front matter is the procedure, up to 20,000 characters, as the agent reads it. Its `##` sections are its steps, numbered in order from `## 1.` (a Workflow's stage sends its owner to a step by that number), so keep anything that is not a step in the opening lines, or under a `###` heading inside a step. A Role has at most 12 Playbooks.
 
 A file with a mistake (an unknown field, no name or description, an empty procedure) is left out and the rest still load; the host's log says what was wrong. The folders that ship are held to "no mistake at all" by the test suite.
 
-The Roles you add in [`roles.json`](roles.md#your-own-roles-rolesjson) have no Playbooks: a Playbook is a file in a Role's folder, in a checkout of the repository. A Role you add there with `npm run new-role` starts with a first Playbook to make its own ([Adding a Role](roles.md#adding-a-role)), and `npm run check-roles` says whether every Playbook says when to run it and numbers its steps.
+The Roles you add in [`roles.json`](roles.md#your-own-roles-rolesjson) have no Playbooks: a Playbook is a file in a Role's folder, in a checkout of the repository. A Role you add there with `npm run new-role` starts with a first Playbook to make its own ([Adding a Role](roles.md#adding-a-role)), and `npm run check-roles` says whether every Playbook says when to run it and numbers its steps with none skipped or out of place.
