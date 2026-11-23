@@ -10,7 +10,7 @@ Each built-in Role is a folder of Markdown files you can read: its definition, i
 2. Press the **Role** row at the top (it reads **None** until you pick one) and choose a Role. Hovering a Role shows what it does and names its Playbooks; the number beside a Role's name is how many it has.
 3. Choose the Directory to launch into, as for any agent.
 
-![The launch drawer's Role row, open on the seven built-in Roles; the DevSecOps Engineer shows its three Playbooks](images/roles-picker.png)
+![The launch drawer's Role row, open on the seven built-in Roles, each with how many Playbooks it has](images/roles-picker.png)
 
 The agent's label shows the Role above its activity, and its card carries a strip of the Role's colour (hover the card for the name). Turn on **Settings → Always Show Labels** to see every agent's Role at a glance.
 
@@ -45,17 +45,17 @@ Each built-in Role lives in the repository under [`roles/<role id>/`](../roles),
 | `playbooks/<id>.md` | One [Playbook](playbooks.md) each: a procedure with the tools it runs and the exact commands.                                       |
 | `workflows/<id>.md` | One [Workflow](workflows.md) each that this Role leads: the lead's brief, then the stages with the Role that owns each.             |
 
-What each Role has today:
+Every Role has its Contract. Its Playbooks and the Workflows it leads:
 
-| Role                  | Contract | Playbooks                                                        | Workflows it leads                                                  |
-| --------------------- | -------- | ---------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Architect             | Yes      | None yet                                                         | None yet                                                            |
-| Developer             | Yes      | None yet                                                         | None yet                                                            |
-| QA Engineer           | Yes      | None yet                                                         | None yet                                                            |
-| DevSecOps Engineer    | Yes      | Pipeline troubleshooting, Pipeline hardening, Supply chain audit | Pipeline troubleshooting, Pipeline hardening, Supply chain audit    |
-| Security Engineer     | Yes      | None yet                                                         | None yet                                                            |
-| Cloud Engineer        | Yes      | None yet                                                         | None yet                                                            |
-| Agile Project Manager | Yes      | None yet                                                         | New feature, Bug fix, Deep security analysis, Deep quality analysis |
+| Role                  | Playbooks                                                        | Workflows it leads                                                                   |
+| --------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Architect             | Architecture review, Technical design                            | Architecture review, Technical design                                                |
+| Developer             | Safe refactor, Dependency upgrade                                | Safe refactor, Dependency upgrade                                                    |
+| QA Engineer           | Full regression, Flaky test hunt                                 | Full regression, Flaky test hunt                                                     |
+| DevSecOps Engineer    | Pipeline troubleshooting, Pipeline hardening, Supply chain audit | Pipeline troubleshooting, Pipeline hardening, Supply chain audit                     |
+| Security Engineer     | Threat model, Vulnerability review                               | Threat model, Vulnerability review                                                   |
+| Cloud Engineer        | Infrastructure review, Cost review                               | Infrastructure review, Cost review                                                   |
+| Agile Project Manager | Daily, Sprint planning                                           | New feature, Bug fix, Deep security analysis, Deep quality analysis, Sprint planning |
 
 The files are read when the office starts. A file with a mistake is left out and the rest still load; the host's log says what was wrong. The folders that ship are held to "no mistake at all" by the test suite.
 

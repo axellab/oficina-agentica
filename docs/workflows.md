@@ -2,17 +2,28 @@
 
 A Workflow is how one kind of request is handled: an ordered list of stages, each owned by a [Role](roles.md). You pick the Workflow that fits what you need, write the request in your own words, and a [Crew](roles.md#a-crew-agents-free-to-work-together) takes it from there: its lead hands each stage to an agent of the Role that owns it, and the office shows you every stage as it moves.
 
-Every Workflow is led by one Role. The four general ones are led by the Agile Project Manager, who coordinates the whole team; a Role can also lead Workflows of its own, for the requests that are its speciality. You can write your own too.
+Every Workflow is led by one Role. The general ones are led by the Agile Project Manager, who coordinates the whole team; every other Role leads Workflows of its own, for the requests that are its speciality. You can write your own too.
 
-| Workflow                     | Led by                | For                                                                         |
-| ---------------------------- | --------------------- | --------------------------------------------------------------------------- |
-| **New feature**              | Agile Project Manager | From a request to a tested, reviewed change ready to merge.                 |
-| **Bug fix**                  | Agile Project Manager | Reproduce a bug, find its cause, fix it and prove it stays fixed.           |
-| **Deep security analysis**   | Agile Project Manager | A threat model and a ranked list of security findings, with evidence.       |
-| **Deep quality analysis**    | Agile Project Manager | How healthy the code, its tests and its pipeline are, with a ranked plan.   |
-| **Pipeline troubleshooting** | DevSecOps Engineer    | Why a pipeline that passed now fails, and a fix proven by a green run.      |
-| **Pipeline hardening**       | DevSecOps Engineer    | The pipeline reviewed for mistakes and for abuse, and hardened on a branch. |
-| **Supply chain audit**       | DevSecOps Engineer    | What the code is built from, what in it is vulnerable, unpinned or leaked.  |
+| Workflow                     | Led by                | For                                                                                            |
+| ---------------------------- | --------------------- | ---------------------------------------------------------------------------------------------- |
+| **New feature**              | Agile Project Manager | From a request to a tested, reviewed change ready to merge.                                    |
+| **Bug fix**                  | Agile Project Manager | Reproduce a bug, find its cause, fix it and prove it stays fixed.                              |
+| **Deep security analysis**   | Agile Project Manager | A threat model and a ranked list of security findings, with evidence.                          |
+| **Deep quality analysis**    | Agile Project Manager | How healthy the code, its tests and its pipeline are, with a ranked plan.                      |
+| **Sprint planning**          | Agile Project Manager | A goal and a backlog turned into a sprint plan you agreed to, story by story.                  |
+| **Architecture review**      | Architect             | How the system is really structured against how it is meant to be, with a ranked plan.         |
+| **Technical design**         | Architect             | A goal turned into a reviewed design, its decision recorded, and a plan in steps.              |
+| **Safe refactor**            | Developer             | Code restructured in small steps, its behaviour pinned by tests and proven unchanged.          |
+| **Dependency upgrade**       | Developer             | Dependencies upgraded one at a time, their changes read, their origin checked.                 |
+| **Full regression**          | QA Engineer           | Every suite run, each failure classified, the regressions fixed, and a verdict on the release. |
+| **Flaky test hunt**          | QA Engineer           | The tests that fail for no reason found, reproduced, and fixed at their cause.                 |
+| **Pipeline troubleshooting** | DevSecOps Engineer    | Why a pipeline that passed now fails, and a fix proven by a green run.                         |
+| **Pipeline hardening**       | DevSecOps Engineer    | The pipeline reviewed for mistakes and for abuse, and hardened on a branch.                    |
+| **Supply chain audit**       | DevSecOps Engineer    | What the code is built from, what in it is vulnerable, unpinned or leaked.                     |
+| **Threat model**             | Security Engineer     | How a system or a change could be attacked, and the control that answers each threat.          |
+| **Vulnerability review**     | Security Engineer     | The code scanned and read for vulnerabilities, ranked, fixed where you say, verified.          |
+| **Infrastructure review**    | Cloud Engineer        | The infrastructure code checked for mistakes, exposure and weak reliability, ranked.           |
+| **Cost review**              | Cloud Engineer        | What the infrastructure costs per month, what makes most of it, and where to save.             |
 
 ## Starting a run
 
@@ -21,7 +32,7 @@ Every Workflow is led by one Role. The four general ones are led by the Agile Pr
 3. Choose the Directory the work happens in.
 4. The office shows the Workflow's stages and asks for **your request**. Write what you need as you would to a colleague, then press **Start** (or Ctrl+Enter).
 
-![The launch drawer's Workflow row: the Workflows under the Role that leads each, and the drawer once Pipeline troubleshooting is picked, with the Role and the Crew set by it](images/workflow-picker.png)
+![The launch drawer's Workflow row: the Workflows under the Role that leads each (the list scrolls; its two halves are side by side here), and the drawer once Threat model is picked, with the Role and the Crew set by it](images/workflow-picker.png)
 
 ![The request dialog for New feature: its stages numbered by step with the Role that owns each, and the request the run starts from](images/workflow-request.png)
 
@@ -29,7 +40,7 @@ Nothing launches before **Start**. The pick lasts until the drawer closes, like 
 
 ## What happens next
 
-- **The lead comes in**, as the Workflow's lead Role (the Agile Project Manager for the four general ones, the DevSecOps Engineer for its own), with a new Crew. It reads your request and the stages, and asks you in its own terminal for anything the request leaves open that only you can decide.
+- **The lead comes in**, as the Workflow's lead Role (the Agile Project Manager for the general ones, each other Role for its own), with a new Crew. It reads your request and the stages, and asks you in its own terminal for anything the request leaves open that only you can decide.
 - **It hands each stage to the Role that owns it**, launching the Roles the Crew does not have yet, without asking you: that is what a Crew is. A stage its own Role owns, it does itself.
 - **The stages run in order.** A stage starts once the ones before it are done or skipped. Stages that share a number in the dialog run at the same time (a security review beside the testing, for example). When later work sends an earlier stage back (QA finds a defect), the lead starts that stage again.
 - **You watch it in the office.** Every hand-over is a walk to the other agent's desk. The **Workflow** panel (top right) counts the stages closed; opened, it shows your request and each stage with its Role, where it stands, and the note the lead closed it with: what was done and how it was verified, or why the request did not need it.
@@ -39,9 +50,9 @@ Nothing launches before **Start**. The pick lasts until the drawer closes, like 
 
 _From the test suite: the terminal on the right is its stand-in for Claude Code._
 
-The analyses (Deep security analysis, Deep quality analysis, Supply chain audit) change nothing in your project: what they deliver is the report, and fixing what they find is a new request you decide on.
+The analyses (Deep security analysis, Deep quality analysis, Architecture review, Supply chain audit, Threat model, Infrastructure review, Cost review) change nothing in your project: what they deliver is the report, and fixing what they find is a new request you decide on. The ones that do change something (a fix, a refactor, an upgrade, a design's documents) do it on a branch of its own, and nothing is merged for you.
 
-A stage of a Role's own Workflow often sends its owner to one of its [Playbooks](playbooks.md): the Workflow says who does what and in which order, the Playbook says which tools to run and how.
+A stage often sends its owner to one of its [Playbooks](playbooks.md): the Workflow says who does what and in which order, the Playbook says which tools to run and how.
 
 ## Stopping a run
 
@@ -110,11 +121,107 @@ A secret found on the way is reported by where it is, never copied into a note o
 | 3   | Triage             | QA Engineer           | Every finding left has a priority and a reason, grouped into steps. |
 | 4   | Report             | Agile Project Manager | The findings by priority and the first steps recommended.           |
 
-## The DevSecOps Engineer's Workflows
+### Sprint planning
 
-Led by the DevSecOps Engineer, who does its own stages with its [Playbooks](playbooks.md) and brings in the other Roles for theirs.
+| #   | Stage            | Role                  | What closes it                                                                                          |
+| --- | ---------------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
+| 1   | Goal and backlog | Agile Project Manager | The goal agreed with you, where things stand, and the candidate stories with their acceptance criteria. |
+| 2   | Feasibility      | Architect             | Every candidate has a size with its reason, or a question that must be answered first.                  |
+| 2   | Readiness        | QA Engineer           | Every acceptance criterion can be checked as written, and what done must include.                       |
+| 3   | Plan             | Agile Project Manager | You agreed to the plan in so many words: what is in, what is out, what done means, the risks.           |
+| 4   | Report           | Agile Project Manager | The agreed plan written where the team keeps it, and what each Role starts with.                        |
 
-### Pipeline troubleshooting
+Nothing is written to your tracker before you agree to the plan, and nobody starts building during the planning.
+
+## The Roles' own Workflows
+
+Each is led by the Role it belongs to, which does its own stages with its [Playbooks](playbooks.md) and brings in the other Roles for theirs.
+
+![The request dialog for the Security Engineer's Threat model: its stages by step, three of them at the same time with the Architect, the Cloud Engineer and the DevSecOps Engineer](images/workflow-request-threat-model.png)
+
+### Architect
+
+#### Architecture review
+
+| #   | Stage                 | Role               | What closes it                                                                               |
+| --- | --------------------- | ------------------ | -------------------------------------------------------------------------------------------- |
+| 1   | Map                   | Architect          | The structure the repository says it has, and the parts as they are.                         |
+| 2   | Structure             | Architect          | Dependencies that point the wrong way, where change is expensive, what no tool decides.      |
+| 2   | Testability           | QA Engineer        | What cannot be tested without starting the whole system, and where a seam is missing.        |
+| 2   | Security architecture | Security Engineer  | Weaknesses no single file shows: misplaced trust, a check another path goes round.           |
+| 2   | Operability           | DevSecOps Engineer | What must be built and deployed together, and how a failure is traced to a part.             |
+| 3   | Recommendations       | Architect          | Every finding left ranked by what it costs against what fixing it costs.                     |
+| 4   | Report                | Architect          | The intended and the real structure side by side, the findings by priority, the first steps. |
+
+#### Technical design
+
+| #   | Stage           | Role              | What closes it                                                                                  |
+| --- | --------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
+| 1   | Context         | Architect         | The goal and how anyone will know it is met, the constraints, the system as it is.              |
+| 2   | Options         | Architect         | At least two real options, and the one recommended with what it trades away.                    |
+| 3   | Security review | Security Engineer | Each concern with what would answer it: new entry points, trust boundaries that move, the data. |
+| 3   | Test strategy   | QA Engineer       | How the design would be tested, and what is hard to test as designed.                           |
+| 3   | Operations      | Cloud Engineer    | Where each part runs, what it needs, how it is observed and recovered, roughly what it costs.   |
+| 4   | Decision        | Architect         | The decision record and the plan in steps, committed as documents on a branch of its own.       |
+| 5   | Report          | Architect         | What was decided and what it trades away, where the documents are, what is yours to decide.     |
+
+Nobody implements the design in this run: building it is a new request.
+
+### Developer
+
+#### Safe refactor
+
+| #   | Stage        | Role        | What closes it                                                                                          |
+| --- | ------------ | ----------- | ------------------------------------------------------------------------------------------------------- |
+| 1   | Bounds       | Developer   | What is restructured and why, what must not change, the branch, and who depends on the code.            |
+| 2   | Target shape | Architect   | The target structure agreed, or the objection with its reason.                                          |
+| 2   | Safety net   | QA Engineer | The missing tests written against the code as it is, passing, committed before any restructuring.       |
+| 3   | Refactor     | Developer   | One move per commit, the repository's checks green on each.                                             |
+| 4   | Verification | QA Engineer | The same tests pass as before, none removed, skipped or loosened, and the public interface is the same. |
+| 5   | Report       | Developer   | What was restructured, the commits, the checks before and after, what was found and left alone.         |
+
+A refactor and a change of behaviour never share a commit: a bug found on the way is noted for its own change.
+
+#### Dependency upgrade
+
+| #   | Stage        | Role               | What closes it                                                                                            |
+| --- | ------------ | ------------------ | --------------------------------------------------------------------------------------------------------- |
+| 1   | Plan         | Developer          | Each chosen upgrade with its two versions and the breaking changes that touch this project.               |
+| 2   | Origin check | DevSecOps Engineer | Each new version has a go, or a no with its reason: vulnerabilities, publisher, install scripts, licence. |
+| 3   | Upgrade      | Developer          | One upgrade per commit, through the package manager, the repository's checks passing.                     |
+| 4   | Verification | QA Engineer        | The suites, and the behaviours no test covers, exercised on the branch's last commit.                     |
+| 5   | Report       | Developer          | Each package with its two versions, what changed in the code, what was refused, what is still behind.     |
+
+### QA Engineer
+
+#### Full regression
+
+| #   | Stage                    | Role               | What closes it                                                                                           |
+| --- | ------------------------ | ------------------ | -------------------------------------------------------------------------------------------------------- |
+| 1   | Baseline                 | QA Engineer        | Every suite with its command, the commit under test, and the last green run to compare with.             |
+| 2   | Run                      | QA Engineer        | Every suite has its result, and every failure its class: regression, already broken, flaky, environment. |
+| 3   | Fix                      | Developer          | For each regression: the smallest change that removes it, on a branch.                                   |
+| 3   | Pipeline and environment | DevSecOps Engineer | For the failures that come from how the suites are run: the cause named, fixed as code or put to you.    |
+| 4   | Second run               | QA Engineer        | The regressions are gone, nothing new failed, and no test was skipped or loosened to get there.          |
+| 5   | Report                   | QA Engineer        | Each suite's result, each failure with its class, and the verdict with the risk that remains.            |
+
+#### Flaky test hunt
+
+| #   | Stage        | Role               | What closes it                                                                                       |
+| --- | ------------ | ------------------ | ---------------------------------------------------------------------------------------------------- |
+| 1   | Suspects     | QA Engineer        | Each suspect with how often it failed and where.                                                     |
+| 2   | Reproduction | QA Engineer        | Each suspect fails on demand with its cause named, or is named as not reproduced.                    |
+| 3   | Test fix     | QA Engineer        | For a cause in the test: the fix at the cause, one test per commit.                                  |
+| 3   | Product fix  | Developer          | For a cause in the product: a defect, fixed with a test that forces the failure without the fix.     |
+| 3   | Pipeline fix | DevSecOps Engineer | For a cause in how the suite runs: the change to the pipeline, as code. Never a retry of everything. |
+| 4   | Proof        | QA Engineer        | Each fixed test repeated at least three times as many runs as it took to fail, with no failure.      |
+| 5   | Report       | QA Engineer        | Each flaky test with its cause, what was fixed and where, the runs that prove it.                    |
+
+In both, nobody gets a suite green with a retry, a longer timeout or a skip, and whichever stages at step 3 the causes do not need are skipped, with a note.
+
+### DevSecOps Engineer
+
+#### Pipeline troubleshooting
 
 | #   | Stage           | Role               | What closes it                                                                                          |
 | --- | --------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
@@ -127,7 +234,7 @@ Led by the DevSecOps Engineer, who does its own stages with its [Playbooks](play
 
 Whichever of the two stages at step 3 the cause does not need is skipped, with a note. Nobody makes the pipeline green by skipping a test or turning a check off. How the Evidence stage uses [Pipeline Doctor](playbooks.md#pipeline-troubleshooting-and-pipeline-doctor) is in the Playbook.
 
-### Pipeline hardening
+#### Pipeline hardening
 
 | #   | Stage           | Role               | What closes it                                                                         |
 | --- | --------------- | ------------------ | -------------------------------------------------------------------------------------- |
@@ -138,7 +245,7 @@ Whichever of the two stages at step 3 the cause does not need is skipped, with a
 | 4   | Verification    | QA Engineer        | The pipeline runs green on the branch and still runs the same tests as before.         |
 | 5   | Report          | DevSecOps Engineer | The findings by severity, what was fixed and where, what waits for your decision.      |
 
-### Supply chain audit
+#### Supply chain audit
 
 | #   | Stage        | Role               | What closes it                                                                          |
 | --- | ------------ | ------------------ | --------------------------------------------------------------------------------------- |
@@ -147,6 +254,62 @@ Whichever of the two stages at step 3 the cause does not need is skipped, with a
 | 2   | Secrets      | Security Engineer  | Each match in the files and the history judged, by where it is, never by its value.     |
 | 3   | Triage       | Security Engineer  | Every finding left ranked by real risk in this system, with a reason.                   |
 | 4   | Report       | DevSecOps Engineer | The findings by severity, the secrets to replace, the tools that ran and those missing. |
+
+### Security Engineer
+
+#### Threat model
+
+| #   | Stage                       | Role               | What closes it                                                                                   |
+| --- | --------------------------- | ------------------ | ------------------------------------------------------------------------------------------------ |
+| 1   | Scope and assets            | Security Engineer  | What is modelled, and what is worth protecting.                                                  |
+| 2   | How it is built             | Architect          | The components, data flows, entry points and trust boundaries, each with the file that shows it. |
+| 2   | Where it runs               | Cloud Engineer     | What is reachable from the network, the identity each part runs as, where data is stored.        |
+| 2   | How it is built and shipped | DevSecOps Engineer | Who can change the pipeline, the secrets it reads, what an outside pull request can make it run. |
+| 3   | Threats and controls        | Security Engineer  | Every gap has a severity, a reason and a concrete fix.                                           |
+| 4   | Report                      | Security Engineer  | The model written down: the threats that matter most with their controls, the gaps by severity.  |
+
+Nothing is attacked: the model comes from reading how the system is built.
+
+#### Vulnerability review
+
+| #   | Stage          | Role               | What closes it                                                                              |
+| --- | -------------- | ------------------ | ------------------------------------------------------------------------------------------- |
+| 1   | Scope and scan | Security Engineer  | What ran, what was missing, and the leads each tool gave.                                   |
+| 2   | Code reading   | Security Engineer  | Every entry point in scope read for what no scanner sees.                                   |
+| 2   | Supply chain   | DevSecOps Engineer | Known vulnerabilities in the dependencies, secrets in the files and the history (redacted). |
+| 3   | Triage         | Security Engineer  | Every finding left ranked by real risk, and you are asked which to fix now.                 |
+| 4   | Fix            | Developer          | For the findings you chose: one per commit, each with the test that fails without it.       |
+| 5   | Verification   | Security Engineer  | Each fix closes the path, not only the one input that showed it.                            |
+| 6   | Report         | Security Engineer  | The findings by severity, what was fixed and where, what waits for your decision.           |
+
+Without your answer after the triage nothing is fixed: the report is what the run delivers, and the last two stages before it are skipped with a note.
+
+### Cloud Engineer
+
+#### Infrastructure review
+
+| #   | Stage                | Role               | What closes it                                                                                        |
+| --- | -------------------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
+| 1   | Inventory            | Cloud Engineer     | The root modules, the environments, the providers and modules with their versions, where state lives. |
+| 2   | Checks               | Cloud Engineer     | Format, validation, the linter, the scanners and what no tool decides; a plan only if you said yes.   |
+| 2   | Network and identity | Security Engineer  | What is reachable from the internet, and what each identity could do if it were taken over.           |
+| 2   | Deployment           | DevSecOps Engineer | Who or what applies the code, with which identity, and where the plan is reviewed.                    |
+| 3   | Findings             | Cloud Engineer     | Every finding left has a severity, a reason and the change that would fix it.                         |
+| 4   | Report               | Cloud Engineer     | The findings by severity, what the plan showed if one was made, the tools that ran and those missing. |
+
+Nothing is applied, imported or destroyed. A `terraform plan` reads your real cloud account, so the lead asks you once whether you want one and for which environment; without a yes in so many words, the review is from the code alone.
+
+#### Cost review
+
+| #   | Stage     | Role           | What closes it                                                                         |
+| --- | --------- | -------------- | -------------------------------------------------------------------------------------- |
+| 1   | Inventory | Cloud Engineer | The root modules and environments, and the resources that usually carry the bill.      |
+| 2   | Estimate  | Cloud Engineer | The monthly estimate per environment, each number with its source and its assumptions. |
+| 2   | Design    | Architect      | What in the design makes it expensive, and what a cheaper design would give up.        |
+| 3   | Savings   | Cloud Engineer | Each saving with its money per month, its trade-off and who should decide.             |
+| 4   | Report    | Cloud Engineer | The estimate, what makes most of it, the savings in order, every assumption.           |
+
+The lead asks you once for the expected usage, and whether pricing through Infracost is fine with you (see [what it needs and sends](playbooks.md#what-reaches-outside-your-machine)).
 
 ## Where the built-in Workflows live
 
@@ -232,7 +395,7 @@ Create `~/.pixel-agents/workflows.json` to add a Workflow or replace a built-in 
 | `stages[].brief`    | What the stage's owner does and what closes it, up to 2,000 characters: one string, or a list of lines. The lead is told it; write it so it can check the result. |
 | `stages[].parallel` | `true` when the stage may run at the same time as the stage listed before it. Not on the first stage.                                                             |
 
-The built-in ids are `new-feature`, `bug-fix`, `security-review`, `quality-review`, `pipeline-troubleshooting`, `pipeline-hardening` and `supply-chain-audit`. An entry with one of them replaces that Workflow **whole** (its stages are a list, not fields to merge), so start from the full Workflow you want. New Workflows are listed after the built-in ones, in the file's order; the drawer shows each under the Role that leads it. Up to 30 entries are read.
+The built-in ids are `new-feature`, `bug-fix`, `security-review`, `quality-review`, `sprint-planning`, `architecture-review`, `technical-design`, `safe-refactor`, `dependency-upgrade`, `full-regression`, `flaky-test-hunt`, `pipeline-troubleshooting`, `pipeline-hardening`, `supply-chain-audit`, `threat-model`, `vulnerability-review`, `infrastructure-review` and `cost-review`. An entry with one of them replaces that Workflow **whole** (its stages are a list, not fields to merge), so start from the full Workflow you want. New Workflows are listed after the built-in ones, in the file's order; the drawer shows each under the Role that leads it. Up to 30 entries are read.
 
 A change applies to the next run you start; reload the office to see a new or renamed Workflow in the drawer. A run already under way keeps the stages it started with.
 
