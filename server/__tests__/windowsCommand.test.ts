@@ -134,6 +134,22 @@ describe('windowsLaunch', () => {
     });
   });
 
+  it('starts Node on a script with no extension (an npm `bin` often has none)', () => {
+    const launcher = npmScriptLauncher().replace(
+      'node_modules\\some-cli\\cli.js',
+      'node_modules\\some-cli\\bin\\tool',
+    );
+    const files = disk({
+      [`${NODE_DIR}\\tool.cmd`]: launcher,
+      [`${NODE_DIR}\\node.exe`]: '',
+      [`${NODE_DIR}\\node_modules\\some-cli\\bin\\tool`]: '',
+    });
+    expect(windowsLaunch('tool', ['x'], { cwd: CWD, env: env([NODE_DIR]) }, files)).toEqual({
+      command: `${NODE_DIR}\\node.exe`,
+      args: [`${NODE_DIR}\\node_modules\\some-cli\\bin\\tool`, 'x'],
+    });
+  });
+
   it("reads pnpm's launcher too", () => {
     const files = disk({
       [`${TOOLS_DIR}\\tool.cmd`]: PNPM_SCRIPT_LAUNCHER,
@@ -171,6 +187,23 @@ describe('windowsLaunch', () => {
       files,
     );
     expect(launch.command).toBe(`${NODE_DIR}\\tool.exe`);
+  });
+
+  it('takes a name that says what it is as given, whatever PATHEXT lists', () => {
+    // PATHEXT only completes a bare name: `node.exe` is not looked for as `node.exe.cmd`.
+    const cmdOnly = env([TOOLS_DIR, NODE_DIR], { PATHEXT: '.CMD' });
+    const files = disk({
+      [`${TOOLS_DIR}\\tool.cmd`]: npmScriptLauncher(),
+      [`${TOOLS_DIR}\\node_modules\\some-cli\\cli.js`]: '',
+      [`${NODE_DIR}\\node.exe`]: '',
+    });
+    expect(windowsLaunch('tool', ['x'], { cwd: CWD, env: cmdOnly }, files)).toEqual({
+      command: `${NODE_DIR}\\node.exe`,
+      args: [`${TOOLS_DIR}\\node_modules\\some-cli\\cli.js`, 'x'],
+    });
+    expect(windowsLaunch('node.exe', [], { cwd: CWD, env: cmdOnly }, files).command).toBe(
+      `${NODE_DIR}\\node.exe`,
+    );
   });
 
   it('never picks a file from the folder the terminal opens in', () => {
@@ -245,12 +278,18 @@ describe('windowsLaunch', () => {
         'does not hand its script straight to Node',
       );
       expect(refused('sh "%~dp0\\run.sh" %*\r\n', { [`${TOOLS_DIR}\\run.sh`]: '' })).toContain(
-        'neither a program nor a Node script',
+        'does not hand its script straight to Node',
       );
       // Arguments of the launcher's own between Node and the script are not carried over.
       expect(
         refused('node --no-warnings "%~dp0\\cli.js" %*\r\n', { [`${TOOLS_DIR}\\cli.js`]: '' }),
       ).toContain('does not hand its script straight to Node');
+    });
+
+    it('a launcher running by itself something that is not a program', () => {
+      expect(refused('"%~dp0\\other.cmd" %*\r\n', { [`${TOOLS_DIR}\\other.cmd`]: '' })).toContain(
+        'what it runs by itself is not a program',
+      );
     });
 
     it('a launcher running a program through another one', () => {
