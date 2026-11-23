@@ -34,6 +34,7 @@ import type {
   TerminalSessions,
 } from './terminalSessions.js';
 import { TerminalEvents } from './terminalSessions.js';
+import { windowsLaunch } from './windowsCommand.js';
 
 /**
  * The mode that restores the mirror's mouse encoding ('' for the default).
@@ -337,11 +338,18 @@ function spawnPty(
   cols: number,
   rows: number,
 ): IPty {
-  return module.spawn(options.command, options.args, {
+  const env = terminalEnv(options.env);
+  // Windows starts programs: a CLI installed as a package manager's .cmd
+  // launcher is started as the program that launcher runs (windowsCommand.ts).
+  const { command, args } =
+    process.platform === 'win32'
+      ? windowsLaunch(options.command, options.args, { cwd: options.cwd, env })
+      : options;
+  return module.spawn(command, args, {
     name: TERMINAL_TERM_NAME,
     cols,
     rows,
     cwd: options.cwd,
-    env: terminalEnv(options.env),
+    env,
   });
 }
