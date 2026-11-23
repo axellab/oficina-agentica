@@ -17,6 +17,7 @@ import { handleCastMessage } from '../characters/castMessages.js';
 import { castStore } from '../characters/castStore.js';
 import { startOfficeSync } from '../characters/officeSprites.js';
 import { type Card, cardOrderOf } from '../components/cardBar.js';
+import { handleCrewsMessage } from '../crews/crewStore.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import { clearAgentContextUsed, setAgentContextUsed } from '../office/contextGauge.js';
 import { applyAgentMessageShow, applyAgentVisit } from '../office/engine/agentVisit.js';
@@ -438,6 +439,8 @@ export function useExtensionMessages(
       // Usage bars (usage/usageStore.ts): the bridge's state and the plan usage.
       if (handleUsageMessage(msg)) return;
       if (handleRolesMessage(msg)) return;
+      // Crews (crews/crewStore.ts): who the user set free to work together.
+      if (handleCrewsMessage(msg)) return;
       if (handleSignInMessage(msg)) return;
       // The Pixel Office MCP (officeMcp/officeMcpStore.ts): its settings and Intro step.
       if (handleOfficeMcpMessage(msg)) return;

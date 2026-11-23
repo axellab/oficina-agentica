@@ -27,8 +27,10 @@ import {
 import { WorktreeRejectedModal } from './components/WorktreeRejectedModal.js';
 import { MobileZoomLevel, ZoomControls } from './components/ZoomControls.js';
 import {
+  AGENT_CARD_HEIGHT_PX,
   CARD_BAR_TOP_PX,
   CONVERSATION_SIDEBAR_WIDTH_PX,
+  CREW_PANEL_GAP_PX,
   OFFICE_CANVAS_TEST_ID,
   TERMINAL_SIDEBAR_WIDTH_PX,
 } from './constants.js';
@@ -37,6 +39,8 @@ import { ConversationSearch } from './conversations/ConversationSearch.js';
 import { ConversationSidebar } from './conversations/ConversationSidebar.js';
 import { useConversationSidebar } from './conversations/useConversationSidebar.js';
 import type { WorktreesListing } from './conversations/WorktreeList.js';
+import { CrewPanel } from './crews/CrewPanel.js';
+import { useCrews } from './crews/crewStore.js';
 import { useDirectoryEditor } from './hooks/useDirectoryEditor.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
@@ -44,7 +48,7 @@ import { type Directory, useExtensionMessages } from './hooks/useExtensionMessag
 import { useIntroTour } from './hooks/useIntroTour.js';
 import { useIsMobile } from './hooks/useIsMobile.js';
 import { useKeyboardViewport } from './hooks/useKeyboardViewport.js';
-import { useLaunchActions } from './hooks/useLaunchActions.js';
+import { type LaunchAs, useLaunchActions } from './hooks/useLaunchActions.js';
 import { popClass, usePresence } from './hooks/usePresence.js';
 import { useTerminalDrawer } from './hooks/useTerminalDrawer.js';
 import { MobileMenu, MobileMenuButton } from './mobile/MobileMenu.js';
@@ -249,10 +253,10 @@ function App() {
   const newWorktree = useNewWorktree(launchAgent);
   const { open: askNewWorktree } = newWorktree;
   const launchIntoDirectory = useCallback(
-    (directory: Directory, palette?: number, worktree?: boolean, roleId?: string) => {
-      // The Role picked in the drawer rides through the modal to the launch.
-      if (worktree) askNewWorktree(directory, palette, roleId);
-      else launchAgent(directory, palette, undefined, roleId);
+    (directory: Directory, palette?: number, worktree?: boolean, launchAs?: LaunchAs) => {
+      // The drawer's Role and Crew switch ride through the modal to the launch.
+      if (worktree) askNewWorktree(directory, palette, launchAs);
+      else launchAgent(directory, palette, undefined, launchAs);
     },
     [askNewWorktree, launchAgent],
   );
@@ -369,6 +373,9 @@ function App() {
   // checklist while a run is under way.
   const tutorial = useTutorial();
   const [tutorialRequested, setTutorialRequested] = useState(false);
+  // The Crews: the agents the user set free to work together (crewStore).
+  const crews = useCrews();
+  const endCrew = useCallback((crewId: string) => transport.send({ type: 'endCrew', crewId }), []);
   // What was on as the Intro's asks arrived (first run, Settings → Replay the
   // Intro): the choices' boxes start there.
   const [introReplay, setIntroReplay] = useState<{
@@ -766,6 +773,24 @@ function App() {
               onQuit={tutorial.quit}
               rightInset={isMobile || isDebugMode ? 0 : TERMINAL_SIDEBAR_WIDTH_PX}
               top={CARD_BAR_TOP_PX}
+            />
+          )}
+
+          {/* The Crews, top-right while one has agents: under the tutorial's
+              checklist where a run shows one (its header is a card tall). A
+              view-only office sees them and ends none. */}
+          {crews && crews.crews.length > 0 && (
+            <CrewPanel
+              crews={crews.crews}
+              maxAgents={crews.maxAgents}
+              onEnd={officeReadOnly ? undefined : endCrew}
+              rightInset={isMobile || isDebugMode ? 0 : TERMINAL_SIDEBAR_WIDTH_PX}
+              top={
+                CARD_BAR_TOP_PX +
+                (tutorial.status?.run && !officeReadOnly
+                  ? AGENT_CARD_HEIGHT_PX + CREW_PANEL_GAP_PX
+                  : 0)
+              }
             />
           )}
 

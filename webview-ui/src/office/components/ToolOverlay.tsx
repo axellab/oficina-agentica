@@ -21,6 +21,7 @@ import {
   TOOL_OVERLAY_GAP_PX,
   TOOL_OVERLAY_VERTICAL_OFFSET,
 } from '../../constants.js';
+import { activeCrewOf, useCrews } from '../../crews/crewStore.js';
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
 import { useFrameTick } from '../../hooks/useFrameTick.js';
 import { ContextBar } from '../ContextBar.js';
@@ -145,6 +146,7 @@ export function ToolOverlay({
   alwaysShowOverlay,
 }: ToolOverlayProps) {
   useFrameTick();
+  const crews = useCrews();
   // Each shown gist bubble's height (CSS px), measured when its text changes:
   // the label stacks above it (a frame late after a change).
   const gistHeights = useRef(new Map<number, number>());
@@ -331,6 +333,7 @@ export function ToolOverlay({
 
         // Team info
         const teamRoleLabel = ch.isTeamLead ? 'LEAD' : ch.agentName || null;
+        const inCrew = activeCrewOf(crews, id) !== undefined;
 
         // Context gauge. Every agent gets one — lead, teammate, adopted,
         // headless — as soon as the server reports its context (a cleared
@@ -366,15 +369,35 @@ export function ToolOverlay({
                   />
                 )}
                 <div className="flex flex-col gap-0 overflow-hidden">
-                  {/* The Role it was launched as, in the Role's colour. */}
-                  {ch.role && (
+                  {/* The Role it was launched as, in the Role's colour, after
+                      its Crew's mark where the user set it free to work with
+                      the others (the mark alone says "Crew" with no Role). */}
+                  {(ch.role || inCrew) && (
                     <span
-                      className="overflow-hidden text-ellipsis block leading-none"
-                      style={{ fontSize: '18px', color: ROLE_COLOR_HEX[ch.role.color] }}
-                      data-testid="agent-role"
-                      data-role-id={ch.role.id}
+                      className="flex items-center gap-4 leading-none overflow-hidden"
+                      style={{ fontSize: '18px' }}
                     >
-                      {ch.role.name}
+                      {inCrew && (
+                        <span
+                          className="inline-flex shrink-0 text-accent-bright"
+                          data-testid="agent-crew"
+                        >
+                          <PixelIcon name="crew" scale={1} />
+                          {ch.role && <span className="sr-only">Crew</span>}
+                        </span>
+                      )}
+                      {ch.role ? (
+                        <span
+                          className="min-w-0 overflow-hidden text-ellipsis block leading-none"
+                          style={{ color: ROLE_COLOR_HEX[ch.role.color] }}
+                          data-testid="agent-role"
+                          data-role-id={ch.role.id}
+                        >
+                          {ch.role.name}
+                        </span>
+                      ) : (
+                        <span className="text-accent-bright">Crew</span>
+                      )}
                     </span>
                   )}
                   {teamRoleLabel && (

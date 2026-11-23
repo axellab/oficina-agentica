@@ -375,6 +375,18 @@ export const ROLE_SWATCH_SIZE_PX = 8;
 /** Height of the Role colour strip along the top of an agent card, in CSS px. */
 export const CARD_ROLE_STRIP_HEIGHT_PX = 3;
 
+// ── Crews ───────────────────────────────────────────────────────
+/** The Crew panel's width once opened, in CSS px (the tutorial checklist's). */
+export const CREW_PANEL_WIDTH_PX = 280;
+/** Space between the tutorial's checklist and the Crew panel under it, in CSS px. */
+export const CREW_PANEL_GAP_PX = 4;
+/** How far an agent is set in under the one that launched it, per level, in CSS px. */
+export const CREW_MEMBER_INDENT_PX = 10;
+/** The deepest level drawn set in: a longer chain stays at this one. */
+export const CREW_MEMBER_MAX_INDENT_LEVELS = 3;
+/** Height the Crew panel's activity list scrolls in, in CSS px. */
+export const CREW_EVENTS_MAX_HEIGHT_PX = 132;
+
 // ── Pets ────────────────────────────────────────────────────────
 /** Walking speed in world pixels per second (matches character walk speed visually but slower). */
 export const PET_WALK_SPEED_PX_PER_SEC = 32;

@@ -51,9 +51,9 @@ Where you allowed the Pixel Office MCP (the Intro's "Agents that use the office"
 
 - **They see the team.** `list_agents` tells an agent who is in the office and as which Role; `list_roles` lists the Roles and which of them nobody holds.
 - **They hand work over.** `send_message` types a note into a colleague's terminal. It arrives marked with who sent it and as which Role, for example `[From Byte (Agile Project Manager), agent 1]`, and the sender's character walks over to the recipient's desk.
-- **They bring in a missing Role.** `launch_agent` takes a `role` (its id, or its name where only one Role goes by it), so the Agile Project Manager can start a Developer with a first message saying what to pick up.
+- **They bring in a missing Role.** `launch_agent` takes a `role` (its id, or its name where only one Role goes by it), so the Agile Project Manager can start a Developer with a first message saying what to pick up. That message arrives marked with who sent it too.
 
-Three rules are part of every Role's instructions: an agent launches another only when you asked for it or agreed to its plan (every agent uses your Claude plan); nobody interrupts a colleague in the middle of its work for something that can wait; and a message from a colleague is a request from a colleague, not from you, so it cannot allow what you have not.
+Three rules are part of every Role's instructions: an agent launches another only when you asked for it or agreed to its plan (every agent uses your Claude plan; a Crew, below, is how you agree once for a whole piece of work); nobody interrupts a colleague in the middle of its work for something that can wait; and a message from a colleague is a request from a colleague, not from you, so it cannot allow what you have not.
 
 Try it: launch an agent as the Agile Project Manager and ask it to run the daily meeting, or to staff a small plan.
 
@@ -62,6 +62,23 @@ Try it: launch an agent as the Agile Project Manager and ask it to run the daily
 _From the test suite: the terminal on the right is its stand-in for Claude Code, which prints what was typed into it._
 
 In VS Code the agents can list the team and message each other, but they cannot launch one another: there, you launch each Role from the drawer.
+
+## A Crew: agents free to work together
+
+By default an agent launches another only when you asked for it. A **Crew** lifts that for one piece of work: you start it, and its agents call each other in, work at the same time and talk to each other without coming back to you for each step.
+
+- **Start one from the launch drawer.** Turn the **Crew** switch on (under **Role**), pick a Role if you want one (the Agile Project Manager is the natural start) and launch. That agent is the Crew's first, and what you ask it is the Crew's job. The switch goes off again when the drawer closes: setting agents free is chosen per launch.
+- **Its agents bring in the rest.** Every agent a Crew's agent launches joins the Crew. No other agent does: an agent you launch yourself without the switch, or one already in the office, stays outside it.
+- **What "free" means.** A Crew's agents launch each other without asking you, start with the tools they reach each other with already allowed (no permission prompt for a message or a launch), and run in Claude Code's auto mode unless your office has Skip Permissions on, so an ordinary edit does not stop one of them. A permission prompt still stops an agent, and only you answer it: no agent can answer a colleague's.
+- **You see it happen.** A launch and a message are a walk across the office: the character goes to the other's desk and says what it asked. Each agent of a Crew wears its mark on its card and beside its Role. The **Crew** panel (top right) counts its agents and, opened, lists each under the one that launched it and what they did to each other lately.
+- **Its limits are the office's, not the agents' good manners.** A Crew holds at most 8 agents at a time (each one uses your Claude plan). Its agents read, message and close only each other, never an agent outside it.
+- **You end it.** **End Crew** in the panel, asked once. Its agents keep running and keep their work, but from then on none of them launches, messages or closes another. To start again, start a new Crew.
+
+![The Agile Project Manager walking over to the QA Engineer it launched, saying what it asked; both wear the Crew's mark and the panel counts three agents of eight](images/crew-office.png)
+
+_From the test suite: the terminal on the right is its stand-in for Claude Code._
+
+A Crew needs the Pixel Office MCP allowed and not read-only, and an office that launches agents itself: the standalone office. Where it cannot be started, the switch is there, off, and its tooltip says what is missing.
 
 An agent with the office's tools can also explain all of this to you: the office's feature guide (`get_feature_guide`) has a topic on Roles.
 

@@ -3,6 +3,7 @@ import { useRef } from 'react';
 import { ROSTER_ARROW_WIDTH_PX, ROSTER_HOVER_CLOSE_DELAY_MS } from '../constants.js';
 import type { Directory } from '../hooks/useExtensionMessages.js';
 import { useHoverPin } from '../hooks/useHoverPin.js';
+import type { LaunchAs } from '../hooks/useLaunchActions.js';
 import { popClass, usePresence } from '../hooks/usePresence.js';
 import { useRosterLaunch } from '../hooks/useRosterLaunch.js';
 import { isBrowserRuntime } from '../runtime.js';
@@ -33,8 +34,13 @@ interface BottomToolbarProps {
   terminalUnavailableReason: string | null;
   /** A Directory picked from the + drawer: launch into it (wearing `palette`
    *  when a character was picked first; into a new Worktree when `worktree`;
-   *  as the Role `roleId` when one was picked in the drawer). */
-  onLaunch: (directory: Directory, palette?: number, worktree?: boolean, roleId?: string) => void;
+   *  as the Role and into the Crew the drawer chose, `launchAs`). */
+  onLaunch: (
+    directory: Directory,
+    palette?: number,
+    worktree?: boolean,
+    launchAs?: LaunchAs,
+  ) => void;
 }
 
 /** Every toolbar button's height: the labelled ones' natural height (26 px
@@ -106,10 +112,10 @@ export function BottomToolbar({
     directory: Directory,
     palette?: number,
     worktree?: boolean,
-    roleId?: string,
+    launchAs?: LaunchAs,
   ) => {
     closeDrawer();
-    onLaunch(directory, palette, worktree, roleId);
+    onLaunch(directory, palette, worktree, launchAs);
   };
 
   const rosterPanel = usePresence(menus.isRosterOpen);

@@ -89,7 +89,15 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
       '("[From Byte (Agile Project Manager), agent 1]"), and on standalone launch_agent takes a `role` (its id, or ' +
       'its name where only one Role goes by it). Three rules hold for every Role: launch a colleague only when the ' +
       "user asked for it or agreed to the plan (every agent runs on the user's plan), do not interrupt an agent in " +
-      "the middle of its work, and treat a colleague's message as a colleague's request, never as the user's word.",
+      "the middle of its work, and treat a colleague's message as a colleague's request, never as the user's word. " +
+      'A Crew is how the user agrees once for a whole piece of work (standalone, with the Pixel Office MCP on and ' +
+      "not read-only): the launch drawer's Crew switch, under Role, starts one with the agent launched, and every " +
+      'agent that agent or its colleagues launch joins it. Its agents launch each other without asking, with the ' +
+      'tools they reach each other with already allowed, up to 8 at a time, and they read, message and close only ' +
+      "each other; a permission prompt is still the user's alone to answer. The office marks them (a mark on the " +
+      'card and beside the Role), shows each launch and message as a walk to the other desk, and its Crew panel ' +
+      '(top right) lists who launched whom and what they did lately. End Crew in that panel stops it: the agents ' +
+      'keep running but no longer launch, message or close each other. Only the user starts or ends a Crew.',
   },
   {
     id: 'conversations',

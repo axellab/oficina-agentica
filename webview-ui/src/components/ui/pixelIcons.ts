@@ -355,6 +355,17 @@ export const ICONS = {
     '##......',
     '##......',
   ],
+  // A Crew: two agents side by side.
+  crew: [
+    '.##..##.',
+    '.##..##.',
+    '........',
+    '###..###',
+    '###..###',
+    '###..###',
+    '###..###',
+    '........',
+  ],
   // A magnifying glass: the lens top-left, the handle out to the corner.
   search: [
     '.####...',

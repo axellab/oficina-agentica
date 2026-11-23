@@ -343,7 +343,7 @@ test.describe('Standalone / roles over the Pixel Office MCP', () => {
     await expectOverlayVisibleWithTexts(page, ['Developer', directoryName]);
 
     // The Developer was started as its Role (the instructions file on its
-    // command line) with the manager's first message.
+    // command line) with the manager's first message, tagged with who asks.
     const promptFile = path.join(
       standalone.tmpHome,
       '.pixel-agents',
@@ -355,7 +355,10 @@ test.describe('Standalone / roles over the Pixel Office MCP', () => {
       .toContain(`--append-system-prompt-file ${promptFile}`);
     await developerCard.click();
     const developerTerminal = page.locator('.xterm:visible');
-    await expect(developerTerminal).toContainText(`> ${firstMessage}`, { timeout: 15_000 });
+    await expect(developerTerminal).toContainText(
+      `(Agile Project Manager), agent 1] ${firstMessage}`,
+      { timeout: 15_000 },
+    );
 
     // The manager's question reached the Developer's terminal, tagged with
     // which Role is asking.
