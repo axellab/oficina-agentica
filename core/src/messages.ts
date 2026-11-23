@@ -60,6 +60,8 @@ export type ServerMessage =
   | DirectorySuggestions
   | RolesLoaded
   | CrewsLoaded
+  | WorkflowsLoaded
+  | WorkflowRejected
   | ConversationsLoaded
   | ConversationSearchResults
   | WorktreeRejected
@@ -106,6 +108,8 @@ export type ClientMessage =
   | SkipTutorialQuest
   | QuitTutorial
   | EndCrew
+  | StartWorkflow
+  | StopWorkflow
   | SetWatchAllSessions
   | ExportLayout
   | ImportLayout
@@ -728,6 +732,58 @@ export interface CrewEvent {
 
 export type CrewEventKind = 'launched' | 'messaged' | 'closed';
 
+export interface WorkflowsLoaded {
+  type: 'workflowsLoaded';
+  available: boolean;
+  unavailableReason?: string;
+  workflows: Workflow[];
+  runs: WorkflowRun[];
+}
+
+export interface Workflow {
+  id: string;
+  name: string;
+  description: string;
+  source: WorkflowSource;
+  leadRoleName: string;
+  stages: WorkflowStage[];
+}
+
+export type WorkflowSource = 'builtin' | 'user';
+
+export interface WorkflowStage {
+  id: string;
+  title: string;
+  roleName: string;
+  parallel?: boolean;
+}
+
+export interface WorkflowRun {
+  crewId: string;
+  workflowId: string;
+  name: string;
+  leadAgentId?: number;
+  request: string;
+  finished: boolean;
+  stages: WorkflowRunStage[];
+}
+
+export interface WorkflowRunStage {
+  id: string;
+  title: string;
+  roleName: string;
+  parallel?: boolean;
+  state: WorkflowStageState;
+  note?: string;
+}
+
+export type WorkflowStageState = 'pending' | 'active' | 'done' | 'skipped';
+
+export interface WorkflowRejected {
+  type: 'workflowRejected';
+  reason: string;
+}
+
 export interface ConversationsLoaded {
   type: 'conversationsLoaded';
   directories: DirectoryConversations[];
@@ -1049,6 +1105,19 @@ export interface QuitTutorial {
 
 export interface EndCrew {
   type: 'endCrew';
+  crewId: string;
+}
+
+export interface StartWorkflow {
+  type: 'startWorkflow';
+  workflowId: string;
+  directoryPath: string;
+  request: string;
+  palette?: number;
+}
+
+export interface StopWorkflow {
+  type: 'stopWorkflow';
   crewId: string;
 }
 

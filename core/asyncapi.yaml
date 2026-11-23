@@ -147,6 +147,9 @@ components:
         - $ref: '#/components/schemas/RolesLoaded'
         # Crews (agents the user set free to work together)
         - $ref: '#/components/schemas/CrewsLoaded'
+        # Workflows (one kind of request, handled by a Crew stage by stage)
+        - $ref: '#/components/schemas/WorkflowsLoaded'
+        - $ref: '#/components/schemas/WorkflowRejected'
         - $ref: '#/components/schemas/ConversationsLoaded'
         - $ref: '#/components/schemas/ConversationSearchResults'
         # Worktrees
@@ -199,6 +202,8 @@ components:
         - $ref: '#/components/schemas/SkipTutorialQuest'
         - $ref: '#/components/schemas/QuitTutorial'
         - $ref: '#/components/schemas/EndCrew'
+        - $ref: '#/components/schemas/StartWorkflow'
+        - $ref: '#/components/schemas/StopWorkflow'
         - $ref: '#/components/schemas/SetWatchAllSessions'
         - $ref: '#/components/schemas/ExportLayout'
         - $ref: '#/components/schemas/ImportLayout'
@@ -1807,6 +1812,160 @@ components:
           items:
             $ref: '#/components/schemas/Crew'
 
+    WorkflowSource:
+      description: |
+        Where a Workflow comes from: `builtin` ships with Pixel Agents, `user`
+        is the host's own (its `workflows.json`), a replaced built-in one
+        included.
+      type: string
+      enum: [builtin, user]
+
+    WorkflowStage:
+      description: |
+        One stage of a Workflow, as the office lists it: its title and the
+        name of the Role that owns it. `parallel`: it may run at the same time
+        as the stage listed before it. What its owner is told never travels.
+      type: object
+      additionalProperties: false
+      required: [id, title, roleName]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        roleName:
+          type: string
+        parallel:
+          type: boolean
+
+    Workflow:
+      description: |
+        A Workflow: how one kind of request (a new feature, a bug fix, a deep
+        security or quality analysis...) is handled, as an ordered list of
+        stages, each owned by a Role. `leadRoleName` is the Role of the agent
+        that leads its runs.
+      type: object
+      additionalProperties: false
+      required: [id, name, description, source, leadRoleName, stages]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        source:
+          $ref: '#/components/schemas/WorkflowSource'
+        leadRoleName:
+          type: string
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowStage'
+
+    WorkflowStageState:
+      description: |
+        Where one stage of a Workflow run stands: `pending` (not started),
+        `active` (being worked on), `done`, or `skipped` (the request did not
+        need it).
+      type: string
+      enum: [pending, active, done, skipped]
+
+    WorkflowRunStage:
+      description: |
+        One stage of a Workflow run and where it stands. `note` is what the
+        run's lead said when it finished or skipped it, cut short.
+      type: object
+      additionalProperties: false
+      required: [id, title, roleName, state]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        roleName:
+          type: string
+        parallel:
+          type: boolean
+        state:
+          $ref: '#/components/schemas/WorkflowStageState'
+        note:
+          type: string
+
+    WorkflowRun:
+      description: |
+        A Workflow run: one request being handled by a Workflow. It is the
+        work of one Crew (`crewId`, which names the run too), led by the agent
+        the user started it with (`leadAgentId`, absent while that agent is
+        still launching). `request` is the user's words, cut short. `finished`
+        once every stage is done or skipped. Listed until its lead leaves the
+        office or the user stops it.
+      type: object
+      additionalProperties: false
+      required: [crewId, workflowId, name, request, finished, stages]
+      properties:
+        crewId:
+          type: string
+        workflowId:
+          type: string
+        name:
+          type: string
+        leadAgentId:
+          type: integer
+        request:
+          type: string
+        finished:
+          type: boolean
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowRunStage'
+
+    WorkflowsLoaded:
+      description: |
+        The Workflows of the office, the whole list: the catalog a run can be
+        started from (the built-in Workflows with the host's own
+        `~/.pixel-agents/workflows.json` laid over them) and the runs under
+        way. `available` says whether one can be started now
+        (`startWorkflow`), else `unavailableReason` in plain words: a run is a
+        Crew's work, so it needs what a Crew needs. Sent on `webviewReady` by
+        a server whose Pixel Office MCP can launch agents, and broadcast after
+        every change. Memory only on the client: a reconnect takes the new
+        list as the whole truth.
+      type: object
+      additionalProperties: false
+      required: [type, available, workflows, runs]
+      properties:
+        type:
+          const: workflowsLoaded
+        available:
+          type: boolean
+        unavailableReason:
+          type: string
+        workflows:
+          type: array
+          items:
+            $ref: '#/components/schemas/Workflow'
+        runs:
+          type: array
+          description: In the order they were started.
+          items:
+            $ref: '#/components/schemas/WorkflowRun'
+
+    WorkflowRejected:
+      description: |
+        A `startWorkflow` that started nothing, to its sender alone: why (no
+        such Workflow, an empty request, no Crew can be started, the lead's
+        launch failed).
+      type: object
+      additionalProperties: false
+      required: [type, reason]
+      properties:
+        type:
+          const: workflowRejected
+        reason:
+          type: string
+
     ConversationsLoaded:
       description: |
         The sidebar's recent conversations: for each Directory, the ones an
@@ -2522,6 +2681,50 @@ components:
           const: endCrew
         crewId:
           type: string
+
+    StartWorkflow:
+      description: |
+        The user starts a Workflow run: the agent that leads it is launched
+        into the Directory at `directoryPath` as the Workflow's lead Role
+        (wearing `palette`, a roster pick, when given), in a new Crew, and
+        told to read its request and stages from the Pixel Office MCP's
+        `workflow` tool. `request` is what the user asks for, in their own
+        words: it reaches the lead through that tool, never on a command
+        line. Answered with a `workflowsLoaded` broadcast carrying the run,
+        or `workflowRejected` to the sender. Only an office starts one, never
+        an agent.
+      type: object
+      additionalProperties: false
+      required: [type, workflowId, directoryPath, request]
+      properties:
+        type:
+          const: startWorkflow
+        workflowId:
+          type: string
+        directoryPath:
+          type: string
+          description: Path of the Directory the lead is launched into.
+        request:
+          type: string
+        palette:
+          type: integer
+          minimum: 0
+
+    StopWorkflow:
+      description: |
+        The user stopped a Workflow run (its panel's Stop): the run is over
+        and its Crew is ended, as `endCrew` would: the agents keep running
+        but no longer launch, message or close each other. Answered with
+        `workflowsLoaded` and `crewsLoaded` broadcasts.
+      type: object
+      additionalProperties: false
+      required: [type, crewId]
+      properties:
+        type:
+          const: stopWorkflow
+        crewId:
+          type: string
+          description: The run's Crew (`WorkflowRun.crewId`).
 
     OfficeMcpChoice:
       description: |

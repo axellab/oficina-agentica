@@ -3,7 +3,7 @@
  * the MCP module (route, tokens, tool table) and the runtime, split by
  * capability (OfficeCapabilities). composeOfficeMcp.ts builds them from the
  * surface's office facts — one module per capability (agentsView, layoutOps,
- * messaging, visitsOps, charactersView, directoryOps, lifecycle, pcShellOps, rolesView) — and tools only ever call these, never the
+ * messaging, visitsOps, charactersView, directoryOps, lifecycle, pcShellOps, rolesView; the tutorial's and the Workflows' owners are their own) — and tools only ever call these, never the
  * store or the runtime directly.
  *
  * A later tool that needs a new operation adds it HERE (typed in office
@@ -15,6 +15,8 @@ import type { CrewLaunch } from '../crews.js';
 import type { MessageKey, ShellKey, TypedInput } from '../terminal/agentTerminals.js';
 import type { LaunchAsks } from '../terminal/launchAsks.js';
 import type { TutorialSkipOutcome, TutorialView } from '../tutorial/tutorial.js';
+import type { StageMove } from '../workflows/workflowProgress.js';
+import type { WorkflowMoveOutcome, WorkflowView } from '../workflows/workflows.js';
 
 /** The named keys a Message may press (the office's word for them). */
 export { MESSAGE_KEYS } from '../terminal/agentTerminals.js';
@@ -339,6 +341,14 @@ export interface TutorialOps {
   skip(caller: number, questId: string): TutorialSkipOutcome;
 }
 
+/** Workflow runs (workflow): one request of the user's that a Crew handles
+ *  stage by stage, as the asking agent sees it, and its lead reporting a stage
+ *  (workflows/workflows.ts). Only a surface whose office starts Crews has it. */
+export interface WorkflowOps {
+  view(caller: number): WorkflowView;
+  move(caller: number, move: StageMove, stageId: string, note?: string): WorkflowMoveOutcome;
+}
+
 /** Everything the tools may call, by capability: a tool names the ones it uses
  *  (`uses`), and the MCP offers a tool only where its surface supplies them. */
 export interface OfficeCapabilities {
@@ -353,19 +363,21 @@ export interface OfficeCapabilities {
   close: Closing;
   shells: PcShellOps;
   tutorial: TutorialOps;
+  workflows: WorkflowOps;
 }
 
 export type Capability = keyof OfficeCapabilities;
 
 /** What a surface's office supplies: every capability (the tutorial's too,
  *  even where it can't be started: its tool then says none runs) but launching,
- *  closing and PC shells, which only a surface that can do them has (standalone;
- *  VS Code doesn't list launch_agent / close_agent or the PC shell tools at all). */
+ *  closing, PC shells and Workflow runs, which only a surface that can do them
+ *  has (standalone; VS Code doesn't list launch_agent / close_agent, the PC
+ *  shell tools or workflow at all). */
 export type OfficeOperations = Pick<
   OfficeCapabilities,
   'agents' | 'layout' | 'messaging' | 'visits' | 'characters' | 'directories' | 'roles' | 'tutorial'
 > &
-  Partial<Pick<OfficeCapabilities, 'launch' | 'close' | 'shells'>>;
+  Partial<Pick<OfficeCapabilities, 'launch' | 'close' | 'shells' | 'workflows'>>;
 
 // ── Launch (launch_agent) ───────────────────────────────────
 
