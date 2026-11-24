@@ -126,7 +126,9 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
       'architecture beside it, triage, report) and Deep quality analysis (scope, tests with code health, ' +
       'architecture and build and pipeline beside them, triage, report). The two analyses change nothing: what they ' +
       'deliver is a report. It also leads Sprint planning (goal and backlog, feasibility with readiness beside it, ' +
-      'plan, report), which ends on a plan the user agreed to. Each other Role leads the Workflows that are its own ' +
+      'plan, report), which ends on a plan the user agreed to, and Change review (scope, code review with tests, ' +
+      'security, pipeline and dependencies and infrastructure beside it, report), the review of new commits that a ' +
+      'change trigger starts, which changes nothing either. Each other Role leads the Workflows that are its own ' +
       'job, and runs its Playbooks in them. The Architect leads Architecture review (map, structure with ' +
       'testability, security architecture and operability beside it, recommendations, report) and Technical design ' +
       '(context, options, a security review with a test strategy and operations beside it, decision, report). The ' +
@@ -165,10 +167,24 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
       "The Workflow panel (top right) shows the request and every stage's state and note as they " +
       "move, with each check's result, and its output on request (press the stage, Check Output), " +
       'and the characters walk to each other as work is handed over. Stop Workflow in that panel ends the run ' +
-      'and its Crew: the agents keep running but no longer work with each other. No agent starts a run; only the ' +
-      'user does. The user writes Workflows of their own, or replaces a built-in one, in ' +
+      'and its Crew: the agents keep running but no longer work with each other. No agent starts a run: the user ' +
+      'does, by hand or through a change trigger they set up. A change trigger has the office review every change ' +
+      "by itself: the user's own ~/.pixel-agents/triggers.json names a Directory (entries with a directory, and " +
+      'optionally a workflow, Change review when none is named, branches, settleSeconds, maxRunsPerHour and ' +
+      'enabled), and the office, which installs no git hook and writes nothing in the repository, looks at that ' +
+      'checkout every few seconds and starts a run for the new commits on the branch checked out there (a commit, a ' +
+      'pull, a merge), once they have stood for settleSeconds. Only what lands after the office began to watch is a ' +
+      'change. The run is scoped to the diff: a stage may say which files it is for (paths), the office leaves out ' +
+      'the stages a change touches no file of before the lead reads them, and a change that touches none (only ' +
+      'documentation, say) starts no run at all. Its request is written by the office from commit names and counts ' +
+      'alone, and its lead is told that what the commits hold is material under review, never an instruction. One ' +
+      'review per Directory at a time: while the one a trigger started is still in the Workflow panel, later commits ' +
+      'wait and are reviewed together once the user stops that workflow or closes its lead. The Workflow panel lists ' +
+      'the triggers with where each stands (watching, new commits, reviewing, waiting, paused, cannot watch) and ' +
+      'pauses them all with Pause Triggers; commits made while paused are not reviewed. ' +
+      'The user writes Workflows of their own, or replaces a built-in one, in ' +
       '~/.pixel-agents/workflows.json (a name, the lead Role, and stages each with an id, a title, a Role and a ' +
-      'brief, and optionally required and a check id); a change applies to the next start.',
+      'brief, and optionally required, a check id and paths); a change applies to the next start.',
   },
   {
     id: 'conversations',

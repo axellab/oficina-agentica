@@ -409,10 +409,12 @@ export function handleClientMessage(
     case 'startWorkflow':
     case 'stopWorkflow':
     case 'skipWorkflowStage':
+    case 'setChangeTriggersPaused':
     case 'requestWorkflowCheckOutput':
       // The Pixel Office MCP's consent, its switches, the editing lock and undo,
       // and what runs on it: the tutorial, a Crew's end, a Workflow run's start
-      // and stop, a stage the user skips and the output of a stage's Check.
+      // and stop, a stage the user skips, the Change triggers' pause and the
+      // output of a stage's Check.
       ctx.officeMcp?.handleMessage(msg, ctx.client, (m) => send({ ...m }));
       break;
 

@@ -397,6 +397,11 @@ function App() {
       transport.send({ type: 'skipWorkflowStage', crewId, stageId }),
     [],
   );
+  // The host's Change triggers, paused or resumed from the Workflow panel.
+  const setChangeTriggersPaused = useCallback(
+    (paused: boolean) => transport.send({ type: 'setChangeTriggersPaused', paused }),
+    [],
+  );
   // A stage's Check as the office ran it (WorkflowCheckOutputModal shows the answer).
   const requestCheckOutput = useCallback(
     (crewId: string, stageId: string) =>
@@ -413,7 +418,13 @@ function App() {
   // The office's top-right panels (OfficePanels): the tutorial's checklist
   // while a run is under way, the Workflow runs, the Crews while one has agents.
   const tutorialRun = officeReadOnly ? undefined : tutorial.status?.run;
-  const shownRuns = workflows && workflows.runs.length > 0 ? workflows.runs : undefined;
+  // The Workflow panel is there for a run, and for the host's Change triggers
+  // (the Directories whose new commits start one) while none is under way.
+  const changeTriggers = workflows?.changeTriggers ?? [];
+  const shownRuns =
+    workflows && (workflows.runs.length > 0 || changeTriggers.length > 0)
+      ? workflows.runs
+      : undefined;
   const shownCrews = crews && crews.crews.length > 0 ? crews : undefined;
   // What was on as the Intro's asks arrived (first run, Settings → Replay the
   // Intro): the choices' boxes start there.
@@ -819,6 +830,9 @@ function App() {
                   onStop={officeReadOnly ? undefined : stopWorkflow}
                   onSkipStage={officeReadOnly ? undefined : skipWorkflowStage}
                   onShowCheckOutput={officeReadOnly ? undefined : showCheckOutput}
+                  triggers={changeTriggers}
+                  triggersPaused={workflows?.changeTriggersPaused === true}
+                  onSetTriggersPaused={officeReadOnly ? undefined : setChangeTriggersPaused}
                 />
               )}
               {shownCrews && (

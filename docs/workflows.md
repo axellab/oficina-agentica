@@ -4,26 +4,27 @@ A Workflow is how one kind of request is handled: an ordered list of stages, eac
 
 Every Workflow is led by one Role. The general ones are led by the Agile Project Manager, who coordinates the whole team; every other Role leads Workflows of its own, for the requests that are its speciality. You can write your own too.
 
-| Workflow                     | Led by                | For                                                                                            |
-| ---------------------------- | --------------------- | ---------------------------------------------------------------------------------------------- |
-| **New feature**              | Agile Project Manager | From a request to a tested, reviewed change ready to merge.                                    |
-| **Bug fix**                  | Agile Project Manager | Reproduce a bug, find its cause, fix it and prove it stays fixed.                              |
-| **Deep security analysis**   | Agile Project Manager | A threat model and a ranked list of security findings, with evidence.                          |
-| **Deep quality analysis**    | Agile Project Manager | How healthy the code, its tests and its pipeline are, with a ranked plan.                      |
-| **Sprint planning**          | Agile Project Manager | A goal and a backlog turned into a sprint plan you agreed to, story by story.                  |
-| **Architecture review**      | Architect             | How the system is really structured against how it is meant to be, with a ranked plan.         |
-| **Technical design**         | Architect             | A goal turned into a reviewed design, its decision recorded, and a plan in steps.              |
-| **Safe refactor**            | Developer             | Code restructured in small steps, its behaviour pinned by tests and proven unchanged.          |
-| **Dependency upgrade**       | Developer             | Dependencies upgraded one at a time, their changes read, their origin checked.                 |
-| **Full regression**          | QA Engineer           | Every suite run, each failure classified, the regressions fixed, and a verdict on the release. |
-| **Flaky test hunt**          | QA Engineer           | The tests that fail for no reason found, reproduced, and fixed at their cause.                 |
-| **Pipeline troubleshooting** | DevSecOps Engineer    | Why a pipeline that passed now fails, and a fix proven by a green run.                         |
-| **Pipeline hardening**       | DevSecOps Engineer    | The pipeline reviewed for mistakes and for abuse, and hardened on a branch.                    |
-| **Supply chain audit**       | DevSecOps Engineer    | What the code is built from, what in it is vulnerable, unpinned or leaked.                     |
-| **Threat model**             | Security Engineer     | How a system or a change could be attacked, and the control that answers each threat.          |
-| **Vulnerability review**     | Security Engineer     | The code scanned and read for vulnerabilities, ranked, fixed where you say, verified.          |
-| **Infrastructure review**    | Cloud Engineer        | The infrastructure code checked for mistakes, exposure and weak reliability, ranked.           |
-| **Cost review**              | Cloud Engineer        | What the infrastructure costs per month, what makes most of it, and where to save.             |
+| Workflow                     | Led by                | For                                                                                                               |
+| ---------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **New feature**              | Agile Project Manager | From a request to a tested, reviewed change ready to merge.                                                       |
+| **Bug fix**                  | Agile Project Manager | Reproduce a bug, find its cause, fix it and prove it stays fixed.                                                 |
+| **Deep security analysis**   | Agile Project Manager | A threat model and a ranked list of security findings, with evidence.                                             |
+| **Deep quality analysis**    | Agile Project Manager | How healthy the code, its tests and its pipeline are, with a ranked plan.                                         |
+| **Sprint planning**          | Agile Project Manager | A goal and a backlog turned into a sprint plan you agreed to, story by story.                                     |
+| **Change review**            | Agile Project Manager | The commits that just landed, reviewed for defects, tests and security. The office can start it for every change. |
+| **Architecture review**      | Architect             | How the system is really structured against how it is meant to be, with a ranked plan.                            |
+| **Technical design**         | Architect             | A goal turned into a reviewed design, its decision recorded, and a plan in steps.                                 |
+| **Safe refactor**            | Developer             | Code restructured in small steps, its behaviour pinned by tests and proven unchanged.                             |
+| **Dependency upgrade**       | Developer             | Dependencies upgraded one at a time, their changes read, their origin checked.                                    |
+| **Full regression**          | QA Engineer           | Every suite run, each failure classified, the regressions fixed, and a verdict on the release.                    |
+| **Flaky test hunt**          | QA Engineer           | The tests that fail for no reason found, reproduced, and fixed at their cause.                                    |
+| **Pipeline troubleshooting** | DevSecOps Engineer    | Why a pipeline that passed now fails, and a fix proven by a green run.                                            |
+| **Pipeline hardening**       | DevSecOps Engineer    | The pipeline reviewed for mistakes and for abuse, and hardened on a branch.                                       |
+| **Supply chain audit**       | DevSecOps Engineer    | What the code is built from, what in it is vulnerable, unpinned or leaked.                                        |
+| **Threat model**             | Security Engineer     | How a system or a change could be attacked, and the control that answers each threat.                             |
+| **Vulnerability review**     | Security Engineer     | The code scanned and read for vulnerabilities, ranked, fixed where you say, verified.                             |
+| **Infrastructure review**    | Cloud Engineer        | The infrastructure code checked for mistakes, exposure and weak reliability, ranked.                              |
+| **Cost review**              | Cloud Engineer        | What the infrastructure costs per month, what makes most of it, and where to save.                                |
 
 ## Starting a run
 
@@ -52,7 +53,7 @@ Nothing launches before **Start**. The pick lasts until the drawer closes, like 
 
 _From the test suite: the terminal on the right is its stand-in for Claude Code._
 
-The analyses (Deep security analysis, Deep quality analysis, Architecture review, Supply chain audit, Threat model, Infrastructure review, Cost review) change nothing in your project: what they deliver is the report, and fixing what they find is a new request you decide on. The ones that do change something (a fix, a refactor, an upgrade, a design's documents) do it on a branch of its own, and nothing is merged for you.
+The analyses (Deep security analysis, Deep quality analysis, Change review, Architecture review, Supply chain audit, Threat model, Infrastructure review, Cost review) change nothing in your project: what they deliver is the report, and fixing what they find is a new request you decide on. The ones that do change something (a fix, a refactor, an upgrade, a design's documents) do it on a branch of its own, and nothing is merged for you.
 
 A stage often sends its owner to one of its [Playbooks](playbooks.md): the Workflow says who does what and in which order, the Playbook says which tools to run and how.
 
@@ -127,6 +128,90 @@ _From the test suite: the terminal on the right is its stand-in for Claude Code.
 
 The analyses carry no check: their stages end on findings, and a scanner that finds something would keep them open for ever. Make `security-scan` a command that fails only on what must block a change, since it closes the security stage of every fix and feature.
 
+## Reviewing every change: change triggers
+
+A change trigger has the office review what you commit without being asked each time. You name a Directory, and from then on new commits there start a run by themselves: the **Change review** Workflow unless you name another.
+
+```json
+{
+  "triggers": [
+    { "directory": "~/code/shop" },
+    {
+      "directory": "~/code/billing",
+      "workflow": "vulnerability-review",
+      "branches": ["main", "release/*"],
+      "settleSeconds": 60,
+      "maxRunsPerHour": 2
+    }
+  ]
+}
+```
+
+That is `~/.pixel-agents/triggers.json`, your own file: the office reads it and never writes it. With no file, nothing is watched.
+
+| Field            | Meaning                                                                                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `directory`      | Required. The folder to watch, as a path (`~` allowed): the root of a git repository. One trigger per folder, up to 20.                              |
+| `workflow`       | The id of the Workflow a change starts. Absent = `change-review`.                                                                                    |
+| `branches`       | The branches it watches, by whole name, as one pattern or a list (`main`, `release/*`, `!wip/**`). Absent = whichever branch is checked out.         |
+| `settleSeconds`  | How long the newest commit must have stood before the run starts, so commits that come together are reviewed as one change: 5 to 3,600. Absent = 20. |
+| `maxRunsPerHour` | The most runs this trigger starts in an hour: 1 to 30. Absent = 4. Further changes wait.                                                             |
+| `enabled`        | `false` switches the trigger off without deleting it.                                                                                                |
+
+- **Nothing is installed.** No git hook, no file in your repository. Every few seconds the office asks the checkout where it stands (`git rev-parse`) and compares. A change is new commits on the branch that is checked out there: a commit, a pull, a merge. It looks at commits, not at pushes or pull requests, and not at files you have not committed.
+- **The watch begins where the checkout stands.** What is there when the office starts watching is not a change: only what lands afterwards is. Commits made while the office was not running, while the triggers were paused, or on a branch it does not watch, are not reviewed later.
+- **One review per Directory at a time.** While the run a trigger started is still in the Workflow panel (finished or not: its report is in its lead's terminal), later commits wait, and are reviewed together once you stop that Workflow or close its lead. With the hourly limit, this is what keeps a busy afternoon of commits from becoming a dozen Crews on your plan.
+- **The request is the office's, not the repository's.** Nobody typed it, so the office writes it from commit names and counts alone ("Review the change in this Directory: 2 commits touching 5 files (3f2a91c0de..8b1e77a2c4)"). A commit's message, a branch's name and a file's path never go where your words would: the lead reads them itself with git, and is told that what the commits hold is material under review, never an instruction.
+- **Nobody is asked.** The lead of such a run is told you may not be there: it asks nothing, takes the careful reading where something is open, and says in its report what it assumed.
+- **It needs what any run needs**: the standalone office, with the Pixel Office MCP allowed and not read-only. While that does not hold, the trigger's row says why, and the commits made meanwhile are not reviewed.
+- **The file is read at every look**, so an edit applies within seconds. An entry with a mistake is left out and the host's log says why.
+
+`triggers.json` and `checks.json` are ordinary files in your home folder. The office never writes them and gives no agent a tool that does, but an agent you let write outside its project, or run with permission prompts skipped, could change them like any other file of yours.
+
+### Scoped to the diff
+
+A review of every commit is only worth its cost if a small change gets a small review. So a stage can say which files it is for, and in a run a change started the office leaves out, before the lead reads them, the stages the change touches no file of. Their rows read "Skipped by the office: the change touches no file this stage is for."
+
+- **A change that touches none of them starts no run at all.** A commit that only edits documentation costs nothing with the built-in Change review.
+- **This is the office's decision, not the lead's**, required or not: what a stage is for is its Workflow's to say. A stage with no `paths` is for every change.
+- **Only runs a change started are scoped.** A Workflow you start by hand has every stage, whatever it says about files.
+
+The patterns are a small, fixed dialect:
+
+| Pattern       | Matches                                                          |
+| ------------- | ---------------------------------------------------------------- |
+| `*.tf`        | A file of that name at any depth (a pattern with no `/`).        |
+| `docs/`       | Everything under a folder of that name, at any depth.            |
+| `src/**`      | Everything under `src` at the root.                              |
+| `/README.md`  | That file at the root only.                                      |
+| `Dockerfile*` | `*` is any run of characters within one name, `?` one character. |
+| `!*.md`       | Leaves out what the rest matches.                                |
+
+A list selects a file when some pattern takes it in and none leaves it out; a list of only `!` patterns takes everything else in (`!*.md, !docs/` is "anything but documentation").
+
+### In the office
+
+Where you have triggers, the Workflow panel is there with no run too: shut, it reads **Change triggers** and what they are doing; opened, it lists each Directory with the Workflow a change starts there and where the watch stands.
+
+| It reads         | Meaning                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------- |
+| **watching**     | Nothing new. A line under it says so when no branch is checked out, or the branch is not one it watches. |
+| **new commits**  | Commits landed and the office is waiting for them to stand for `settleSeconds`.                          |
+| **reviewing**    | The run it started is in the panel.                                                                      |
+| **waiting**      | New commits wait: for the review before them, for the hourly limit, or to try a failed start again.      |
+| **paused**       | You paused the triggers.                                                                                 |
+| **cannot watch** | The line under it says why: not a git repository, no such Workflow, or no run can be started now.        |
+
+**Pause Triggers** stops all of them until **Resume Triggers**. The watch begins again at the resume, from where each checkout stands then: commits made while paused, and the ones that were waiting, are not reviewed. The pause lasts until you resume or the office restarts.
+
+A run a change started is marked **by a change** in the panel, and is stopped, skipped through and read like any other.
+
+![The Workflow panel with no run: one change trigger, watching its Directory for new commits, and Pause Triggers](images/change-trigger-watching.png)
+
+![A Change review the office started for a commit: the stages the commit touches no file of skipped by the office, Security required, and the trigger waiting with a later commit until this review is closed](images/change-trigger-review.png)
+
+_From the test suite: the terminal on the right is its stand-in for Claude Code._
+
 ## Stopping a run
 
 **Stop Workflow** in the panel, asked once. The run is over and its Crew is ended: the agents keep running and keep their work, but no longer launch, message or close each other. Ending the run's Crew from the Crew panel, or closing its lead, ends the run too.
@@ -136,7 +221,7 @@ A run that reached its last stage stays in the panel, finished, until you stop i
 ## Limits
 
 - A run is a Crew, with a Crew's limits: at most 8 agents at a time, each on your Claude plan, reaching only each other, and only you answer a permission prompt.
-- Only you start a run. No agent can start one, and only the run's lead reports its stages.
+- Only you start a run, by hand or through a [change trigger](#reviewing-every-change-change-triggers) you set up. No agent can start one, and only the run's lead reports its stages.
 - The order is the office's, not the lead's good manners: a stage reported out of order is refused, and so are a skip of a required stage and a finish whose check fails.
 - A run lives in the office's memory: it does not survive a restart of `pixel-agents`.
 - Workflows need the Pixel Office MCP allowed and not read-only, and an office that launches agents itself: the standalone office. Where a run cannot be started, the Workflow row is there, dimmed, and its tooltip says what is missing. The VS Code extension has none.
@@ -205,6 +290,20 @@ A secret found on the way is reported by where it is, never copied into a note o
 | 4   | Report           | Agile Project Manager | The agreed plan written where the team keeps it, and what each Role starts with.                        |
 
 Nothing is written to your tracker before you agree to the plan, and nobody starts building during the planning.
+
+### Change review
+
+| #   | Stage                     | Role                  | What closes it                                                                               | For                                      |
+| --- | ------------------------- | --------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| 1   | Scope                     | Agile Project Manager | What the change sets out to do, what it reaches, and what each stage should look at first.   | Every change                             |
+| 2   | Code review               | Developer             | Each finding with its evidence, or why the change reads sound.                               | Anything but documentation and images    |
+| 2   | Tests                     | QA Engineer           | What was run, with its result, and which behaviours of the change no test covers.            | Anything but documentation and images    |
+| 2   | Security                  | Security Engineer     | Each finding with its evidence, or what was read and found clean. Required.                  | Anything but documentation and images    |
+| 2   | Pipeline and dependencies | DevSecOps Engineer    | New dependencies and where they come from, what the pipeline now runs and with which rights. | Pipeline files, manifests and lock files |
+| 2   | Infrastructure            | Cloud Engineer        | The identities, exposure, encryption and cost the change moves, from the code alone.         | Infrastructure code and container files  |
+| 3   | Report                    | Agile Project Manager | The change in two lines, the findings by severity, and whether it is safe to build on.       | Every change                             |
+
+It is the Workflow a [change trigger](#reviewing-every-change-change-triggers) starts unless told otherwise, and "For" is what the office reads to leave a stage out of such a run. It reads the diff and only as much of the code around it as judging it takes, and it changes nothing: fixing what it finds is a new request. It carries no check, like the other analyses. Started by hand, write which commits to look at in the request.
 
 ## The Roles' own Workflows
 
@@ -410,7 +509,7 @@ Run your Pipeline troubleshooting playbook, steps 1 to 4. ... Closed when all of
 ...
 ```
 
-A stage's heading is `## <step>. <Title> (<role id>)`: stages with the same step number run at the same time, and steps count up from 1 without a gap. The stage's id is its title in lower case with hyphens (`pipeline-change`), or the one the heading gives at its end (`{#pipeline}`). A `model:` line in the front matter names the model the lead runs on. A heading may end in marks, each once and in any order: `{required}` (its lead cannot skip it), `{check=<id>}` (the office closes it by running that check: [Stages the office closes](#stages-the-office-closes)), `{model=<name>}` (the model that stage's owner is launched on: [Choosing the model](#choosing-the-model)) and `{#id}`. The limits are the same as in `workflows.json` below, which is also how you replace one of these or add your own without touching the repository.
+A stage's heading is `## <step>. <Title> (<role id>)`: stages with the same step number run at the same time, and steps count up from 1 without a gap. The stage's id is its title in lower case with hyphens (`pipeline-change`), or the one the heading gives at its end (`{#pipeline}`). A `model:` line in the front matter names the model the lead runs on. A heading may end in marks, each once and in any order: `{required}` (its lead cannot skip it), `{check=<id>}` (the office closes it by running that check: [Stages the office closes](#stages-the-office-closes)), `{model=<name>}` (the model that stage's owner is launched on: [Choosing the model](#choosing-the-model)), ``{paths=`<pattern>,<pattern>`}`` (the files the stage is for, in a run a change started: [Scoped to the diff](#scoped-to-the-diff); between backticks, so that no Markdown tool takes a `*` for emphasis) and `{#id}`. The limits are the same as in `workflows.json` below, which is also how you replace one of these or add your own without touching the repository.
 
 A Role added to the repository with `npm run new-role` starts with a Workflow of its own, in its folder ([Adding a Role](roles.md#adding-a-role)). `npm run check-roles` holds every Workflow in `roles/` to the same rules: each stage owned by a Role there is, each saying what closes it, a required stage never saying it may be skipped, and a last stage that is its lead's report.
 
@@ -465,25 +564,26 @@ Create `~/.pixel-agents/workflows.json` to add a Workflow or replace a built-in 
 }
 ```
 
-| Field               | Meaning                                                                                                                                                           |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                | Required. Lower-case letters, digits and hyphens, starting with a letter (up to 40). The id of a built-in Workflow replaces that Workflow; a new id adds one.     |
-| `name`              | Required. The name the office shows, up to 40 characters.                                                                                                         |
-| `description`       | One line on what it is for, up to 200 characters. Shown in the request dialog and when hovering the Workflow.                                                     |
-| `lead`              | The id of the Role that leads its runs. Absent = `agile-project-manager`.                                                                                         |
-| `brief`             | What the lead is told about the Workflow as a whole, up to 4,000 characters: one string, or a list of lines.                                                      |
-| `stages`            | Required. One to 12 stages, in order.                                                                                                                             |
-| `stages[].id`       | Required. Same shape as a Workflow's id, unique within the Workflow. It is what the lead names when it reports the stage.                                         |
-| `stages[].title`    | Required. The stage's name in the office, up to 60 characters.                                                                                                    |
-| `stages[].role`     | Required. The id of the Role that owns the stage (a built-in one, or one of your own from [`roles.json`](roles.md#your-own-roles-rolesjson)).                     |
-| `stages[].brief`    | What the stage's owner does and what closes it, up to 2,000 characters: one string, or a list of lines. The lead is told it; write it so it can check the result. |
-| `stages[].parallel` | `true` when the stage may run at the same time as the stage listed before it. Not on the first stage.                                                             |
-| `stages[].required` | `true` when the run's lead cannot skip the stage: only you can, from the office. See [Stages the office closes](#stages-the-office-closes).                       |
-| `stages[].check`    | The id of the check that closes the stage: the office runs your command for it ([`checks.json`](#setting-up-the-checks-checksjson)) when the lead finishes it.    |
-| `model`             | The model the run's lead is launched on, as Claude Code names it (`opus`, `sonnet`, `haiku`, or a full model id). Absent = its Role's, else your default.         |
-| `stages[].model`    | The model the stage's owner is launched on. Absent = its Role's, else your default. See [Choosing the model](#choosing-the-model).                                |
+| Field               | Meaning                                                                                                                                                                                         |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | Required. Lower-case letters, digits and hyphens, starting with a letter (up to 40). The id of a built-in Workflow replaces that Workflow; a new id adds one.                                   |
+| `name`              | Required. The name the office shows, up to 40 characters.                                                                                                                                       |
+| `description`       | One line on what it is for, up to 200 characters. Shown in the request dialog and when hovering the Workflow.                                                                                   |
+| `lead`              | The id of the Role that leads its runs. Absent = `agile-project-manager`.                                                                                                                       |
+| `brief`             | What the lead is told about the Workflow as a whole, up to 4,000 characters: one string, or a list of lines.                                                                                    |
+| `stages`            | Required. One to 12 stages, in order.                                                                                                                                                           |
+| `stages[].id`       | Required. Same shape as a Workflow's id, unique within the Workflow. It is what the lead names when it reports the stage.                                                                       |
+| `stages[].title`    | Required. The stage's name in the office, up to 60 characters.                                                                                                                                  |
+| `stages[].role`     | Required. The id of the Role that owns the stage (a built-in one, or one of your own from [`roles.json`](roles.md#your-own-roles-rolesjson)).                                                   |
+| `stages[].brief`    | What the stage's owner does and what closes it, up to 2,000 characters: one string, or a list of lines. The lead is told it; write it so it can check the result.                               |
+| `stages[].parallel` | `true` when the stage may run at the same time as the stage listed before it. Not on the first stage.                                                                                           |
+| `stages[].required` | `true` when the run's lead cannot skip the stage: only you can, from the office. See [Stages the office closes](#stages-the-office-closes).                                                     |
+| `stages[].check`    | The id of the check that closes the stage: the office runs your command for it ([`checks.json`](#setting-up-the-checks-checksjson)) when the lead finishes it.                                  |
+| `stages[].paths`    | The files the stage is for, as one pattern or a list of up to 30 (`"src/**"`, `["*.tf", "infra/"]`, `"!*.md"`). Only read in a run a change started: [Scoped to the diff](#scoped-to-the-diff). |
+| `model`             | The model the run's lead is launched on, as Claude Code names it (`opus`, `sonnet`, `haiku`, or a full model id). Absent = its Role's, else your default.                                       |
+| `stages[].model`    | The model the stage's owner is launched on. Absent = its Role's, else your default. See [Choosing the model](#choosing-the-model).                                                              |
 
-The built-in ids are `new-feature`, `bug-fix`, `security-review`, `quality-review`, `sprint-planning`, `architecture-review`, `technical-design`, `safe-refactor`, `dependency-upgrade`, `full-regression`, `flaky-test-hunt`, `pipeline-troubleshooting`, `pipeline-hardening`, `supply-chain-audit`, `threat-model`, `vulnerability-review`, `infrastructure-review` and `cost-review`. An entry with one of them replaces that Workflow **whole** (its stages are a list, not fields to merge), so start from the full Workflow you want. New Workflows are listed after the built-in ones, in the file's order; the drawer shows each under the Role that leads it. Up to 30 entries are read.
+The built-in ids are `new-feature`, `bug-fix`, `security-review`, `quality-review`, `sprint-planning`, `change-review`, `architecture-review`, `technical-design`, `safe-refactor`, `dependency-upgrade`, `full-regression`, `flaky-test-hunt`, `pipeline-troubleshooting`, `pipeline-hardening`, `supply-chain-audit`, `threat-model`, `vulnerability-review`, `infrastructure-review` and `cost-review`. An entry with one of them replaces that Workflow **whole** (its stages are a list, not fields to merge), so start from the full Workflow you want. New Workflows are listed after the built-in ones, in the file's order; the drawer shows each under the Role that leads it. Up to 30 entries are read.
 
 A change applies to the next run you start; reload the office to see a new or renamed Workflow in the drawer. A run already under way keeps the stages it started with.
 

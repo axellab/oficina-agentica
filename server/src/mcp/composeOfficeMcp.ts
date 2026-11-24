@@ -10,6 +10,7 @@
 
 import { randomUUID } from 'crypto';
 import type { FastifyInstance } from 'fastify';
+import * as path from 'path';
 
 import { greeterPalette } from '../../../core/src/greeterCharacter.js';
 import type { ServerMessage } from '../../../core/src/messages.js';
@@ -19,6 +20,7 @@ import { getCharacterProfiles, getWardrobeItems } from '../characterProfilesStor
 import { getOfficeMcpConsent, getOfficeMcpReadOnly, readConfig } from '../configPersistence.js';
 import { type CrewPlace, Crews } from '../crews.js';
 import {
+  expandTilde,
   normalizeDirectoryPath,
   setDirectoryCharacters,
   writeUserDirectories,
@@ -30,8 +32,12 @@ import { writeOnboardingPlugin } from '../tutorial/onboardingPlugin.js';
 import { Tutorial, type TutorialSurface } from '../tutorial/tutorial.js';
 import { GUIDE_FALLBACK_NAME } from '../tutorial/tutorialCopy.js';
 import { layoutSignature } from '../tutorial/tutorialSightings.js';
+import { changeSince, headOf } from '../workflows/changeGit.js';
+import { changeTriggerCatalog } from '../workflows/changeTriggerCatalog.js';
+import { ChangeTriggers } from '../workflows/changeTriggers.js';
 import { checkForDirectory } from '../workflows/checkCatalog.js';
 import { checkEnv, startCheck } from '../workflows/checkRunner.js';
+import { workflowCatalog } from '../workflows/workflowCatalog.js';
 import { Workflows } from '../workflows/workflows.js';
 import { invalidateAttributionDirectories } from '../worktreeAttribution.js';
 import { isRepo } from '../worktreeGit.js';
@@ -118,6 +124,10 @@ export interface OfficeMcpFeature extends AgentMcpAccess {
    *  is started from and the runs under way. Told to the offices the Crews are
    *  told to, and nowhere else: a run is a Crew's work. */
   workflowsSnapshot(send: (message: ServerMessage) => void): void;
+  /** One look at the Directories the Change triggers watch, now: the look the
+   *  office takes every few seconds by itself (a test asks for it rather than
+   *  wait). Nothing where no run can ever be started. */
+  lookForChanges(): Promise<void>;
   /** Answer one of an office's MCP messages (consent, its switches, the editing
    *  locks, the layout editor's and the Characters view's undo, a Crew's end, a
    *  Workflow run's start and stop); false when it isn't one. `client` is the office
@@ -264,10 +274,17 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
   const launch = surface.launch;
   // Workflow runs: a request handled by a Crew stage by stage. Only where a
   // Crew can ever be started (an office whose agents can launch agents).
+  // Late-bound: the watch starts runs through `workflows`, which tells the
+  // offices where the watch stands.
+  let changeTriggers: ChangeTriggers | undefined;
   const workflows = launch
     ? new Workflows({
         store,
         crews,
+        changeTriggers: {
+          status: () => changeTriggers?.status(),
+          setPaused: (paused) => changeTriggers?.setPaused(paused),
+        },
         // A run is a Crew's work: it can start where a Crew can.
         unavailable: crewUnavailable,
         launch: (request) => launch(request, officeMcp),
@@ -289,6 +306,31 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
         },
       })
     : undefined;
+  // Change triggers: the Directories the user's triggers.json names, whose new
+  // commits start a run with nobody asking. Only where a run can be started.
+  if (workflows) {
+    changeTriggers = new ChangeTriggers({
+      definitions: changeTriggerCatalog,
+      // The Directory as the office lists it (its own spelling of the path:
+      // an agent launched there is filed under it), else the folder as written.
+      resolve: (directory) => {
+        const key = normalizeDirectoryPath(directory);
+        const listed = facts
+          .directories()
+          .find((candidate) => normalizeDirectoryPath(candidate.path) === key);
+        const folder = listed?.path ?? path.resolve(expandTilde(directory));
+        return { path: folder, name: listed?.name ?? (path.basename(folder) || folder) };
+      },
+      git: { headOf, changeSince },
+      unavailable: crewUnavailable,
+      workflowName: (id) => workflowCatalog().find((candidate) => candidate.id === id)?.name,
+      start: (workflowId, directoryPath, change) =>
+        workflows.startForChange(workflowId, directoryPath, change),
+      isListed: (crewId) => workflows.isListed(crewId),
+      now: Date.now,
+      onChange: () => workflows.broadcast(),
+    });
+  }
   const office: OfficeOperations = {
     agents: createAgentsView(facts, (id) => terminals.has(id)),
     layout: createLayoutOps(facts, layoutEdits),
@@ -337,6 +379,8 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
       if (url !== null) officeMcp.setEndpoint(url);
       decided = true;
       decide();
+      // Whether a run can be started is known from here on: the watch begins.
+      changeTriggers?.start();
     },
     offered: () => officeMcp.offered(),
 
@@ -359,6 +403,9 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
       // Whether a run can be started hangs on whether this server serves /mcp.
       if (decided) tell();
       else void whenDecided.then(tell);
+    },
+    lookForChanges() {
+      return changeTriggers?.tick() ?? Promise.resolve();
     },
 
     handshake(send, afterHooksAsks) {
@@ -428,6 +475,7 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
       tutorial.dispose();
       visits.dispose();
       closing?.dispose();
+      changeTriggers?.dispose();
       workflows?.dispose();
       waits.dispose();
       crews.dispose();

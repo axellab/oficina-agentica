@@ -41,6 +41,7 @@ import { BUILTIN_WORKFLOWS } from '../src/workflows/builtinWorkflows.js';
 import { workflowCatalog, workflowListing } from '../src/workflows/workflowCatalog.js';
 import {
   NO_WORKFLOW_NOTE,
+  WORKFLOW_CHANGE_FIRST_MESSAGE,
   WORKFLOW_FIRST_MESSAGE,
   WORKFLOW_LEAD_RULES,
   WORKFLOW_STOPPED_NOTE,
@@ -301,7 +302,7 @@ describe('the built-in Workflows', () => {
     expect(mergeWorkflowCatalog(BUILTIN_WORKFLOWS, [], ROLE_IDS).problems).toEqual([]);
   });
 
-  it('cover a new feature, a bug fix, the two deep analyses and the sprint plan, led by the coordinator and listed first', () => {
+  it('cover a new feature, a bug fix, the two deep analyses, the sprint plan and the review of a change, led by the coordinator and listed first', () => {
     const coordinated = BUILTIN_WORKFLOWS.filter((w) => w.lead === 'agile-project-manager');
     expect(coordinated.map((w) => [w.id, w.name])).toEqual([
       ['new-feature', 'New feature'],
@@ -309,6 +310,7 @@ describe('the built-in Workflows', () => {
       ['security-review', 'Deep security analysis'],
       ['quality-review', 'Deep quality analysis'],
       ['sprint-planning', 'Sprint planning'],
+      ['change-review', 'Change review'],
     ]);
     expect(BUILTIN_WORKFLOWS.slice(0, coordinated.length)).toEqual(coordinated);
   });
@@ -566,9 +568,13 @@ describe('what a run tells its agents', () => {
   it('the first message is plain words a command line carries whole in any shell', () => {
     // Letters, digits, spaces and the few marks no shell or Windows command
     // shim reads: the request itself never rides the command line.
-    expect(WORKFLOW_FIRST_MESSAGE).toMatch(/^[A-Za-z0-9 ._,-]+$/);
-    expect(WORKFLOW_FIRST_MESSAGE).toContain('mcp__pixel-office__workflow');
-    expect(WORKFLOW_FIRST_MESSAGE).not.toMatch(/\s{2,}/);
+    // The one of a run a Change trigger started is held to the same.
+    for (const message of [WORKFLOW_FIRST_MESSAGE, WORKFLOW_CHANGE_FIRST_MESSAGE]) {
+      expect(message).toMatch(/^[A-Za-z0-9 ._,-]+$/);
+      expect(message).toContain('mcp__pixel-office__workflow');
+      expect(message).not.toMatch(/\s{2,}/);
+    }
+    expect(WORKFLOW_CHANGE_FIRST_MESSAGE).not.toContain('the user just started');
   });
 
   it("a Crew's agents call the workflow tool without a permission prompt", () => {

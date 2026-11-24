@@ -247,9 +247,29 @@ const STAGE_HEADING_RE = /^## (\d{1,2})\. (.+?) \(([a-z][a-z0-9-]*)\)((?: \{[^\s
  * What a stage's heading may mark it with, after the Role, in any order and
  * each once: `{#id}` (its id, when the title's own words would not make it),
  * `{required}` (a run's lead cannot skip it), `{check=<id>}` (the Check the
- * office runs to close it) and `{model=<name>}` (the model its owner is
- * launched on). What an id or a model name is, is core's to say.
+ * office runs to close it), `{model=<name>}` (the model its owner is
+ * launched on) and ``{paths=`<pattern>,<pattern>`}`` (the files it is for, in
+ * a run a change started: path patterns, commas between them, the lot between
+ * backticks). What an id, a model name or a pattern is, is core's to say.
  */
+/**
+ * The `paths` mark's patterns. They are written as code, between backticks:
+ * a heading is Markdown, and a formatter or a renderer reads a bare `*.md` as
+ * the start of emphasis and rewrites it (`_.md`), which would change what the
+ * stage is for without a word.
+ */
+function pathsMark(
+  value: string,
+  written: string,
+  mark: (key: string, value: unknown, written: string) => string | undefined,
+): string | undefined {
+  const coded = /^`([^`]+)`$/.exec(value);
+  if (!coded) {
+    return `"${written}": the patterns go between backticks, so that no Markdown tool takes a * for emphasis, like {paths=\`src/**,*.md\`}`;
+  }
+  return mark('paths', coded[1].split(','), written);
+}
+
 function stageMarks(marks: string): Record<string, unknown> | string {
   const fields: Record<string, unknown> = {};
   const mark = (key: string, value: unknown, written: string): string | undefined => {
@@ -267,7 +287,9 @@ function stageMarks(marks: string): Record<string, unknown> | string {
           ? mark('check', text.slice('check='.length), written)
           : text.startsWith('model=')
             ? mark('model', text.slice('model='.length), written)
-            : `"${written}" is not a mark a stage's heading takes: {#id}, {required}, {check=<id>} or {model=<name>}`;
+            : text.startsWith('paths=')
+              ? pathsMark(text.slice('paths='.length), written, mark)
+              : `"${written}" is not a mark a stage's heading takes: {#id}, {required}, {check=<id>}, {model=<name>} or {paths=\`<pattern>,<pattern>\`}`;
     if (problem !== undefined) return problem;
   }
   return fields;
@@ -299,7 +321,7 @@ export interface KitWorkflow {
  * that share a step run at the same time (the later ones are `parallel`). The
  * front matter's `model` is the model a run's lead is launched on; a heading
  * may end in marks (`stageMarks`): `{required}`, `{check=<id>}`,
- * `{model=<name>}`, `{#id}`.
+ * `{model=<name>}`, ``{paths=`<pattern>,<pattern>`}``, `{#id}`.
  */
 export function parseWorkflowFile(id: string, lead: string, text: string): KitWorkflow | string {
   const doc = readFrontMatter(text, ['name', 'description', 'order', 'model']);

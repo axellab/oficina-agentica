@@ -327,7 +327,39 @@ describe('workflows/<id>.md', () => {
     ]);
   });
 
+  it('says which files a stage is for, between backticks after its heading', () => {
+    const parsed = parseWorkflowFile(
+      'release',
+      'release-manager',
+      WORKFLOW.replace(
+        '## 2. Checks (devsecops-engineer)',
+        '## 2. Checks (devsecops-engineer) {paths=`.github/,Dockerfile*,!*.md`} {required}',
+      ).replace('{#smoke}', '{paths=`src/**`} {#smoke}'),
+    );
+    if (typeof parsed === 'string') throw new Error(parsed);
+    expect(parsed.workflow.stages.map((stage) => [stage.id, stage.paths])).toEqual([
+      ['release-notes', undefined],
+      ['checks', ['.github/', 'Dockerfile*', '!*.md']],
+      ['smoke', ['src/**']],
+      ['report', undefined],
+    ]);
+    expect(parsed.workflow.stages[1].required).toBe(true);
+  });
+
   it.each([
+    [
+      // A formatter reads a bare `*.md` as emphasis and rewrites it: `_.md`.
+      'patterns written bare',
+      '{paths=*.md,docs/}',
+      /stage "Checks": "\{paths=\*\.md,docs\/\}": the patterns go between backticks/,
+    ],
+    [
+      'the files of a stage said twice',
+      '{paths=`src/`} {paths=`docs/`}',
+      /stage "Checks": "\{paths=`docs\/`\}" is written twice/,
+    ],
+    ['a pattern that is none', '{paths=`src/,!`}', /"paths" must be/],
+    ['no pattern at all', '{paths=``}', /the patterns go between backticks/],
     [
       'a mark written twice',
       '{required} {required}',
@@ -747,7 +779,13 @@ describe('the Roles that ship', () => {
       const own = workflow.stages.filter(
         (stage) => stage.role === workflow.lead && /Run your .+ playbook/.test(stage.brief),
       );
-      const coordinated = ['new-feature', 'bug-fix', 'security-review', 'quality-review'];
+      const coordinated = [
+        'new-feature',
+        'bug-fix',
+        'security-review',
+        'quality-review',
+        'change-review',
+      ];
       if (!coordinated.includes(workflow.id)) expect(own.length, workflow.id).toBeGreaterThan(0);
     }
     // The coordinator's send each stage's owner to the Playbook that is its job.

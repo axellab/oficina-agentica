@@ -206,6 +206,7 @@ components:
         - $ref: '#/components/schemas/StartWorkflow'
         - $ref: '#/components/schemas/StopWorkflow'
         - $ref: '#/components/schemas/SkipWorkflowStage'
+        - $ref: '#/components/schemas/SetChangeTriggersPaused'
         - $ref: '#/components/schemas/RequestWorkflowCheckOutput'
         - $ref: '#/components/schemas/SetWatchAllSessions'
         - $ref: '#/components/schemas/ExportLayout'
@@ -1968,10 +1969,47 @@ components:
           type: string
         finished:
           type: boolean
+        startedByChange:
+          type: boolean
+          description: |
+            A Change trigger started it, for new commits in its Directory:
+            `request` is then the office's own words, never the user's.
         stages:
           type: array
           items:
             $ref: '#/components/schemas/WorkflowRunStage'
+
+    WorkflowChangeTriggerState:
+      description: |
+        Where a Change trigger stands: `watching` (the newest commit of its
+        Directory is one it already handed to a run), `settling` (new commits
+        were seen, and it waits for them to stop coming), `running` (the run
+        it started is under way), `waiting` (there is a change to review and
+        no run can be started for it yet: `note` says why), `paused` (the
+        user paused the triggers) or `problem` (it cannot watch: `note`).
+      type: string
+      enum: [watching, settling, running, waiting, paused, problem]
+
+    WorkflowChangeTrigger:
+      description: |
+        A Change trigger of the host's own `~/.pixel-agents/triggers.json`
+        and where it stands: the Directory whose new commits it watches for,
+        and the Workflow it starts a run of for each change. `note`: why it
+        waits or cannot watch, in plain words (never a path).
+      type: object
+      additionalProperties: false
+      required: [directoryName, workflowId, workflowName, state]
+      properties:
+        directoryName:
+          type: string
+        workflowId:
+          type: string
+        workflowName:
+          type: string
+        state:
+          $ref: '#/components/schemas/WorkflowChangeTriggerState'
+        note:
+          type: string
 
     WorkflowsLoaded:
       description: |
@@ -1983,7 +2021,9 @@ components:
         Crew's work, so it needs what a Crew needs. Sent on `webviewReady` by
         a server whose Pixel Office MCP can launch agents, and broadcast after
         every change. Memory only on the client: a reconnect takes the new
-        list as the whole truth.
+        list as the whole truth. `changeTriggers`: the host's Change triggers
+        and where each stands (absent = none set up); `changeTriggersPaused`:
+        the user paused them (`setChangeTriggersPaused`).
       type: object
       additionalProperties: false
       required: [type, available, workflows, runs]
@@ -2003,6 +2043,13 @@ components:
           description: In the order they were started.
           items:
             $ref: '#/components/schemas/WorkflowRun'
+        changeTriggers:
+          type: array
+          description: In the order the host's file lists them.
+          items:
+            $ref: '#/components/schemas/WorkflowChangeTrigger'
+        changeTriggersPaused:
+          type: boolean
 
     WorkflowRejected:
       description: |
@@ -2834,6 +2881,23 @@ components:
           description: The run's Crew (`WorkflowRun.crewId`).
         stageId:
           type: string
+
+    SetChangeTriggersPaused:
+      description: |
+        The user pauses or resumes the host's Change triggers (the Workflow
+        panel): while paused, no run is started for a change, and commits
+        made meanwhile are not reviewed after the resume, which starts from
+        each Directory's newest commit. Memory only: a restarted server
+        watches again. Runs already under way are not touched. Answered with
+        a `workflowsLoaded` broadcast.
+      type: object
+      additionalProperties: false
+      required: [type, paused]
+      properties:
+        type:
+          const: setChangeTriggersPaused
+        paused:
+          type: boolean
 
     RequestWorkflowCheckOutput:
       description: |

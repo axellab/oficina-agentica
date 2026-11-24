@@ -344,6 +344,21 @@ export const CHECK_OUTPUT_FOR_OFFICE_CHARS = 60_000;
  *  processes get to leave by themselves before they are killed. */
 export const CHECK_KILL_GRACE_MS = 2000;
 
+// ── Change triggers (server/src/workflows/changeTriggers.ts) ──
+/** The Directories whose new commits start a Workflow run, in the persistence dir (the user's file). */
+export const TRIGGERS_FILE_NAME = 'triggers.json';
+/** How often a watched Directory's checkout is asked where it stands. One
+ *  short git process per Directory: cheap, and nothing is installed in the
+ *  repository to be told instead. */
+export const CHANGE_TRIGGER_POLL_MS = 5000;
+/** After a run that could not be started, how long before it is tried again. */
+export const CHANGE_TRIGGER_RETRY_MS = 60_000;
+/** The window `maxRunsPerHour` counts over. */
+export const CHANGE_TRIGGER_RATE_WINDOW_MS = 60 * 60 * 1000;
+/** What closes a stage the office left out of a run a change started. */
+export const WORKFLOW_CHANGE_SKIP_NOTE =
+  'Skipped by the office: the change touches no file this stage is for.';
+
 // ── Recent conversations (the sidebar) ──────────────────────
 /** What each conversation's agent wore and where it sat, in the persistence dir. */
 export const CONVERSATIONS_FILE_NAME = 'conversations.json';

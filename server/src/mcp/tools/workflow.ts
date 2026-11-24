@@ -15,6 +15,16 @@ function described(view: WorkflowView, checkNote?: string): Record<string, unkno
     lead_agent_id: view.leadAgentId,
     workflow: view.workflow,
     request: view.request,
+    ...(view.change
+      ? {
+          change: {
+            from: view.change.base,
+            to: view.change.head,
+            commits: view.change.commits,
+            files: view.change.files,
+          },
+        }
+      : {}),
     finished: view.finished,
     stages: view.stages.map((stage) => ({
       id: stage.id,
@@ -56,7 +66,9 @@ export const workflow = defineTool({
     'A workflow run: one request of the user that your Crew handles stage by stage. The user starts one from ' +
     'the office, choosing the kind of request (new feature, bug fix, deep security or quality analysis, or ' +
     'one of their own) and writing what they need; no agent starts one. ' +
-    "`status` (default): whether your Crew runs one, and if so the `request` (the user's own words), the " +
+    "`status` (default): whether your Crew runs one, and if so the `request` (the user's own words; in a " +
+    "run the office's change trigger started for new commits, the office's, with the `change`: the commits " +
+    '`from`..`to` to read with git, how many there are and how many files they touch), the ' +
     'workflow (name, what it is for), who leads it, and every stage in order: its `id`, title, the Role that ' +
     'owns it, `what_to_do`, whether it may run in `parallel` with the stage before it, its `state` (pending | ' +
     'active | done | skipped) and the note it was closed with, and the `model` the stage names when it names ' +
