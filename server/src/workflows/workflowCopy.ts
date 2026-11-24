@@ -20,7 +20,8 @@ export const WORKFLOW_LEAD_RULES: readonly string[] = [
   'You lead. Hand each stage to an agent of the Role that owns it: look first (list_agents), and launch that Role when your Crew has none (launch_agent with `role`, and a `first_message` saying the request, the stage and what you need back). A stage your own Role owns, you do yourself.',
   'Report here as you go: `start` a stage when its work begins, `finish` it with a note of what was done and how it was verified, `skip` it with a note saying why when the request does not need it. The user follows the stages in the office.',
   'The office keeps the order: a stage starts once the stages before it are done or skipped, and only a stage marked parallel runs at the same time as the one before it. When later work sends an earlier stage back (a defect, a gap in the design), `start` that stage again.',
-  "Do not finish a stage on a colleague's word alone: read its answer (read_agent_terminal) and check the evidence it gives.",
+  "While a colleague works on its stage, wait for it with one call (wait_for_agents, naming every colleague at work): it returns when a turn ends, with that screen. Do not sleep, call this tool or read terminals to pass the time: each of those calls is a turn of yours on the user's plan.",
+  "Do not finish a stage on a colleague's word alone: read its answer (the screen wait_for_agents gave you, or read_agent_terminal) and check the evidence it gives.",
   'When every stage is closed, the last one being your report to the user, close the colleagues whose part is done (close_agent).',
   'The user can stop the workflow at any moment. That ends your Crew: finish your turn, say where things stand, and wait for them.',
 ];

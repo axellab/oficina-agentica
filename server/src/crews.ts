@@ -90,6 +90,20 @@ const REACH_VERB: Record<CrewReach, string> = {
   close: 'close',
 };
 
+/**
+ * The agent whose permission prompt is open in agent `target`'s terminal, if
+ * any: `target` itself, or a Teammate of its own. A Teammate's prompt opens in
+ * its Lead's terminal, and it is the Teammate that is marked as waiting
+ * (hookEventHandler's handlePermissionRequest).
+ */
+export function promptHolderIn(store: AgentStateStore, target: number): number | undefined {
+  if (store.get(target)?.permissionSent) return target;
+  for (const [id, agent] of store) {
+    if (agent.leadAgentId === target && agent.permissionSent) return id;
+  }
+  return undefined;
+}
+
 export class Crews {
   private readonly records = new Map<string, CrewRecord>();
   private nextOrder = 1;
@@ -253,17 +267,11 @@ export class Crews {
     if (!store.get(caller)?.crew) return null;
     const leaveIt =
       'Only the user answers that: leave it, and carry on with what does not depend on it.';
-    if (store.get(target)?.permissionSent) {
-      return `Agent ${target} is waiting for the user to allow something. ${leaveIt}`;
-    }
-    // A Teammate's prompt opens in its Lead's terminal, and it is the Teammate
-    // that is marked as waiting (hookEventHandler's handlePermissionRequest).
-    for (const [id, agent] of store) {
-      if (agent.leadAgentId === target && agent.permissionSent) {
-        return `Agent ${target}'s terminal is where its Teammate, agent ${id}, is waiting for the user to allow something. ${leaveIt}`;
-      }
-    }
-    return null;
+    const holder = promptHolderIn(store, target);
+    if (holder === undefined) return null;
+    return holder === target
+      ? `Agent ${target} is waiting for the user to allow something. ${leaveIt}`
+      : `Agent ${target}'s terminal is where its Teammate, agent ${holder}, is waiting for the user to allow something. ${leaveIt}`;
   }
 
   // ── The panel's events ────────────────────────────────────

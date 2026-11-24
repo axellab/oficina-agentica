@@ -23,7 +23,11 @@
  */
 
 import type { WorkflowRun, WorkflowsLoaded } from '../../../core/src/messages.js';
-import { type CatalogWorkflow, MAX_WORKFLOW_REQUEST_CHARS } from '../../../core/src/workflows.js';
+import {
+  type CatalogWorkflow,
+  isStageClosed,
+  MAX_WORKFLOW_REQUEST_CHARS,
+} from '../../../core/src/workflows.js';
 import type { AgentStateStore } from '../agentStateStore.js';
 import { WORKFLOW_SHOWN_TEXT_MAX_CHARS } from '../constants.js';
 import type { CrewPlace } from '../crews.js';
@@ -88,6 +92,8 @@ export type WorkflowView =
         parallel: boolean;
         /** What its owner does and what closes it. */
         brief: string;
+        /** The model its owner is launched on, when the stage names one. */
+        model?: string;
         state: StageProgress['state'];
         note?: string;
       }>;
@@ -285,7 +291,11 @@ export class Workflows {
         palette,
         roleId: workflow.lead,
         crew: place.launch,
-        asks: { firstMessage: WORKFLOW_FIRST_MESSAGE },
+        // The Workflow's own model for its lead wins over its Role's.
+        asks: {
+          firstMessage: WORKFLOW_FIRST_MESSAGE,
+          ...(workflow.model !== undefined ? { model: workflow.model } : {}),
+        },
       });
       // A launch that outlived its answer may still bring the lead: the start
       // is decided, and the Crew's place given back, once it is over.
@@ -364,12 +374,30 @@ export class Workflows {
           role: { id: stage.role, name: run.roleNames[index] },
           parallel: stage.parallel === true,
           brief: stage.brief,
+          ...(stage.model !== undefined ? { model: stage.model } : {}),
           state,
           ...(note ? { note } : {}),
         };
       }),
       ...(youLead ? { rules: WORKFLOW_LEAD_RULES } : { note: workflowMemberNote(run.leadAgentId) }),
     };
+  }
+
+  /**
+   * The model an agent `caller` launches as Role `roleId` runs on by its
+   * Workflow: the one named by the first stage that Role owns and that is not
+   * closed yet, when `caller` leads a run. An agent keeps the model it was
+   * launched with, so the stage it is launched for decides.
+   */
+  stageModel(caller: number, roleId: string): { model: string; stageTitle: string } | undefined {
+    const crewId = this.crewIdOf(caller);
+    const run = crewId !== undefined ? this.runs.get(crewId) : undefined;
+    if (!run || run.leadAgentId !== caller) return undefined;
+    const index = run.workflow.stages.findIndex(
+      (stage, at) => stage.role === roleId && !isStageClosed(run.stages[at].state),
+    );
+    const stage = index < 0 ? undefined : run.workflow.stages[index];
+    return stage?.model === undefined ? undefined : { model: stage.model, stageTitle: stage.title };
   }
 
   /** The lead moves a stage of its run (workflowProgress.ts holds the rules). */

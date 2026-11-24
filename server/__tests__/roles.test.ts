@@ -308,9 +308,11 @@ describe('composeRolePrompt', () => {
     const prompt = composeRolePrompt(BUILTIN[1], BUILTIN);
     // The tools are named as the coding agent lists them, so it can tell it has them.
     expect(prompt).toContain('mcp__pixel-office__');
-    for (const tool of ['list_agents', 'list_roles', 'send_message', 'read_agent_terminal']) {
+    for (const tool of ['list_agents', 'list_roles', 'send_message', 'wait_for_agents']) {
       expect(prompt).toContain(tool);
     }
+    // An answer is waited for in one call, never by looking again and again.
+    expect(prompt).toMatch(/wait for it with ONE call \(wait_for_agents\)/);
     expect(prompt).toContain('launch_agent with `role`');
     expect(prompt).toContain('only when the human asked for it or agreed to your plan');
     // A Message from another agent is tagged, and is not the human speaking.

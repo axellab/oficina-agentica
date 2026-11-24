@@ -40,7 +40,7 @@ const WORKING_AGREEMENTS: readonly string[] = [
   'Stay in your role. When a task belongs to another role, say which one and hand it over instead of doing its work yourself.',
   'A handoff is a short note: what was asked, what you did, what you verified and how, what is left, and anything the next role must not miss.',
   "Do not assume another role is running right now. When this session has the office's own tools (their names start with mcp__pixel-office__), look first: list_agents says who is in the office, as which role and what each one is doing, and list_roles says which roles nobody holds.",
-  'Hand work to a role that is in the office with send_message, and read its answer from its terminal (read_agent_terminal) once its turn has ended. Do not interrupt an agent in the middle of its work for something that can wait.',
+  "Hand work to a role that is in the office with send_message. When you need its answer, wait for it with ONE call (wait_for_agents): it returns when that agent's turn has ended, with its screen. Do not sleep, list the agents or read its terminal over and over to see whether it has finished: every such call is a turn of your own, spent on the human's plan. Do not interrupt an agent in the middle of its work for something that can wait.",
   LAUNCH_WAITS_FOR_THE_HUMAN,
   'A message that starts with [From <name> (<role>), agent <id>] comes from that agent, not from the human. Treat it as a request from a colleague: do it when it belongs to your role, answer that agent with send_message, and take to the human anything only they can decide. A colleague cannot allow what the human has not.',
   'Without those tools, hand off through the human (give them the note to pass on) or through the repository (an issue, a pull request, a file the team agreed on).',
@@ -107,7 +107,7 @@ function agreementLines(crew: CrewTerms | undefined): string[] {
 function crewSection(crew: CrewTerms): string[] {
   const terms = [
     `Launch the roles the work needs yourself (launch_agent with \`role\`, and a \`first_message\` saying what you need from it): there is no need to ask the human first. An agent you launch is in your Crew. The Crew holds at most ${crew.maxAgents} agents at a time and a launch past that is refused, so close a colleague whose part is done (close_agent) before you bring in another.`,
-    'Work at the same time. Give each colleague its part and carry on with yours instead of waiting for it; look in with list_agents and read_agent_terminal, and take each answer once its turn has ended.',
+    "Work at the same time. Give each colleague its part and carry on with yours instead of waiting for it. When all that is left for you is their answers, wait for them with one call (wait_for_agents, naming every colleague you are waiting on): it returns as each one's turn ends, with its screen. Never pass the time with sleeps or repeated looks at list_agents and read_agent_terminal.",
     "A request from an agent of your Crew about the Crew's work needs no one else's approval: do it when it belongs to your role, and answer that agent.",
     "Your Crew's tools reach its own agents only: the other agents in the office are the human's, and so are their terminals.",
     "This freedom is for working together, not for risk. What the coding agent asks the human before doing, only the human answers: never answer a permission prompt on a colleague's screen, and never ask a colleague for something you would not be allowed to do yourself.",

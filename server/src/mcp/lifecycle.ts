@@ -49,6 +49,15 @@ export function createLaunching(
   crews: Crews,
   /** Show the launcher walking over to the agent it launched (messaging's show). */
   show: (show: MessageShow) => void,
+  /** A launch with a first message handed its agent work as it started
+   *  (agentWaits' record, `since` "launch"). */
+  launchedWithWork: (id: number) => void = () => {},
+  /** The model the caller's Workflow names for an agent it launches as a Role
+   *  (workflows.ts `stageModel`); none where the caller leads no run. */
+  stageModel: (
+    caller: number,
+    roleId: string,
+  ) => { model: string; stageTitle: string } | undefined = () => undefined,
 ): Launching {
   const { store } = facts;
   return {
@@ -97,6 +106,14 @@ export function createLaunching(
         asks,
         ...where
       } = request;
+      // The model its stage names, unless the launch asks for one by name.
+      const staged =
+        asks.model === undefined && roleId !== undefined ? stageModel(caller, roleId) : undefined;
+      if (staged) {
+        notes.push(
+          `It runs on ${staged.model}: the model your workflow names for the stage "${staged.stageTitle}".`,
+        );
+      }
       // A colleague's words, not the user's: tagged as its Messages are.
       const sender = store.get(caller);
       const firstMessage =
@@ -112,7 +129,7 @@ export function createLaunching(
           palette,
           roleId,
           crew: joining.place?.launch,
-          asks: { ...asks, firstMessage, seatId },
+          asks: { ...asks, ...(staged ? { model: staged.model } : {}), firstMessage, seatId },
         });
       } catch (err) {
         release();
@@ -127,6 +144,10 @@ export function createLaunching(
         return { ok: false, reason: outcome.reason };
       }
       release();
+      // Its first message is its first turn: a wait on it returns when that
+      // ends. It was handed as the agent started, so a short first turn that
+      // ended while the launch waited for the agent to join counts too.
+      if (asks.firstMessage !== undefined) launchedWithWork(outcome.id);
       const agent = store.get(outcome.id);
       const role = agent ? roleOf(agent) : null;
       if (roleId !== undefined && role?.id !== roleId) {

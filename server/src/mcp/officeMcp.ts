@@ -277,12 +277,15 @@ export class OfficeMcp implements AgentMcpAccess {
       return;
     }
     reply.hijack();
-    const server = this.serverFor(who.caller);
+    // A tool that holds its call open (wait_for_agents) stops with the request.
+    const gone = new AbortController();
+    const server = this.serverFor(who.caller, gone.signal);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
     });
     reply.raw.on('close', () => {
+      gone.abort();
       void transport.close();
       void server.close();
     });
@@ -299,7 +302,7 @@ export class OfficeMcp implements AgentMcpAccess {
   }
 
   /** An MCP server for one request, its tools bound to `caller`. */
-  private serverFor(caller: number): McpServer {
+  private serverFor(caller: number, signal: AbortSignal): McpServer {
     const server = new McpServer(
       { name: OFFICE_MCP_SERVER_NAME, version: process.env.PIXEL_AGENTS_VERSION ?? '0.0.0' },
       // The tutorial's first message is only its skill's command: this is the fallback.
@@ -310,6 +313,7 @@ export class OfficeMcp implements AgentMcpAccess {
       caller,
       office: this.office as OfficeCapabilities,
       target: (agentId) => agentId ?? caller,
+      signal,
     };
     for (const tool of this.tools) {
       server.registerTool(

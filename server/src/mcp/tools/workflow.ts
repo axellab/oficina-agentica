@@ -20,6 +20,7 @@ function described(view: WorkflowView): Record<string, unknown> {
       role: stage.role,
       parallel: stage.parallel,
       what_to_do: stage.brief,
+      ...(stage.model !== undefined ? { model: stage.model } : {}),
       state: stage.state,
       ...(stage.note ? { note: stage.note } : {}),
     })),
@@ -38,7 +39,8 @@ export const workflow = defineTool({
     "`status` (default): whether your Crew runs one, and if so the `request` (the user's own words), the " +
     'workflow (name, what it is for), who leads it, and every stage in order: its `id`, title, the Role that ' +
     'owns it, `what_to_do`, whether it may run in `parallel` with the stage before it, its `state` (pending | ' +
-    'active | done | skipped) and the note it was closed with. The lead also gets the `rules`. ' +
+    'active | done | skipped) and the note it was closed with, and the `model` the stage names when it names ' +
+    "one (the office launches the stage's Role on it by itself). The lead also gets the `rules`. " +
     'Only the lead (the agent the user started the workflow with) reports the stages: `start` with ' +
     '`stage_id` when its work begins (a stage starts once the stages before it are done or skipped; a done ' +
     'stage can be started again when later work sends it back), `finish` with `stage_id` and a `note` of ' +

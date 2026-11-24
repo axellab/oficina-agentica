@@ -113,6 +113,35 @@ describe('parseWorkflows (workflows.json)', () => {
     ]);
   });
 
+  it("a Workflow may name its lead's model and a stage its owner's; one that is no model name is refused", () => {
+    const parsed = parseWorkflows({
+      workflows: [
+        entry({
+          model: 'sonnet',
+          stages: [
+            { id: 'fix', title: 'Fix it', role: 'developer', model: 'claude-haiku-5-5' },
+            { id: 'check', title: 'Check it', role: 'qa-engineer' },
+          ],
+        }),
+        entry({ id: 'flagged', model: '--dangerously-skip-permissions' }),
+        entry({
+          id: 'spaced',
+          stages: [{ id: 'fix', title: 'Fix it', role: 'developer', model: 'opus; rm -rf /' }],
+        }),
+      ],
+    });
+    expect(parsed.workflows).toHaveLength(1);
+    expect(parsed.workflows[0].model).toBe('sonnet');
+    expect(parsed.workflows[0].stages.map((stage) => stage.model)).toEqual([
+      'claude-haiku-5-5',
+      undefined,
+    ]);
+    expect(parsed.problems).toEqual([
+      expect.stringMatching(/workflows\[1\]: "model" must be a model name or alias/),
+      expect.stringMatching(/workflows\[2\]: stages\[0\]: "model" must be a model name or alias/),
+    ]);
+  });
+
   it('leaves a bad entry out, says why, and keeps the rest', () => {
     const stage = { id: 'fix', title: 'Fix it', role: 'developer' };
     const bad: Array<[Record<string, unknown> | string, RegExp]> = [
@@ -677,6 +706,60 @@ describe('Workflows (the runs)', () => {
     expect(parseWorkflowsLoaded(JSON.parse(JSON.stringify(last)))).toEqual(
       workflows.statusMessage(),
     );
+  });
+
+  it("a Workflow's model is its lead's, and a stage's the one its owner is launched on while that stage is open", async () => {
+    fs.mkdirSync(path.join(os.homedir(), PIXEL_AGENTS_DIR), { recursive: true });
+    fs.writeFileSync(
+      path.join(os.homedir(), PIXEL_AGENTS_DIR, 'workflows.json'),
+      JSON.stringify({
+        workflows: [
+          {
+            id: 'triage',
+            name: 'Triage',
+            model: 'sonnet',
+            stages: [
+              { id: 'look', title: 'Look', role: 'qa-engineer', model: 'haiku' },
+              { id: 'fix', title: 'Fix', role: 'developer' },
+              { id: 'look-again', title: 'Look again', role: 'qa-engineer', model: 'opus' },
+              { id: 'report', title: 'Report', role: 'agile-project-manager' },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const lead = await started({ workflowId: 'triage' });
+    expect(launches[0].asks).toEqual({ firstMessage: WORKFLOW_FIRST_MESSAGE, model: 'sonnet' });
+    // A built-in Workflow names none: its lead runs on its Role's, or the user's default.
+    await started();
+    expect(launches[1].asks).toEqual({ firstMessage: WORKFLOW_FIRST_MESSAGE });
+
+    // The first stage of that Role still open decides: an agent keeps its model.
+    expect(workflows.stageModel(lead, 'qa-engineer')).toEqual({
+      model: 'haiku',
+      stageTitle: 'Look',
+    });
+    expect(workflows.stageModel(lead, 'developer')).toBeUndefined();
+    expect(workflows.stageModel(lead, 'security-engineer')).toBeUndefined();
+    workflows.move(lead, 'start', 'look');
+    expect(workflows.stageModel(lead, 'qa-engineer')).toMatchObject({ model: 'haiku' });
+    workflows.move(lead, 'finish', 'look', 'Seen it fail.');
+    expect(workflows.stageModel(lead, 'qa-engineer')).toEqual({
+      model: 'opus',
+      stageTitle: 'Look again',
+    });
+    // The lead reads it with the stage; an agent that leads no run launches as ever.
+    const view = workflows.view(lead);
+    expect(view.running && view.stages.map((stage) => stage.model)).toEqual([
+      'haiku',
+      undefined,
+      'opus',
+      undefined,
+    ]);
+    const member = join(store.get(lead)!.crew && { ...store.get(lead)!.crew!, launchedBy: lead });
+    expect(workflows.stageModel(member, 'qa-engineer')).toBeUndefined();
+    expect(workflows.stageModel(join(), 'qa-engineer')).toBeUndefined();
   });
 
   it('the run is listed before its lead joins: its first call finds it', async () => {

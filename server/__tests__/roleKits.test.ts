@@ -284,11 +284,45 @@ describe('workflows/<id>.md', () => {
     });
   });
 
+  it("names its lead's model in the front matter and a stage's after its heading", () => {
+    const parsed = parseWorkflowFile(
+      'release',
+      'release-manager',
+      WORKFLOW.replace('order: 3', 'order: 3\nmodel: sonnet')
+        .replace(
+          '## 2. Checks (devsecops-engineer)',
+          '## 2. Checks (devsecops-engineer) {model=haiku}',
+        )
+        .replace('{#smoke}', '{#smoke} {model=claude-opus-5-5}'),
+    );
+    if (typeof parsed === 'string') throw new Error(parsed);
+    expect(parsed.workflow.model).toBe('sonnet');
+    expect(parsed.workflow.stages.map((stage) => [stage.id, stage.model])).toEqual([
+      ['release-notes', undefined],
+      ['checks', 'haiku'],
+      ['smoke', 'claude-opus-5-5'],
+      ['report', undefined],
+    ]);
+  });
+
   it.each([
     [
       'a heading that names no Role',
       WORKFLOW.replace('## 2. Checks (devsecops-engineer)', '## 2. Checks'),
       /is not a stage heading: write "## <step>\. <Title> \(<role id>\)"/,
+    ],
+    [
+      'a stage model that is no model name',
+      WORKFLOW.replace(
+        '## 2. Checks (devsecops-engineer)',
+        '## 2. Checks (devsecops-engineer) {model=--help}',
+      ),
+      /"model" must be a model name or alias/,
+    ],
+    [
+      'a lead model that is no model name',
+      WORKFLOW.replace('order: 3', 'order: 3\nmodel: opus plan'),
+      /"model" must be a model name or alias/,
     ],
     [
       'a step that skips',

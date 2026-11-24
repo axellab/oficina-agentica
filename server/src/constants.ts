@@ -292,7 +292,8 @@ export const CREW_MAX_AGENTS = 8;
 export const CREW_EVENTS_KEPT = 30;
 /** The Pixel Office MCP tools a Crew's agent calls without a permission prompt:
  *  what working together takes (seeing who is there, launching, messaging,
- *  reading an answer, closing a colleague whose part is done, walking over).
+ *  waiting for an answer and reading it, closing a colleague whose part is
+ *  done, walking over).
  *  Everything else the MCP offers still asks, as for any agent. */
 export const CREW_PREAPPROVED_TOOLS: readonly string[] = [
   'list_agents',
@@ -301,6 +302,7 @@ export const CREW_PREAPPROVED_TOOLS: readonly string[] = [
   'launch_agent',
   'send_message',
   'read_agent_terminal',
+  'wait_for_agents',
   'close_agent',
   'visit',
   // A Crew running a Workflow reports and reads its stages with it.
@@ -436,6 +438,29 @@ export const OFFICE_MCP_TOKEN_BYTES = 32;
 /** What a changing tool answers while the MCP is read-only. */
 export const OFFICE_MCP_READ_ONLY_REASON =
   'The Pixel Office MCP is read-only in Pixel Agents settings: listing and reading work, changes are refused. Ask the user to turn read-only off in Settings if this change is needed.';
+
+// ── Waiting for agents (wait_for_agents) ────────────────────
+/** How long a wait_for_agents call waits when it names no time. */
+export const WAIT_FOR_AGENTS_DEFAULT_SECONDS = 90;
+/** The longest a wait_for_agents call holds its request open. Under the two
+ *  minutes after which Claude Code moves a tool call to the background (its
+ *  caller would go on without the answer), and well under its five-minute
+ *  idle limit for an MCP server reached over HTTP. */
+export const WAIT_FOR_AGENTS_MAX_SECONDS = 110;
+/** How many agents one wait may name. */
+export const WAIT_FOR_AGENTS_MAX_IDS = 16;
+/** How often a wait looks at its agents. */
+export const WAIT_FOR_AGENTS_POLL_MS = 250;
+/** How long an agent must stay out of work before a wait takes its turn as
+ *  ended: a Message queued behind the turn starts the next one at once, and
+ *  the TUI is still drawing its last rows when the turn's end is reported. */
+export const TURN_END_SETTLE_MS = 1000;
+/** A Message submitted into an agent mid-turn is either taken into that turn
+ *  or starts the next one as it ends, and a turn reports nothing until its
+ *  first tool call. Once the running turn has ended, this long with no sign of
+ *  another is taken as the first: the Message was answered in the turn that
+ *  ended. */
+export const QUEUED_HANDOVER_QUIET_MS = 20_000;
 
 // ── Messages (read_agent_terminal / send_message) ───────────
 /** A Message's gist (shown in the sender's speech bubble) is at most this long. */

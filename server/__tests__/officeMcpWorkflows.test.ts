@@ -8,6 +8,7 @@
  * one, are workflows.test.ts.
  */
 
+import * as fs from 'fs';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
@@ -82,6 +83,52 @@ describe('Workflows through the Pixel Office MCP (composed server, mock-claude i
     expect(reply.isError, JSON.stringify(reply.value)).toBe(true);
     return reply.text;
   };
+
+  // ── The models a Workflow names ─────────────────────────────
+
+  it("a Workflow's model launches its lead, and a stage's the agent the lead launches for it", async () => {
+    // The host's own Workflow, naming a model for its lead and for a stage.
+    fs.mkdirSync(path.join(h.home, '.pixel-agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(h.home, '.pixel-agents', 'workflows.json'),
+      JSON.stringify({
+        workflows: [
+          {
+            id: 'triage',
+            name: 'Triage',
+            model: 'sonnet',
+            stages: [
+              { id: 'look', title: 'Look', role: 'qa-engineer', model: 'haiku' },
+              { id: 'report', title: 'Report', role: 'agile-project-manager' },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const lead = await startedRun({ workflowId: 'triage' });
+    expect(flag(lead.args, '--model')).toBe('sonnet');
+    const status = await h.callJson(lead.client, 'workflow', {});
+    expect((status.stages as Json[]).map((stage) => stage.model)).toEqual(['haiku', undefined]);
+
+    // The office applies it: the lead only names the Role.
+    const reply = await h.callToolCaught(lead.client, 'launch_agent', {
+      directory: 'proj',
+      role: 'qa-engineer',
+    });
+    expect(reply.isError, reply.text).toBe(false);
+    const owner = h.starts().find((start) => start.sessionId === reply.value!.session_id)!;
+    expect(flag(owner.args, '--model')).toBe('haiku');
+    expect(reply.value!.notes).toContainEqual(
+      expect.stringMatching(/runs on haiku: the model your workflow names for the stage "Look"/),
+    );
+
+    // A model the lead asks for by name stands, and a Role no open stage names one for gets none.
+    const asked = await launchedBy(lead, { role: 'qa-engineer', model: 'opus' });
+    expect(flag(asked.args, '--model')).toBe('opus');
+    const other = await launchedBy(lead, { role: 'developer' });
+    expect(flag(other.args, '--model')).toBeUndefined();
+  });
 
   // ── Starting one ────────────────────────────────────────────
 

@@ -42,6 +42,7 @@ Nothing launches before **Start**. The pick lasts until the drawer closes, like 
 
 - **The lead comes in**, as the Workflow's lead Role (the Agile Project Manager for the general ones, each other Role for its own), with a new Crew. It reads your request and the stages, and asks you in its own terminal for anything the request leaves open that only you can decide.
 - **It hands each stage to the Role that owns it**, launching the Roles the Crew does not have yet, without asking you: that is what a Crew is. A stage its own Role owns, it does itself.
+- **It waits without spending your plan on looking.** While a colleague works, the lead waits for it with a single call that the office answers when that colleague's turn ends, with what is on its screen. It does not keep checking.
 - **The stages run in order.** A stage starts once the ones before it are done or skipped. Stages that share a number in the dialog run at the same time (a security review beside the testing, for example). When later work sends an earlier stage back (QA finds a defect), the lead starts that stage again.
 - **You watch it in the office.** Every hand-over is a walk to the other agent's desk. The **Workflow** panel (top right) counts the stages closed; opened, it shows your request and each stage with its Role, where it stands, and the note the lead closed it with: what was done and how it was verified, or why the request did not need it.
 - **It ends on a report.** Every built-in Workflow's last stage is the lead reporting to you in its own terminal. Nothing is merged or deployed for you: that stays your call.
@@ -337,9 +338,18 @@ Run your Pipeline troubleshooting playbook, steps 1 to 4. ... Closed when all of
 ...
 ```
 
-A stage's heading is `## <step>. <Title> (<role id>)`: stages with the same step number run at the same time, and steps count up from 1 without a gap. The stage's id is its title in lower case with hyphens (`pipeline-change`), or the one the heading gives at its end (`{#pipeline}`). The limits are the same as in `workflows.json` below, which is also how you replace one of these or add your own without touching the repository.
+A stage's heading is `## <step>. <Title> (<role id>)`: stages with the same step number run at the same time, and steps count up from 1 without a gap. The stage's id is its title in lower case with hyphens (`pipeline-change`), or the one the heading gives at its end (`{#pipeline}`). A `model:` line in the front matter names the model the lead runs on, and `{model=<name>}` at the very end of a heading the model that stage's owner is launched on ([Choosing the model](#choosing-the-model)). The limits are the same as in `workflows.json` below, which is also how you replace one of these or add your own without touching the repository.
 
 A Role added to the repository with `npm run new-role` starts with a Workflow of its own, in its folder ([Adding a Role](roles.md#adding-a-role)). `npm run check-roles` holds every Workflow in `roles/` to the same rules: each stage owned by a Role there is, each saying what closes it, and a last stage that is its lead's report.
+
+## Choosing the model
+
+Every agent of a run uses your Claude plan, and the model it runs on decides how much. By default each agent runs on its Role's model when the Role names one ([`roles.json`](roles.md#your-own-roles-rolesjson) or the Role's `ROLE.md`), else on the default of your Claude Code. A Workflow can say more:
+
+- **The lead's model**: `model` on the Workflow. The lead is the agent that stays for the whole run, so its model weighs the most.
+- **A stage's model**: `model` on a stage. The office launches the stage's Role on it when the lead brings that Role in for the stage; the lead does not have to ask for it, and its launch tells it which model was used.
+
+An agent keeps the model it was launched with. A Role that owns several stages is launched once, for the first of them still open, and runs on that stage's model until it is closed. No built-in Workflow names a model: nothing changes until you set one.
 
 ## Your own Workflows: `workflows.json`
 
@@ -396,6 +406,8 @@ Create `~/.pixel-agents/workflows.json` to add a Workflow or replace a built-in 
 | `stages[].role`     | Required. The id of the Role that owns the stage (a built-in one, or one of your own from [`roles.json`](roles.md#your-own-roles-rolesjson)).                     |
 | `stages[].brief`    | What the stage's owner does and what closes it, up to 2,000 characters: one string, or a list of lines. The lead is told it; write it so it can check the result. |
 | `stages[].parallel` | `true` when the stage may run at the same time as the stage listed before it. Not on the first stage.                                                             |
+| `model`             | The model the run's lead is launched on, as Claude Code names it (`opus`, `sonnet`, `haiku`, or a full model id). Absent = its Role's, else your default.         |
+| `stages[].model`    | The model the stage's owner is launched on. Absent = its Role's, else your default. See [Choosing the model](#choosing-the-model).                                |
 
 The built-in ids are `new-feature`, `bug-fix`, `security-review`, `quality-review`, `sprint-planning`, `architecture-review`, `technical-design`, `safe-refactor`, `dependency-upgrade`, `full-regression`, `flaky-test-hunt`, `pipeline-troubleshooting`, `pipeline-hardening`, `supply-chain-audit`, `threat-model`, `vulnerability-review`, `infrastructure-review` and `cost-review`. An entry with one of them replaces that Workflow **whole** (its stages are a list, not fields to merge), so start from the full Workflow you want. New Workflows are listed after the built-in ones, in the file's order; the drawer shows each under the Role that leads it. Up to 30 entries are read.
 
