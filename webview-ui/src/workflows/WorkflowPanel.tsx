@@ -1,6 +1,8 @@
 import { useState } from 'react';
 
 import type {
+  WorkflowChangeTrigger,
+  WorkflowChangeTriggerState,
   WorkflowCheckState,
   WorkflowRun,
   WorkflowRunStage,
@@ -18,6 +20,9 @@ import {
   runProgress,
   STAGE_STATE_LABEL,
   stageTitle,
+  TRIGGER_STATE_LABEL,
+  triggersSummary,
+  triggerTitle,
 } from './workflowView.js';
 
 /** What the user may do to a run's stages. Each is absent where this office
@@ -35,6 +40,12 @@ interface WorkflowPanelProps extends StageActions {
   runs: readonly WorkflowRun[];
   /** Stop a run, which ends its Crew. Absent where this office may not (a view-only one). */
   onStop?: (crewId: string) => void;
+  /** The host's Change triggers and where each stands; none where the host set up none. */
+  triggers?: readonly WorkflowChangeTrigger[];
+  /** The user paused the triggers. */
+  triggersPaused?: boolean;
+  /** Pause or resume the triggers. Absent where this office may not. */
+  onSetTriggersPaused?: (paused: boolean) => void;
 }
 
 /** The panel's border (pixel-panel: 2px), inside the card's height. */
@@ -54,15 +65,22 @@ const BORDER_PX = 2;
  * it, not its lead). Pressing a stage shows what the user may do with it:
  * read its Check's output, and skip it (asked once), which only they can do
  * to a required stage.
+ *
+ * Where the host has Change triggers the panel is there with no run too: it
+ * says which Directories the office watches for new commits and where each
+ * stands, and pauses them.
  */
 export function WorkflowPanel({
   runs,
   onStop,
   onSkipStage,
   onShowCheckOutput,
+  triggers = [],
+  triggersPaused = false,
+  onSetTriggersPaused,
 }: WorkflowPanelProps) {
   const [collapsed, setCollapsed] = useState(true);
-  if (runs.length === 0) return null;
+  if (runs.length === 0 && triggers.length === 0) return null;
   const single = runs.length === 1 ? runs[0] : undefined;
 
   return (
@@ -77,10 +95,22 @@ export function WorkflowPanel({
       >
         <span className="text-accent-bright flex items-center gap-6">
           <PixelIcon name="workflow" scale={1} />
-          {single ? 'Workflow' : 'Workflows'}
-          {/* One run: its stages closed against all of them. Several: how many runs. */}
-          <PixelText text={panelCount(runs)} />
-          {single?.finished && <span className="text-text-muted">finished</span>}
+          {runs.length === 0 ? (
+            <>
+              {/* No run: what the watch is doing. */}
+              Change triggers
+              <span className="text-text-muted" data-testid="change-triggers-summary">
+                {triggersSummary(triggers, triggersPaused)}
+              </span>
+            </>
+          ) : (
+            <>
+              {single ? 'Workflow' : 'Workflows'}
+              {/* One run: its stages closed against all of them. Several: how many runs. */}
+              <PixelText text={panelCount(runs)} />
+              {single?.finished && <span className="text-text-muted">finished</span>}
+            </>
+          )}
         </span>
         <Button
           variant="ghost"
@@ -109,7 +139,91 @@ export function WorkflowPanel({
             onShowCheckOutput={onShowCheckOutput}
           />
         ))}
+      {!collapsed && triggers.length > 0 && (
+        <TriggersSection
+          triggers={triggers}
+          paused={triggersPaused}
+          onSetPaused={onSetTriggersPaused}
+        />
+      )}
     </div>
+  );
+}
+
+/** How a trigger's state reads: the ones that need the user stand out. */
+const TRIGGER_STATE_CLASS: Record<WorkflowChangeTriggerState, string> = {
+  watching: 'text-text-muted',
+  settling: 'text-status-active',
+  running: 'text-status-active',
+  waiting: 'text-warning',
+  paused: 'text-text-muted',
+  problem: 'text-status-error',
+};
+
+interface TriggersSectionProps {
+  triggers: readonly WorkflowChangeTrigger[];
+  paused: boolean;
+  onSetPaused?: (paused: boolean) => void;
+}
+
+/** The host's Change triggers: each Directory watched, the Workflow a change
+ *  starts there and where the watch stands, with why when it waits. */
+function TriggersSection({ triggers, paused, onSetPaused }: TriggersSectionProps) {
+  return (
+    <section
+      className="border-t-2 border-border py-6 flex flex-col gap-6"
+      data-testid="change-triggers"
+      data-paused={paused ? 'true' : 'false'}
+    >
+      <span className="text-text-muted">Started by each change</span>
+      <ul className="list-none m-0 pl-0 flex flex-col">
+        {triggers.map((trigger) => (
+          <li
+            key={trigger.directoryName}
+            className="flex flex-col py-2 min-w-0 leading-tight"
+            title={triggerTitle(trigger)}
+            data-testid="change-trigger"
+            data-state={trigger.state}
+          >
+            <span className="flex items-baseline gap-6 min-w-0">
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                {trigger.directoryName}
+              </span>
+              <span className="shrink-0 text-xs text-text-muted">{trigger.workflowName}</span>
+              <span className={`shrink-0 text-xs ${TRIGGER_STATE_CLASS[trigger.state]}`}>
+                {TRIGGER_STATE_LABEL[trigger.state]}
+              </span>
+            </span>
+            {trigger.note && (
+              // Why it waits is what the user acts on: never cut short.
+              <span
+                className="text-xs text-text-muted break-words"
+                data-testid="change-trigger-note"
+              >
+                {trigger.note}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {onSetPaused && (
+        <div>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid="change-triggers-pause"
+            title={
+              paused
+                ? 'Watch again, from the newest commit of each Directory'
+                : 'Start no run for a change until resumed. Commits made meanwhile are not reviewed.'
+            }
+            onClick={() => onSetPaused(!paused)}
+          >
+            {paused ? 'Resume Triggers' : 'Pause Triggers'}
+          </Button>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -299,7 +413,18 @@ function RunSection({ run, counted, onStop, onSkipStage, onShowCheckOutput }: Ru
       data-finished={run.finished ? 'true' : 'false'}
     >
       <div className="flex items-center justify-between gap-6">
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap">{run.name}</span>
+        <span className="flex items-baseline gap-6 min-w-0">
+          <span className="overflow-hidden text-ellipsis whitespace-nowrap">{run.name}</span>
+          {run.startedByChange && (
+            <span
+              className="shrink-0 text-xs text-text-muted"
+              title="Started by a change trigger: new commits landed in its Directory"
+              data-testid="workflow-run-by-change"
+            >
+              by a change
+            </span>
+          )}
+        </span>
         {counted && (
           <span className="shrink-0 flex items-center gap-6 text-xs text-text-muted">
             <PixelText text={runProgress(run)} />
@@ -307,7 +432,8 @@ function RunSection({ run, counted, onStop, onSkipStage, onShowCheckOutput }: Ru
           </span>
         )}
       </div>
-      {/* The user's own words, on one line as the server cut them; whole in the tooltip. */}
+      {/* The user's own words (the office's, for a run a change started), on
+          one line as the server cut them; whole in the tooltip. */}
       <p
         className="m-0 text-xs text-text-muted overflow-hidden text-ellipsis whitespace-nowrap"
         title={run.request}

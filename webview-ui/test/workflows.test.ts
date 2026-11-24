@@ -14,6 +14,7 @@ import { beforeEach, test } from 'vitest';
 
 import type {
   Workflow,
+  WorkflowChangeTrigger,
   WorkflowRun,
   WorkflowRunStage,
   WorkflowStageCheck,
@@ -40,6 +41,8 @@ import {
   runProgress,
   stageMarksTitle,
   stageTitle,
+  triggersSummary,
+  triggerTitle,
   workflowsByLead,
 } from '../src/workflows/workflowView.js';
 
@@ -429,4 +432,81 @@ test('a request must say something and fit', () => {
   );
   // Surrounding blank space is not part of the request.
   assert.equal(requestProblem(` ${'x'.repeat(MAX_WORKFLOW_REQUEST_CHARS)} `), null);
+});
+
+// ── Change triggers ─────────────────────────────────────────────
+
+function trigger(more: Partial<WorkflowChangeTrigger> = {}): WorkflowChangeTrigger {
+  return {
+    directoryName: 'shop',
+    workflowId: 'change-review',
+    workflowName: 'Change review',
+    state: 'watching',
+    ...more,
+  };
+}
+
+test('the Change triggers ride the list, with whether the user paused them and which run a change started', () => {
+  handleWorkflowsMessage(loaded());
+  assert.equal(workflowsLoaded()?.changeTriggers, undefined);
+  assert.equal(workflowsLoaded()?.changeTriggersPaused, undefined);
+
+  const waiting = trigger({
+    state: 'waiting',
+    note: 'New commits wait for the review before them.',
+  });
+  handleWorkflowsMessage(
+    loaded({
+      changeTriggers: [trigger(), waiting],
+      changeTriggersPaused: true,
+      runs: [runOf([stage('reproduce', 'active')], { startedByChange: true })],
+    }),
+  );
+  assert.deepEqual(workflowsLoaded()?.changeTriggers, [trigger(), waiting]);
+  assert.equal(workflowsLoaded()?.changeTriggersPaused, true);
+  assert.equal(workflowsLoaded()?.runs[0].startedByChange, true);
+});
+
+test('a Change trigger that is not one is left out; the rest still list', () => {
+  handleWorkflowsMessage(
+    loaded({
+      changeTriggers: [
+        { directoryName: 'shop' },
+        trigger({ state: 'asleep' as WorkflowChangeTrigger['state'] }),
+        trigger({ directoryName: 'api', state: 'settling' }),
+      ],
+      changeTriggersPaused: 'yes',
+    }),
+  );
+  assert.deepEqual(workflowsLoaded()?.changeTriggers, [
+    trigger({ directoryName: 'api', state: 'settling' }),
+  ]);
+  assert.equal(workflowsLoaded()?.changeTriggersPaused, undefined);
+});
+
+test('the header says what the Change triggers are doing, the one that needs the user first', () => {
+  assert.equal(triggersSummary([trigger()], false), 'watching');
+  assert.equal(triggersSummary([trigger(), trigger({ state: 'settling' })], false), 'new commits');
+  assert.equal(
+    triggersSummary([trigger({ state: 'settling' }), trigger({ state: 'running' })], false),
+    'reviewing',
+  );
+  assert.equal(
+    triggersSummary([trigger({ state: 'running' }), trigger({ state: 'waiting' })], false),
+    'waiting',
+  );
+  assert.equal(
+    triggersSummary([trigger({ state: 'waiting' }), trigger({ state: 'problem' })], false),
+    'cannot watch',
+  );
+  // Paused is the user's word, over whatever each one was doing.
+  assert.equal(triggersSummary([trigger({ state: 'problem' })], true), 'paused');
+});
+
+test("a Change trigger's tooltip says its Directory, its Workflow, where it stands and why", () => {
+  assert.equal(triggerTitle(trigger()), 'shop: a Change review run for each change · watching');
+  assert.equal(
+    triggerTitle(trigger({ state: 'problem', note: 'There is nothing to watch.' })),
+    'shop: a Change review run for each change · cannot watch · There is nothing to watch.',
+  );
 });

@@ -15,6 +15,8 @@ import { isCheckId } from './checks.js';
 import { isRecord } from './isRecord.js';
 import type {
   Workflow,
+  WorkflowChangeTrigger,
+  WorkflowChangeTriggerState,
   WorkflowCheckOutput,
   WorkflowCheckState,
   WorkflowRun,
@@ -25,10 +27,13 @@ import type {
   WorkflowStageCheck,
   WorkflowStageState,
 } from './messages.js';
+import { MAX_PATH_GLOBS, parsePathGlobs } from './pathGlobs.js';
 import { isModelName, isRoleId, MODEL_NAME_PROBLEM } from './roles.js';
 
 export type {
   Workflow,
+  WorkflowChangeTrigger,
+  WorkflowChangeTriggerState,
   WorkflowCheckOutput,
   WorkflowCheckState,
   WorkflowRun,
@@ -61,6 +66,12 @@ export interface WorkflowStageDefinition {
    *  agent keeps the model it was launched with, so this counts for the stage
    *  its Role is first launched for. */
   model?: string;
+  /** The files it is for, as path patterns (core/src/pathGlobs.ts). They
+   *  count only in a run a Change trigger started: the office itself leaves
+   *  the stage out when the change touches none of them. In a run the user
+   *  started there is no change to compare, and they say nothing. Absent = a
+   *  stage for every change. */
+  paths?: string[];
 }
 
 /** A Workflow as the catalog holds it. */
@@ -122,6 +133,9 @@ function briefOf(value: unknown, max: number): string | undefined {
   return brief.length > 0 && brief.length <= max ? brief : undefined;
 }
 
+/** What a stage's `paths` must be, for whoever wrote one that is not. */
+export const PATHS_PROBLEM = `"paths" must be a path pattern or a list of 1-${MAX_PATH_GLOBS} of them, none twice (like "src/**", "*.md" or "!docs/": no spaces, braces or commas)`;
+
 const STAGE_KEYS = new Set([
   'id',
   'title',
@@ -131,6 +145,7 @@ const STAGE_KEYS = new Set([
   'required',
   'check',
   'model',
+  'paths',
 ]);
 const WORKFLOW_KEYS = new Set(['id', 'name', 'description', 'lead', 'brief', 'model', 'stages']);
 
@@ -175,6 +190,11 @@ function parseStage(value: unknown, first: boolean): WorkflowStageDefinition | s
   if (value.model !== undefined) {
     if (!isModelName(value.model)) return MODEL_NAME_PROBLEM;
     stage.model = value.model;
+  }
+  if (value.paths !== undefined) {
+    const paths = parsePathGlobs(value.paths);
+    if (paths === undefined) return PATHS_PROBLEM;
+    stage.paths = paths;
   }
   return stage;
 }
@@ -418,13 +438,38 @@ function parseRun(raw: unknown): WorkflowRun | null {
   if (typeof raw.leadAgentId === 'number' && Number.isInteger(raw.leadAgentId)) {
     run.leadAgentId = raw.leadAgentId;
   }
+  if (raw.startedByChange === true) run.startedByChange = true;
   return run;
+}
+
+const TRIGGER_STATES: readonly string[] = [
+  'watching',
+  'settling',
+  'running',
+  'waiting',
+  'paused',
+  'problem',
+];
+
+function parseChangeTrigger(raw: unknown): WorkflowChangeTrigger | null {
+  if (!isRecord(raw) || typeof raw.directoryName !== 'string' || !raw.directoryName) return null;
+  if (typeof raw.workflowId !== 'string' || !raw.workflowId) return null;
+  if (typeof raw.state !== 'string' || !TRIGGER_STATES.includes(raw.state)) return null;
+  const trigger: WorkflowChangeTrigger = {
+    directoryName: raw.directoryName,
+    workflowId: raw.workflowId,
+    workflowName:
+      typeof raw.workflowName === 'string' && raw.workflowName ? raw.workflowName : raw.workflowId,
+    state: raw.state as WorkflowChangeTriggerState,
+  };
+  if (typeof raw.note === 'string' && raw.note) trigger.note = raw.note;
+  return trigger;
 }
 
 /**
  * A `workflowsLoaded` message as an office keeps it, or null when it isn't
- * one. Lenient per entry, like the Roles and the Crews: a Workflow, run or
- * stage that is not one is left out and the rest kept.
+ * one. Lenient per entry, like the Roles and the Crews: a Workflow, run,
+ * stage or Change trigger that is not one is left out and the rest kept.
  */
 export function parseWorkflowsLoaded(raw: unknown): WorkflowsLoaded | null {
   if (!isRecord(raw) || raw.type !== 'workflowsLoaded') return null;
@@ -439,6 +484,11 @@ export function parseWorkflowsLoaded(raw: unknown): WorkflowsLoaded | null {
   if (typeof raw.unavailableReason === 'string' && raw.unavailableReason) {
     loaded.unavailableReason = raw.unavailableReason;
   }
+  if (Array.isArray(raw.changeTriggers)) {
+    const triggers = raw.changeTriggers.flatMap((trigger) => parseChangeTrigger(trigger) ?? []);
+    if (triggers.length > 0) loaded.changeTriggers = triggers;
+  }
+  if (raw.changeTriggersPaused === true) loaded.changeTriggersPaused = true;
   return loaded;
 }
 

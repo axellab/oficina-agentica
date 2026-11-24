@@ -7,6 +7,8 @@
 
 import type {
   Workflow,
+  WorkflowChangeTrigger,
+  WorkflowChangeTriggerState,
   WorkflowCheckState,
   WorkflowRun,
   WorkflowRunStage,
@@ -36,6 +38,42 @@ export function runProgress(run: Pick<WorkflowRun, 'stages'>): string {
 /** The panel's header count: the one run's progress, else how many runs there are. */
 export function panelCount(runs: readonly WorkflowRun[]): string {
   return runs.length === 1 ? runProgress(runs[0]) : `${runs.length}`;
+}
+
+/** Where a Change trigger stands, in a word or two. */
+export const TRIGGER_STATE_LABEL: Record<WorkflowChangeTriggerState, string> = {
+  watching: 'watching',
+  settling: 'new commits',
+  running: 'reviewing',
+  waiting: 'waiting',
+  paused: 'paused',
+  problem: 'cannot watch',
+};
+
+/**
+ * The panel's header while no run is under way and the host has Change
+ * triggers: what they are doing as a whole. One that cannot watch is said
+ * first, since it is the one that needs the user.
+ */
+export function triggersSummary(
+  triggers: readonly Pick<WorkflowChangeTrigger, 'state'>[],
+  paused: boolean,
+): string {
+  if (paused) return TRIGGER_STATE_LABEL.paused;
+  for (const state of ['problem', 'waiting', 'running', 'settling'] as const) {
+    if (triggers.some((trigger) => trigger.state === state)) return TRIGGER_STATE_LABEL[state];
+  }
+  return TRIGGER_STATE_LABEL.watching;
+}
+
+/** A Change trigger's row in one line (its tooltip). */
+export function triggerTitle(trigger: WorkflowChangeTrigger): string {
+  const parts = [
+    `${trigger.directoryName}: a ${trigger.workflowName} run for each change`,
+    TRIGGER_STATE_LABEL[trigger.state],
+  ];
+  if (trigger.note) parts.push(trigger.note);
+  return parts.join(' · ');
 }
 
 /** How long a Check ran, as the office writes it: "under 1 s", "42 s", "3 min 5 s". */

@@ -39,6 +39,7 @@ import type { AgentState } from '../src/types.js';
 import { checkCatalog, checkForDirectory } from '../src/workflows/checkCatalog.js';
 import { cleanCheckOutput, outputTail } from '../src/workflows/checkOutput.js';
 import {
+  CHECK_LEFTOVERS_NOTE,
   checkEnv,
   type CheckResult,
   type RunningCheck,
@@ -226,6 +227,16 @@ describe("a check's output, as text", () => {
     expect(cleanCheckOutput(raw)).toBe('✓ 12 passed\ndonelink\n');
   });
 
+  it('drops the one-character forms of those sequences too, and every other C1 control character', () => {
+    // A terminal reading UTF-8 takes U+009B for ESC [ and U+009D for ESC ].
+    const raw =
+      'a\u009b2J\u009b31mb\u009d0;title\u009cc\u009d0;title\u0007d\u001b]0;title\u009ce\u0085f\u0090g\u009fh\u00a0i';
+    expect(cleanCheckOutput(raw)).toBe('abcdefgh\u00a0i');
+    // An opener with nothing after it is a control character like any other.
+    expect(cleanCheckOutput('x\u009by\u009d')).toBe('x');
+    expect(cleanCheckOutput('x\u009d')).toBe('x');
+  });
+
   it('takes a carriage return as the end of a line and leaves no other control character', () => {
     expect(cleanCheckOutput('10%\r50%\r100%\r\nok\u0007\u0000\tend\n\n\n\nlast')).toBe(
       '10%\n50%\n100%\nok\tend\n\nlast',
@@ -363,6 +374,67 @@ describe('running a check (real processes)', () => {
       // Nothing of it is left to run beside the check that comes next.
       await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5000 });
     },
+  );
+
+  /** A command that ends with `exitCode` once the helper it started (not
+   *  detached: in its process group) says it is up, in the file `ready`. */
+  const leaving = (name: string, helper: string, exitCode = 0, stdio = 'ignore'): string =>
+    script(
+      name,
+      `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(helper)}], { stdio: '${stdio}' }).unref(); console.log('12 passed'); const up = setInterval(() => { if (require('fs').existsSync('ready')) { clearInterval(up); process.exit(${exitCode}); } }, 20)`,
+    );
+  const helperPid = (): number => Number(fs.readFileSync(path.join(work, 'ready'), 'utf8'));
+
+  it.skipIf(process.platform === 'win32')(
+    'ends what a command that ran to its end left running, and keeps how the command ended',
+    async () => {
+      const helper =
+        "require('fs').writeFileSync('ready', String(process.pid)); setInterval(() => {}, 1000)";
+      const result = await run(leaving('leaves.js', helper)).result;
+      expect(result).toMatchObject({ passed: true, ended: 'exited', exitCode: 0 });
+      expect(result.output).toBe(`12 passed\n\n${CHECK_LEFTOVERS_NOTE}\n`);
+      // Gone by the time the result is given: nothing runs beside the next Check.
+      expect(alive(helperPid())).toBe(false);
+
+      // A failed command stays failed, with its own exit code.
+      fs.rmSync(path.join(work, 'ready'));
+      const failed = await run(leaving('leaves-failing.js', helper, 3)).result;
+      expect(failed).toMatchObject({ passed: false, ended: 'exited', exitCode: 3 });
+      expect(alive(helperPid())).toBe(false);
+
+      // One that holds the Check's pipes is ended the same way.
+      fs.rmSync(path.join(work, 'ready'));
+      const holding = await run(leaving('leaves-holding.js', helper, 0, 'inherit')).result;
+      expect(holding).toMatchObject({ passed: true, ended: 'exited', exitCode: 0 });
+      expect(holding.output).toContain(CHECK_LEFTOVERS_NOTE);
+      expect(alive(helperPid())).toBe(false);
+    },
+    20_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'ends by force what a command left running that ignores the ask to end',
+    async () => {
+      const stubborn =
+        "process.on('SIGTERM', () => {}); require('fs').writeFileSync('ready', String(process.pid)); setInterval(() => {}, 1000)";
+      const result = await run(leaving('leaves-stubborn.js', stubborn)).result;
+      expect(result).toMatchObject({ passed: true, ended: 'exited', exitCode: 0 });
+      expect(result.output).toContain(CHECK_LEFTOVERS_NOTE);
+      await vi.waitFor(() => expect(alive(helperPid())).toBe(false), { timeout: 5000 });
+    },
+    20_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'what is on its way out when the command ends is given the time to leave, and nothing is said of it',
+    async () => {
+      const brief =
+        "require('fs').writeFileSync('ready', String(process.pid)); setTimeout(() => {}, 300)";
+      const result = await run(leaving('leaves-briefly.js', brief)).result;
+      expect(result).toMatchObject({ passed: true, ended: 'exited', exitCode: 0 });
+      expect(result.output).toBe('12 passed\n');
+    },
+    20_000,
   );
 
   it('a folder that is not there runs nothing and says so', async () => {

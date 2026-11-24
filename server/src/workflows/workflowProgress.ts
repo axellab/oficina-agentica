@@ -16,6 +16,7 @@
  */
 
 import type { WorkflowStageState } from '../../../core/src/messages.js';
+import { touchesPaths } from '../../../core/src/pathGlobs.js';
 import {
   isStageClosed,
   stageSteps,
@@ -42,6 +43,44 @@ export type StageMoveOutcome =
 /** A run's stages as it starts: every one pending. */
 export function initialStages(definition: readonly WorkflowStageDefinition[]): StageProgress[] {
   return definition.map((stage) => ({ id: stage.id, state: 'pending' }));
+}
+
+/** Whether a change touching `files` is one the stage is for: a stage that
+ *  names no `paths` is for every change. */
+function stageTouched(stage: WorkflowStageDefinition, files: readonly string[]): boolean {
+  return stage.paths === undefined || touchesPaths(files, stage.paths);
+}
+
+/**
+ * A run's stages as a Change trigger starts it, for a change touching `files`
+ * (the repository's own paths): a stage whose `paths` the change touches none
+ * of is left out by the office, with `skipNote`, required or not: what a
+ * stage is for is its Workflow's to say, and no lead decided it.
+ */
+export function initialStagesForChange(
+  definition: readonly WorkflowStageDefinition[],
+  files: readonly string[],
+  skipNote: string,
+): StageProgress[] {
+  return definition.map((stage) =>
+    stageTouched(stage, files)
+      ? { id: stage.id, state: 'pending' }
+      : { id: stage.id, state: 'skipped', note: skipNote },
+  );
+}
+
+/**
+ * Whether a change touching `files` gives a Workflow anything to do: it names
+ * no `paths` at all (it is for every change), or the change touches a file
+ * one of its stages is for. A change that touches none starts no run: a lead
+ * launched to report that there was nothing to look at is a turn wasted.
+ */
+export function changeHasWork(
+  definition: readonly WorkflowStageDefinition[],
+  files: readonly string[],
+): boolean {
+  const scoped = definition.filter((stage) => stage.paths !== undefined);
+  return scoped.length === 0 || scoped.some((stage) => stageTouched(stage, files));
 }
 
 /** Whether every stage is done or skipped. */

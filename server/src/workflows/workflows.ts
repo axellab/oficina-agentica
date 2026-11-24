@@ -30,6 +30,7 @@
 
 import type { CheckDefinition } from '../../../core/src/checks.js';
 import type {
+  WorkflowChangeTrigger,
   WorkflowCheckOutput,
   WorkflowCheckState,
   WorkflowRun,
@@ -46,6 +47,7 @@ import {
   CHECK_FINISH_HOLD_SECONDS,
   CHECK_OUTPUT_FOR_LEAD_CHARS,
   CHECK_OUTPUT_FOR_OFFICE_CHARS,
+  WORKFLOW_CHANGE_SKIP_NOTE,
   WORKFLOW_SHOWN_TEXT_MAX_CHARS,
   WORKFLOW_USER_SKIP_NOTE,
 } from '../constants.js';
@@ -56,19 +58,25 @@ import { outputTail } from './checkOutput.js';
 import type { CheckResult, RunningCheck } from './checkRunner.js';
 import { roleNameOf, workflowCatalog, workflowListing } from './workflowCatalog.js';
 import {
+  changeRequest,
+  type ChangeTold,
   checkFailedReason,
   checkNotSetUpNote,
   checkPassedNote,
   checkRefusedReason,
   checkRunningNote,
   NO_WORKFLOW_NOTE,
+  WORKFLOW_CHANGE_FIRST_MESSAGE,
+  WORKFLOW_CHANGE_LEAD_RULES,
   WORKFLOW_FIRST_MESSAGE,
   WORKFLOW_LEAD_RULES,
   WORKFLOW_STOPPED_NOTE,
   workflowMemberNote,
 } from './workflowCopy.js';
 import {
+  changeHasWork,
   initialStages,
+  initialStagesForChange,
   isRunFinished,
   moveStage,
   type StageMove,
@@ -100,6 +108,13 @@ export interface WorkflowsDeps {
      *  the user can make the office's tools read-only while a run is under way. */
     refused?(): string | null;
   };
+  /** The host's Change triggers (changeTriggers.ts), where the office has
+   *  them: their status rides `workflowsLoaded`, and the user pauses them
+   *  from the Workflow panel. */
+  changeTriggers?: {
+    status(): { triggers: WorkflowChangeTrigger[]; paused: boolean } | undefined;
+    setPaused(paused: boolean): void;
+  };
 }
 
 /** What an office asks a start with (`startWorkflow`), unchecked. */
@@ -112,6 +127,24 @@ export interface WorkflowStart {
 
 export type WorkflowStartOutcome = { ok: true } | { ok: false; reason: string };
 
+/**
+ * The change a Change trigger starts a run for: the commits of a Directory's
+ * checkout it has not handed to a run yet. Never read from an office's
+ * message: only the office's own watch of the Directory makes one.
+ */
+export interface WorkflowChange {
+  /** The commit the change is counted from, and its newest one. */
+  base: string;
+  head: string;
+  commits: number;
+  /** The paths it touches, as the repository names them. */
+  files: readonly string[];
+}
+
+/** A start for a change: `crewId` names the run; absent = the change touches
+ *  no file a stage of the Workflow is for, so no run was started. */
+export type ChangeStartOutcome = { ok: true; crewId?: string } | { ok: false; reason: string };
+
 /** The `workflow` tool's view, for the agent asking. */
 export type WorkflowView =
   | { running: false; note: string }
@@ -121,8 +154,10 @@ export type WorkflowView =
       youLead: boolean;
       leadAgentId: number | null;
       workflow: { id: string; name: string; description: string; brief: string };
-      /** The user's own words, whole. */
+      /** The user's own words, whole; the office's for a run a change started. */
       request: string;
+      /** The change the run was started for, when a Change trigger started it. */
+      change?: ChangeTold;
       finished: boolean;
       stages: Array<{
         id: string;
@@ -183,6 +218,8 @@ interface RunRecord {
   /** Each stage's Role by name, as the catalog had it then. */
   roleNames: string[];
   request: string;
+  /** The change it was started for, when a Change trigger started it. */
+  change?: WorkflowChange;
   /** The Directory the run was started in: where its Checks run, and the one
    *  checks.json is asked about. */
   directory: string;
@@ -276,6 +313,7 @@ export class Workflows {
         ...(run.leadAgentId !== undefined ? { leadAgentId: run.leadAgentId } : {}),
         request: shown(run.request),
         finished: isRunFinished(run.stages),
+        ...(run.change ? { startedByChange: true } : {}),
         stages: run.workflow.stages.map((stage, index) => {
           const { state, note } = run.stages[index];
           const check = this.checkOf(run, index);
@@ -291,12 +329,15 @@ export class Workflows {
           };
         }),
       }));
+    const watched = this.deps.changeTriggers?.status();
     return {
       type: 'workflowsLoaded',
       available: reason === null,
       ...(reason !== null ? { unavailableReason: reason } : {}),
       workflows: workflowCatalog().map(workflowListing),
       runs,
+      ...(watched && watched.triggers.length > 0 ? { changeTriggers: watched.triggers } : {}),
+      ...(watched?.paused ? { changeTriggersPaused: true } : {}),
     };
   }
 
@@ -328,6 +369,9 @@ export class Workflows {
         if (typeof msg.crewId === 'string' && typeof msg.stageId === 'string') {
           this.skipByUser(msg.crewId, msg.stageId);
         }
+        return true;
+      case 'setChangeTriggersPaused':
+        if (typeof msg.paused === 'boolean') this.deps.changeTriggers?.setPaused(msg.paused);
         return true;
       case 'requestWorkflowCheckOutput': {
         const output =
@@ -379,7 +423,55 @@ export class Workflows {
       typeof asked.palette === 'number' && Number.isInteger(asked.palette) && asked.palette >= 0
         ? asked.palette
         : undefined;
+    const outcome = await this.begin({
+      workflow,
+      request,
+      directory: asked.directoryPath,
+      palette,
+    });
+    return outcome.ok ? { ok: true } : outcome;
+  }
 
+  /**
+   * A Change trigger starts a run for new commits in a Directory. The request
+   * is the office's own words (commit names and counts: nothing the
+   * repository says), and the stages whose files the change does not touch
+   * are left out by the office before the lead reads them. A change that
+   * touches no file any stage is for starts nothing.
+   */
+  async startForChange(
+    workflowId: string,
+    directoryPath: string,
+    change: WorkflowChange,
+  ): Promise<ChangeStartOutcome> {
+    const unavailable = this.deps.unavailable();
+    if (unavailable !== null) return { ok: false, reason: unavailable };
+    const workflow = workflowCatalog().find((candidate) => candidate.id === workflowId);
+    if (!workflow)
+      return { ok: false, reason: `There is no workflow "${workflowId}" on this host.` };
+    if (!changeHasWork(workflow.stages, change.files)) return { ok: true };
+    return this.begin({
+      workflow,
+      request: changeRequest({ ...change, files: change.files.length }),
+      directory: directoryPath,
+      change,
+    });
+  }
+
+  /** Whether the run of Crew `crewId` is still in the office. */
+  isListed(crewId: string): boolean {
+    return this.runs.has(crewId);
+  }
+
+  /** Open the run's Crew, list the run and launch its lead. */
+  private async begin(asked: {
+    workflow: CatalogWorkflow;
+    request: string;
+    directory: string;
+    palette?: number;
+    change?: WorkflowChange;
+  }): Promise<{ ok: true; crewId: string } | { ok: false; reason: string }> {
+    const { workflow, request, palette, change } = asked;
     const place = this.deps.crews.startForLaunch();
     if (!place) {
       return { ok: false, reason: this.deps.unavailable() ?? 'No Crew can be started now.' };
@@ -393,8 +485,11 @@ export class Workflows {
       workflow,
       roleNames: workflow.stages.map((stage) => roleNameOf(stage.role)),
       request,
-      directory: asked.directoryPath,
-      stages: initialStages(workflow.stages),
+      ...(change ? { change } : {}),
+      directory: asked.directory,
+      stages: change
+        ? initialStagesForChange(workflow.stages, change.files, WORKFLOW_CHANGE_SKIP_NOTE)
+        : initialStages(workflow.stages),
       checks: workflow.stages.map(() => undefined),
     });
     this.broadcast();
@@ -402,13 +497,13 @@ export class Workflows {
     let outcome: AgentLaunchOutcome;
     try {
       outcome = await this.deps.launch({
-        directory: asked.directoryPath,
+        directory: asked.directory,
         palette,
         roleId: workflow.lead,
         crew: place.launch,
         // The Workflow's own model for its lead wins over its Role's.
         asks: {
-          firstMessage: WORKFLOW_FIRST_MESSAGE,
+          firstMessage: change ? WORKFLOW_CHANGE_FIRST_MESSAGE : WORKFLOW_FIRST_MESSAGE,
           ...(workflow.model !== undefined ? { model: workflow.model } : {}),
         },
       });
@@ -426,14 +521,14 @@ export class Workflows {
       // Its lead is in the office: a launch reported late is still a start.
       if (!outcome.ok) console.warn(`[Pixel Agents] Workflows: ${outcome.reason}`);
       console.log(
-        `[Pixel Agents] Workflows: ${workflow.name} started, led by agent ${run.leadAgentId}`,
+        `[Pixel Agents] Workflows: ${workflow.name} started${change ? ' by a change' : ''}, led by agent ${run.leadAgentId}`,
       );
-      return { ok: true };
+      return { ok: true, crewId };
     }
     if (!run) {
       // Its lead came and went (or the user stopped it) while the launch settled.
       return outcome.ok
-        ? { ok: true }
+        ? { ok: true, crewId }
         : { ok: false, reason: `The lead couldn't start: ${outcome.reason}` };
     }
     this.runs.delete(crewId);
@@ -480,6 +575,16 @@ export class Workflows {
         brief: workflow.brief,
       },
       request: run.request,
+      ...(run.change
+        ? {
+            change: {
+              base: run.change.base,
+              head: run.change.head,
+              commits: run.change.commits,
+              files: run.change.files.length,
+            },
+          }
+        : {}),
       finished: isRunFinished(run.stages),
       stages: workflow.stages.map((stage, index) => {
         const { state, note } = run.stages[index];
@@ -504,7 +609,9 @@ export class Workflows {
           ...(note ? { note } : {}),
         };
       }),
-      ...(youLead ? { rules: WORKFLOW_LEAD_RULES } : { note: workflowMemberNote(run.leadAgentId) }),
+      ...(youLead
+        ? { rules: run.change ? WORKFLOW_CHANGE_LEAD_RULES : WORKFLOW_LEAD_RULES }
+        : { note: workflowMemberNote(run.leadAgentId) }),
     };
   }
 

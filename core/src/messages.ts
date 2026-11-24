@@ -112,6 +112,7 @@ export type ClientMessage =
   | StartWorkflow
   | StopWorkflow
   | SkipWorkflowStage
+  | SetChangeTriggersPaused
   | RequestWorkflowCheckOutput
   | SetWatchAllSessions
   | ExportLayout
@@ -742,6 +743,8 @@ export interface WorkflowsLoaded {
   unavailableReason?: string;
   workflows: Workflow[];
   runs: WorkflowRun[];
+  changeTriggers?: WorkflowChangeTrigger[];
+  changeTriggersPaused?: boolean;
 }
 
 export interface Workflow {
@@ -772,6 +775,7 @@ export interface WorkflowRun {
   leadAgentId?: number;
   request: string;
   finished: boolean;
+  startedByChange?: boolean;
   stages: WorkflowRunStage[];
 }
 
@@ -797,6 +801,17 @@ export interface WorkflowStageCheck {
 }
 
 export type WorkflowCheckState = 'notSetUp' | 'pending' | 'running' | 'passed' | 'failed';
+
+export interface WorkflowChangeTrigger {
+  directoryName: string;
+  workflowId: string;
+  workflowName: string;
+  state: WorkflowChangeTriggerState;
+  note?: string;
+}
+
+export type WorkflowChangeTriggerState =
+  'watching' | 'settling' | 'running' | 'waiting' | 'paused' | 'problem';
 
 export interface WorkflowRejected {
   type: 'workflowRejected';
@@ -1158,6 +1173,11 @@ export interface SkipWorkflowStage {
   type: 'skipWorkflowStage';
   crewId: string;
   stageId: string;
+}
+
+export interface SetChangeTriggersPaused {
+  type: 'setChangeTriggersPaused';
+  paused: boolean;
 }
 
 export interface RequestWorkflowCheckOutput {
