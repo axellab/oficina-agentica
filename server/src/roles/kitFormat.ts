@@ -7,7 +7,7 @@
  *                          + the Role's standing instructions
  *     CONTRACT.md          the Role's Contract: the five sections of CONTRACT_SECTIONS, in order
  *     playbooks/<id>.md    front matter (name, description, tools?, order?) + the steps
- *     workflows/<id>.md    front matter (name, description, order?) + what the lead is told
+ *     workflows/<id>.md    front matter (name, description, order?, model?) + what the lead is told
  *                          + one section per stage: `## <step>. <Title> (<role id>)`
  *
  * Every reader answers the thing read, or one line saying what is wrong with
@@ -240,8 +240,11 @@ export function parsePlaybookFile(id: string, text: string): KitPlaybook | strin
 }
 
 /** A stage's heading: its step, its title, the Role that owns it and, when the
- *  title's own words would not make its id, the id (`{#id}`). */
-const STAGE_HEADING_RE = /^## (\d{1,2})\. (.+?) \(([a-z][a-z0-9-]*)\)(?: \{#([a-z][a-z0-9-]*)\})?$/;
+ *  title's own words would not make its id, the id (`{#id}`); last, the model
+ *  its owner is launched on when the stage names one (`{model=<name>}`: what
+ *  is a model name is core's to say). */
+const STAGE_HEADING_RE =
+  /^## (\d{1,2})\. (.+?) \(([a-z][a-z0-9-]*)\)(?: \{#([a-z][a-z0-9-]*)\})?(?: \{model=([^\s{}]+)\})?$/;
 
 /** An id from a title: its words in lower case, joined by hyphens (a stage's
  *  id from its heading, a Playbook's from the name a new Role gives it). */
@@ -266,10 +269,12 @@ export interface KitWorkflow {
  *   ## <step>. <Title> (<role id>)
  *
  * whose text is the stage's brief. Steps count from 1 and never skip; stages
- * that share a step run at the same time (the later ones are `parallel`).
+ * that share a step run at the same time (the later ones are `parallel`). The
+ * front matter's `model` is the model a run's lead is launched on; a heading
+ * ending in `{model=<name>}` names the one its stage's owner is launched on.
  */
 export function parseWorkflowFile(id: string, lead: string, text: string): KitWorkflow | string {
-  const doc = readFrontMatter(text, ['name', 'description', 'order']);
+  const doc = readFrontMatter(text, ['name', 'description', 'order', 'model']);
   if (typeof doc === 'string') return doc;
   const order = orderOf(doc.fields);
   if (typeof order === 'string') return order;
@@ -294,13 +299,14 @@ export function parseWorkflowFile(id: string, lead: string, text: string): KitWo
     if (!match) {
       return `"${line.trim()}" is not a stage heading: write "## <step>. <Title> (<role id>)"`;
     }
-    const [, stepText, title, role, givenId] = match;
+    const [, stepText, title, role, givenId, model] = match;
     const asked = Number(stepText);
     if (asked < 1 || (asked !== step && asked !== step + 1)) {
       return `stage "${title}" is step ${asked}, after step ${step}: steps count from 1 and never skip`;
     }
     close();
     const stage: Record<string, unknown> = { id: givenId ?? slugOf(title), title, role };
+    if (model !== undefined) stage.model = model;
     if (asked === step) stage.parallel = true;
     step = asked;
     current = { stage, text: [] };
@@ -308,7 +314,7 @@ export function parseWorkflowFile(id: string, lead: string, text: string): KitWo
   close();
 
   const entry: Record<string, unknown> = { id, lead, stages };
-  for (const key of ['name', 'description']) {
+  for (const key of ['name', 'description', 'model']) {
     const value = doc.fields.get(key);
     if (value !== undefined) entry[key] = value;
   }

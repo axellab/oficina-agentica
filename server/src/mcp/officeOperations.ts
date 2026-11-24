@@ -25,6 +25,7 @@ export type { MessageKey };
 export { SHELL_KEYS } from '../terminal/agentTerminals.js';
 export type { ShellKey };
 import type { Facing, VisitSpot } from '../../../core/src/layout/index.js';
+import type { AgentWaitRequest, AgentWaitState } from './agentWaits.js';
 import type { CharacterOp } from './characterEditOps.js';
 import type { CharacterEditOutcome, CharacterUndoOutcome } from './characterEdits.js';
 import type { CharacterPreview, CharacterRef, OfficeCharacter } from './charactersView.js';
@@ -149,6 +150,13 @@ export interface Messaging {
   sendMessage(message: OfficeMessage): Promise<MessageDelivery[]>;
   /** Show a delivered Message in the office. Fire and forget: delivery never waits on it. */
   showMessage(show: MessageShow): void;
+  /**
+   * Wait until agents are no longer working (wait_for_agents): their turn
+   * ended, a permission prompt stopped them, or they left. One held call in
+   * place of a caller that keeps reading terminals. Refused whole when one of
+   * them is the caller, is not in the office, or is outside the caller's Crew.
+   */
+  waitForAgents(wait: AgentWaitRequest): Promise<AgentWaitResult>;
 }
 
 /** Visits: sending characters across the office. */
@@ -502,6 +510,20 @@ export interface AgentTerminalRead {
    *  or one the asking agent's Crew does not reach). */
   noScreen?: string;
 }
+
+/** One waited agent, as the wait left it. */
+export interface WaitedAgent {
+  id: number;
+  state: AgentWaitState;
+  /** Its status, and its screen once it is no longer working (as
+   *  read_agent_terminal gives it); absent for an agent that left. */
+  read?: AgentTerminalRead;
+}
+
+/** What a wait gives: how long it took, whether its time ran out, each agent. */
+export type AgentWaitResult =
+  | { ok: true; waitedMs: number; timedOut: boolean; agents: WaitedAgent[] }
+  | { ok: false; reason: string };
 
 /** A Message: text (Enter pressed after it when `submit`) or named keys. */
 export type MessageContent = TypedInput;

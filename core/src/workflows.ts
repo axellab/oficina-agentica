@@ -21,7 +21,7 @@ import type {
   WorkflowStage,
   WorkflowStageState,
 } from './messages.js';
-import { isRoleId } from './roles.js';
+import { isModelName, isRoleId, MODEL_NAME_PROBLEM } from './roles.js';
 
 export type { Workflow, WorkflowRun, WorkflowRunStage, WorkflowSource, WorkflowStageState };
 
@@ -36,6 +36,11 @@ export interface WorkflowStageDefinition {
   brief: string;
   /** It may run at the same time as the stage listed before it. */
   parallel?: boolean;
+  /** The model the agent its lead launches for it runs on, in the CLI's own
+   *  names and aliases (absent = its Role's, else the user's default). An
+   *  agent keeps the model it was launched with, so this counts for the stage
+   *  its Role is first launched for. */
+  model?: string;
 }
 
 /** A Workflow as the catalog holds it. */
@@ -48,6 +53,9 @@ export interface WorkflowDefinition {
   lead: string;
   /** What the lead is told of the Workflow as a whole ('' = nothing more). */
   brief: string;
+  /** The model a run's lead is launched on (absent = its Role's, else the
+   *  user's default). */
+  model?: string;
   stages: WorkflowStageDefinition[];
 }
 
@@ -94,8 +102,8 @@ function briefOf(value: unknown, max: number): string | undefined {
   return brief.length > 0 && brief.length <= max ? brief : undefined;
 }
 
-const STAGE_KEYS = new Set(['id', 'title', 'role', 'brief', 'parallel']);
-const WORKFLOW_KEYS = new Set(['id', 'name', 'description', 'lead', 'brief', 'stages']);
+const STAGE_KEYS = new Set(['id', 'title', 'role', 'brief', 'parallel', 'model']);
+const WORKFLOW_KEYS = new Set(['id', 'name', 'description', 'lead', 'brief', 'model', 'stages']);
 
 /** One stage of a workflows.json entry: the stage, or why not. */
 function parseStage(value: unknown, first: boolean): WorkflowStageDefinition | string {
@@ -124,6 +132,10 @@ function parseStage(value: unknown, first: boolean): WorkflowStageDefinition | s
       return '"parallel" means alongside the stage before it, and the first stage has none';
     }
     if (value.parallel) stage.parallel = true;
+  }
+  if (value.model !== undefined) {
+    if (!isModelName(value.model)) return MODEL_NAME_PROBLEM;
+    stage.model = value.model;
   }
   return stage;
 }
@@ -165,6 +177,10 @@ function parseWorkflow(value: unknown): WorkflowDefinition | string {
       return `"brief" must be text (or a list of lines) of 1-${MAX_WORKFLOW_BRIEF_CHARS} characters`;
     }
     workflow.brief = brief;
+  }
+  if (value.model !== undefined) {
+    if (!isModelName(value.model)) return MODEL_NAME_PROBLEM;
+    workflow.model = value.model;
   }
   if (!Array.isArray(value.stages) || value.stages.length === 0) {
     return '"stages" must list at least one stage';

@@ -42,7 +42,7 @@ export const sendMessage = defineTool({
       .record(z.string(), z.string())
       .optional()
       .describe(
-        "Each recipient's screen token from read_agent_terminal, keyed by its id (none to give where screens can't be read).",
+        "Each recipient's screen token from read_agent_terminal or wait_for_agents, keyed by its id (none to give where screens can't be read).",
       ),
   },
   changes: true,

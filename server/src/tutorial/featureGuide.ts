@@ -243,7 +243,8 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
       'the layout and catalogue (get_layout, list_catalog), edits the layout (edit_layout; an office shows it as a ' +
       'buildout from where the agent sits, and the editor offers "Undo <agent>\'s edit"), walks its character ' +
       '(visit), sets up Directories — a new project with its Areas and default characters (list_directories, ' +
-      "edit_directories) — reads and types into other agents' terminals (read_agent_terminal, send_message), and on standalone " +
+      "edit_directories) — reads and types into other agents' terminals (read_agent_terminal, send_message), waits in one " +
+      'call for agents it handed work to (wait_for_agents: it answers when their turn ends, with their screens), and on standalone ' +
       'launches and closes agents (launch_agent, close_agent) and opens, reads, types into and closes PC shells — the ' +
       'plain terminals a PC opens on this machine, shown to the user as a card and a lit PC (list_pc_shells, ' +
       'open_pc_shell, read_pc_shell, type_in_pc_shell, close_pc_shell). Agents adopted from outside never get it. Settings turns ' +

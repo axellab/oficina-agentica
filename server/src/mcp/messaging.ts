@@ -20,6 +20,10 @@
  * and its keys land one at a time, and the user may end the Crew, or a prompt
  * may open, meanwhile. A sender that left the office meanwhile types nothing
  * more, whoever it was: its limits can no longer be read off it.
+ *
+ * A Message that is submitted is work handed to its recipient: it is recorded
+ * as such (agentWaits.ts), so a wait_for_agents on that agent returns on the
+ * turn that answers it, and gives the screen read_agent_terminal would.
  */
 
 import type { AgentMessageShow } from '../../../core/src/messages.js';
@@ -37,8 +41,10 @@ import {
 import type { AgentState } from '../types.js';
 import { agentLabel, messageTag } from './agentLabel.js';
 import { statusOf } from './agentsView.js';
+import { type AgentWaits, createAgentWaits } from './agentWaits.js';
 import type {
   AgentScreen,
+  AgentTerminalRead,
   MessageContent,
   MessageDelivery,
   MessageRecipient,
@@ -153,6 +159,8 @@ export function createMessaging(
   terminals: AgentTerminals,
   guard: DeliveryGuard,
   crews: Crews,
+  /** The office's waits: where a submitted Message is recorded as work handed over. */
+  waits: AgentWaits = createAgentWaits(store),
 ): Messaging {
   // One Message at a time per recipient: its check and its typing (a paste,
   // the pause, the Enter) never interleave with another sender's.
@@ -219,8 +227,11 @@ export function createMessaging(
         }
       };
       if (!('text' in content)) {
+        // An Enter may start a turn: what it starts is what a wait is for.
+        const notHanded = content.keys.includes('enter') ? waits.handedWork(id) : undefined;
         const failed = await typed(content);
         if (!failed) return { id, delivered: true };
+        notHanded?.();
         // Keys land one write each: say how far they got before they stopped.
         const total = content.keys.length;
         return refused(
@@ -242,26 +253,62 @@ export function createMessaging(
       if (notNow) {
         return refused(`Your text was typed into agent ${id}'s input but not submitted: ${notNow}`);
       }
+      // Recorded before the Enter, so the turn it starts is never missed.
+      const notHanded = waits.handedWork(id);
       const enterFailed = await typed({ keys: ['enter'] });
-      return enterFailed ? refused(enterFailed) : { id, delivered: true };
+      if (!enterFailed) return { id, delivered: true };
+      notHanded();
+      return refused(enterFailed);
     });
   }
 
+  async function readAgentTerminal(id: number, caller?: number): Promise<AgentTerminalRead> {
+    const agent = store.get(id);
+    if (!agent) throw new Error(`no agent ${id}`);
+    const status = statusOf(agent);
+    const outsideCrew = caller === undefined ? null : crews.reachProblem(caller, id, 'read');
+    if (outsideCrew) return { status, screen: null, noScreen: outsideCrew };
+    if (!terminals.has(id)) return { status, screen: null, noScreen: noTerminalReason(agent) };
+    const screen = await terminals.screen(id);
+    if (!screen) return { status, screen: null, noScreen: unreadableReason(id) };
+    return { status, screen: { text: screen.text, token: screen.token } };
+  }
+
   return {
-    async readAgentTerminal(id, caller) {
-      const agent = store.get(id);
-      if (!agent) throw new Error(`no agent ${id}`);
-      const status = statusOf(agent);
-      const outsideCrew = caller === undefined ? null : crews.reachProblem(caller, id, 'read');
-      if (outsideCrew) return { status, screen: null, noScreen: outsideCrew };
-      if (!terminals.has(id)) return { status, screen: null, noScreen: noTerminalReason(agent) };
-      const screen = await terminals.screen(id);
-      if (!screen) return { status, screen: null, noScreen: unreadableReason(id) };
-      return { status, screen: { text: screen.text, token: screen.token } };
-    },
+    readAgentTerminal,
 
     sendMessage: ({ from, to, content }) =>
       Promise.all(to.map((recipient) => deliver(from, recipient, content))),
+
+    async waitForAgents(request) {
+      const { caller, ids } = request;
+      for (const id of ids) {
+        if (id === caller) {
+          return {
+            ok: false,
+            reason:
+              'You cannot wait for yourself: your own turn is the one that is running. Name the agents you handed work to.',
+          };
+        }
+        if (!store.has(id)) return { ok: false, reason: noAgentReason(id) };
+        const outsideCrew = crews.reachProblem(caller, id, 'read');
+        if (outsideCrew) return { ok: false, reason: outsideCrew };
+      }
+      const { waitedMs, timedOut, states } = await waits.wait(request);
+      const agents = await Promise.all(
+        ids.map(async (id) => {
+          const state = states.get(id) ?? 'left';
+          // An agent that left as the wait ended has nothing to read either.
+          if (state === 'left' || !store.has(id)) return { id, state: 'left' as const };
+          const read = await readAgentTerminal(id, caller);
+          // One still working gives its status alone: its screen is mid-turn.
+          return state === 'working'
+            ? { id, state, read: { status: read.status, screen: null } }
+            : { id, state, read };
+        }),
+      );
+      return { ok: true, waitedMs, timedOut, agents };
+    },
 
     // The Message show: every open office walks the sender's character to
     // each recipient and shows the gist. Fire-and-forget, after delivery; the

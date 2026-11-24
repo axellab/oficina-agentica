@@ -23,6 +23,7 @@ import { typeInPcShell } from './typeInPcShell.js';
 import { undoCharacterEdit } from './undoCharacterEdit.js';
 import { undoLayoutEdit } from './undoLayoutEdit.js';
 import { visit } from './visit.js';
+import { waitForAgents } from './waitForAgents.js';
 import { workflow } from './workflow.js';
 
 /** Every Pixel Office MCP tool, in the order agents see them. A new tool is
@@ -40,6 +41,7 @@ export const OFFICE_TOOLS: readonly OfficeTool[] = [
   editDirectories,
   readAgentTerminal,
   sendMessage,
+  waitForAgents,
   visit,
   launchAgent,
   closeAgent,

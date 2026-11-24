@@ -87,6 +87,16 @@ export const ROLE_ID_RE = /^[a-z][a-z0-9-]{0,39}$/;
  *  space or a shell metacharacter. */
 const ROLE_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,63}$/;
 
+/** What a catalog entry says when its "model" is not one. */
+export const MODEL_NAME_PROBLEM =
+  '"model" must be a model name or alias (letters, digits, . _ : - [ ])';
+
+/** Whether `value` is a model name as a catalog may give one (a Role's, a
+ *  Workflow's, a stage's): the CLI's own names and aliases. */
+export function isModelName(value: unknown): value is string {
+  return typeof value === 'string' && ROLE_MODEL_RE.test(value);
+}
+
 /** Upper bound on roles.json entries, so a runaway file can't flood the drawer. */
 export const MAX_ROLE_OVERRIDES = 50;
 export const MAX_ROLE_NAME_CHARS = 40;
@@ -163,9 +173,7 @@ function parseRoleOverride(value: unknown): RoleOverride | string {
     entry.prompt = prompt;
   }
   if (value.model !== undefined) {
-    if (typeof value.model !== 'string' || !ROLE_MODEL_RE.test(value.model)) {
-      return '"model" must be a model name or alias (letters, digits, . _ : - [ ])';
-    }
+    if (!isModelName(value.model)) return MODEL_NAME_PROBLEM;
     entry.model = value.model;
   }
   return entry;

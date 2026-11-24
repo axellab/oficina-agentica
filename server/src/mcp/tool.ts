@@ -23,6 +23,9 @@ export interface ToolContext<Uses extends Capability = Capability> {
   office: Pick<OfficeCapabilities, Uses>;
   /** The agent a tool acts on: `agentId` when given, else the caller. */
   target(agentId: number | undefined): number;
+  /** Aborted once the caller's request is gone (it hung up, or was answered):
+   *  a tool that holds its call open stops waiting then. */
+  signal: AbortSignal;
 }
 
 /** A picture for the agent: sent as MCP image content after the JSON, in order.

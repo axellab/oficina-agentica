@@ -34,6 +34,7 @@ import { invalidateAttributionDirectories } from '../worktreeAttribution.js';
 import { isRepo } from '../worktreeGit.js';
 import { agentLabel } from './agentLabel.js';
 import { createAgentsView } from './agentsView.js';
+import { createAgentWaits } from './agentWaits.js';
 import type { EditDirectory } from './characterEditOps.js';
 import { createCharacterEdits } from './characterEdits.js';
 import { createCharacterOps } from './charactersView.js';
@@ -254,6 +255,8 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
     return null;
   };
   const crews = new Crews({ store, unavailable: crewUnavailable });
+  // Work handed to an agent and the turns that end after it: what wait_for_agents waits on.
+  const waits = createAgentWaits(store);
   const closing = surface.close ? createClosing(facts, surface.close, terminals, crews) : undefined;
   const launch = surface.launch;
   // Workflow runs: a request handled by a Crew stage by stage. Only where a
@@ -270,7 +273,7 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
   const office: OfficeOperations = {
     agents: createAgentsView(facts, (id) => terminals.has(id)),
     layout: createLayoutOps(facts, layoutEdits),
-    messaging: createMessaging(store, terminals, surface.deliveryGuard, crews),
+    messaging: createMessaging(store, terminals, surface.deliveryGuard, crews, waits),
     visits,
     characters: createCharacterOps(facts, characterEdits),
     directories,
@@ -286,6 +289,9 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
             // The launcher walks over to the agent it launched, as a Message's sender does.
             ({ fromId, toIds, gist }) =>
               store.broadcast({ type: 'agentMessageShow', fromId, toIds: [...toIds], gist }),
+            // A first message is work handed to the agent it launches.
+            (id) => void waits.handedWork(id),
+            (caller, roleId) => workflows?.stageModel(caller, roleId),
           ),
         }
       : {}),
@@ -404,6 +410,7 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
       visits.dispose();
       closing?.dispose();
       workflows?.dispose();
+      waits.dispose();
       crews.dispose();
     },
   };
