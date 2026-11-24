@@ -257,6 +257,22 @@ describe('running a check (real processes)', () => {
   }
   const run = (command: string, more: { cwd?: string; timeoutSeconds?: number } = {}) =>
     startCheck({ command, cwd: more.cwd ?? work, timeoutSeconds: more.timeoutSeconds ?? 30, env });
+  /** Whether a process is still running: one that ended and waits to be
+   *  collected (Linux lists it until then) is not. */
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return false;
+    }
+    try {
+      // "<pid> (<name>) <state> …": Z is ended, not yet collected.
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+      return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z';
+    } catch {
+      return true;
+    }
+  };
 
   beforeEach(() => {
     work = fs.mkdtempSync(path.join(os.homedir(), 'check-work-'));
@@ -317,18 +333,35 @@ describe('running a check (real processes)', () => {
       );
       await vi.waitFor(() => expect(check.output().text).toMatch(/child \d+/), { timeout: 5000 });
       const pid = Number(/child (\d+)/.exec(check.output().text)![1]);
-      const alive = (): boolean => {
-        try {
-          process.kill(pid, 0);
-          return true;
-        } catch {
-          return false;
-        }
-      };
-      expect(alive()).toBe(true);
+      expect(alive(pid)).toBe(true);
       check.cancel();
       await check.result;
-      await vi.waitFor(() => expect(alive()).toBe(false), { timeout: 5000 });
+      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5000 });
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'ends by force what ignores the ask to end, before it says the check is over',
+    async () => {
+      // The command's own process ends when asked; what it started does not.
+      const stubborn =
+        "process.on('SIGTERM', () => {}); require('fs').writeFileSync('ready', String(process.pid)); setInterval(() => {}, 1000)";
+      const check = run(
+        script(
+          'stubborn.js',
+          `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(stubborn)}], { stdio: 'ignore' }); setInterval(() => {}, 1000)`,
+        ),
+      );
+      const ready = path.join(work, 'ready');
+      await vi.waitFor(() => expect(fs.readFileSync(ready, 'utf8')).toMatch(/^\d+$/), {
+        timeout: 5000,
+      });
+      const pid = Number(fs.readFileSync(ready, 'utf8'));
+      expect(alive(pid)).toBe(true);
+      check.cancel();
+      expect(await check.result).toMatchObject({ passed: false, ended: 'cancelled' });
+      // Nothing of it is left to run beside the check that comes next.
+      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5000 });
     },
   );
 
@@ -373,6 +406,8 @@ describe('a Workflow run whose stages the office closes', () => {
   let started: FakeRun[];
   /** What the user's checks.json says now, by id. */
   let definitions: Map<string, CheckDefinition>;
+  /** Why the office runs no command now (the user holds its tools back), else null. */
+  let heldBack: string | null;
 
   const check = (id: string, command: string, more: Partial<CheckDefinition> = {}) =>
     definitions.set(id, { id, name: id, command, timeoutSeconds: 600, ...more });
@@ -433,6 +468,7 @@ describe('a Workflow run whose stages the office closes', () => {
     nextId = 1;
     started = [];
     definitions = new Map();
+    heldBack = null;
     check('tests', 'npm test', { name: 'Tests' });
     store.on('broadcast', (message) => sent.push(message));
     crews = new Crews({ store, unavailable: () => null });
@@ -446,6 +482,7 @@ describe('a Workflow run whose stages the office closes', () => {
       }),
       checks: {
         forDirectory: (id) => definitions.get(id),
+        refused: () => heldBack,
         start: (request): RunningCheck => {
           let settle: (result: CheckResult) => void = () => {};
           const result = new Promise<CheckResult>((resolve) => {
@@ -644,7 +681,7 @@ describe('a Workflow run whose stages the office closes', () => {
     });
     const notStarted = await broken;
     expect(!notStarted.ok && notStarted.reason).toMatch(
-      /^The office could not run this stage's check, Tests \(`npm test`\), in \/tmp\/p\. verify stays open\. The check is the user's to fix \(their checks\.json\)/,
+      /^The office could not run this stage's check, Tests \(`npm test`\), in \/tmp\/p\. verify stays open\. This is the user's to fix \(their checks\.json, or the office's Settings\)/,
     );
     expect(!notStarted.ok && notStarted.reason).toContain('The folder /tmp/p is not there.');
   });
@@ -829,6 +866,39 @@ describe('a Workflow run whose stages the office closes', () => {
     second.end();
     expect(await scanning).toMatchObject({ ok: true });
     expect(workflows.move(lead, 'start', 'report')).toMatchObject({ ok: true });
+  });
+
+  it("starts no check while the user holds the office's tools back: a finish is refused, and one waiting its turn never starts", async () => {
+    const READ_ONLY = 'The office is read-only in Settings.';
+    const { lead } = await toVerify();
+    check('security-scan', 'trivy fs .');
+    heldBack = READ_ONLY;
+    const held = await workflows.finish(lead, 'verify', 'Green.');
+    expect(!held.ok && held.reason).toBe(
+      "The office did not run this stage's check, Tests: The office is read-only in Settings. verify stays as it is. Tell the user in your own terminal, and wait: they change it in the office's Settings, or skip the stage from the office. Then finish verify again.",
+    );
+    expect(started).toHaveLength(0);
+    // Nothing moved, and the run is still there to read.
+    expect(stage('verify')).toMatchObject({ state: 'active', check: { state: 'pending' } });
+    expect(workflows.view(lead).running).toBe(true);
+
+    // Turned back: the same finish runs it.
+    heldBack = null;
+    const verifying = workflows.finish(lead, 'verify', 'Green.');
+    const scanning = workflows.finish(lead, 'scan', 'Clean.');
+    const first = await running();
+    // Held back again while the second waits its turn: asked as each one starts.
+    heldBack = READ_ONLY;
+    first.end();
+    expect(await verifying).toMatchObject({ ok: true });
+    const told = await scanning;
+    expect(!told.ok && told.reason).toMatch(
+      /^The office could not run this stage's check, security-scan \(`trivy fs \.`\), in \/tmp\/p\. scan stays open\. This is the user's to fix \(their checks\.json, or the office's Settings\)/,
+    );
+    expect(!told.ok && told.reason).toContain(READ_ONLY);
+    expect(started).toHaveLength(1);
+    expect(stage('verify').state).toBe('done');
+    expect(stage('scan')).toMatchObject({ state: 'active', check: { state: 'failed' } });
   });
 
   it("runs in the run's Directory, or in the Worktree of the colleague the lead names", async () => {

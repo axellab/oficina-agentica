@@ -59,6 +59,7 @@ import {
   checkFailedReason,
   checkNotSetUpNote,
   checkPassedNote,
+  checkRefusedReason,
   checkRunningNote,
   NO_WORKFLOW_NOTE,
   WORKFLOW_FIRST_MESSAGE,
@@ -94,6 +95,10 @@ export interface WorkflowsDeps {
   checks?: {
     forDirectory(id: string, directoryPath: string): CheckDefinition | undefined;
     start(request: { command: string; cwd: string; timeoutSeconds: number }): RunningCheck;
+    /** Why the office runs no command now, in plain words; null (or absent)
+     *  when it does. Asked as each Check is about to start, not once per run:
+     *  the user can make the office's tools read-only while a run is under way. */
+    refused?(): string | null;
   };
 }
 
@@ -617,6 +622,12 @@ export class Workflows {
         ...(stage.check !== undefined ? { note: checkNotSetUpNote(stage.check) } : {}),
       };
     }
+    // A command on the host, at an agent's call: not while the user holds
+    // the office's tools back. The stage stays as it is, and nothing is run.
+    const refused = this.deps.checks?.refused?.() ?? null;
+    if (refused !== null) {
+      return { ok: false, reason: checkRefusedReason(stage.id, definition.name, refused) };
+    }
     const folder = this.checkFolder(run, options.agentId);
     if (!folder.ok) return folder;
     const record = this.startCheck(run, index, definition, folder.path, note?.trim() ?? '');
@@ -753,6 +764,9 @@ export class Workflows {
     const turn = this.checkQueue.then(async () => {
       if (record.cancelled) return;
       try {
+        // Asked again now: the Checks before this one may have taken a while.
+        const refused = this.deps.checks?.refused?.() ?? null;
+        if (refused !== null) throw new Error(refused);
         const process = this.deps.checks?.start({
           command: definition.command,
           cwd,

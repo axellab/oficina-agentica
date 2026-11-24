@@ -450,6 +450,41 @@ describe('Workflows through the Pixel Office MCP (composed server, mock-claude i
     });
   });
 
+  it('the office runs no check while the Pixel Office MCP is read-only: the finish is refused until the user turns it back', async () => {
+    setUpTestsCheck();
+    fs.writeFileSync(path.join(h.workspace, 'fixed'), '');
+    const lead = await startedRun();
+    await waitFor(() => runsNow()[0]?.leadAgentId === lead.id, 'the run to be listed');
+    await upToVerification(lead);
+
+    // Read-only mid-run: the `workflow` tool still answers, and runs nothing.
+    h.send({ type: 'setOfficeMcpReadOnly', readOnly: true });
+    await waitFor(() => loaded()?.available === false, 'the office to be told');
+    const held = await refusal(lead.client, {
+      action: 'finish',
+      stage_id: 'verification',
+      note: 'All green here.',
+    });
+    expect(held).toMatch(
+      /^The office did not run this stage's check, Unit tests: The Pixel Agents Office MCP is read-only in Settings, and a check is a command the office runs\. verification stays as it is\./,
+    );
+    const status = await h.callJson(lead.client, 'workflow');
+    expect((status.stages as Json[])[3]).toMatchObject({
+      state: 'active',
+      check: { id: 'tests', state: 'pending' },
+    });
+
+    h.send({ type: 'setOfficeMcpReadOnly', readOnly: false });
+    await waitFor(() => loaded()?.available === true, 'the office to be told');
+    const done = await h.callJson(lead.client, 'workflow', {
+      action: 'finish',
+      stage_id: 'verification',
+      note: 'All green here.',
+    });
+    expect(done.check_note).toMatch(/Unit tests \(`node run-tests\.js`\): it passed/);
+    await waitFor(() => stageNow('verification').state === 'done', 'the office to see it done');
+  });
+
   it('only the user skips a required stage, from an office that may: the lead and a view-only office cannot', async () => {
     setUpTestsCheck();
     const lead = await startedRun();

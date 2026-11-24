@@ -277,6 +277,15 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
           forDirectory: checkForDirectory,
           start: (request) =>
             startCheck({ ...request, env: checkEnv(inheritedEnv(facts.provider)) }),
+          // A Check is a command run on the host at an agent's call (the
+          // `workflow` tool changes nothing itself, so read-only lets it
+          // through): none starts once the user holds the tools back.
+          refused: () =>
+            getOfficeMcpConsent() !== 'granted'
+              ? 'The Pixel Agents Office MCP is off in Settings.'
+              : getOfficeMcpReadOnly()
+                ? 'The Pixel Agents Office MCP is read-only in Settings, and a check is a command the office runs.'
+                : null,
         },
       })
     : undefined;

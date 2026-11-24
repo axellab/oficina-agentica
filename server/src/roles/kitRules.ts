@@ -48,14 +48,30 @@ const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 /** How a stage sends its owner to a Playbook, by the Playbook's name. */
 const STAGE_PLAYBOOK_RE = /Run your (.+?) playbook/g;
 
-/** A stage's text telling its reader the stage may be left out. */
-const SAYS_SKIP_RE = /\bskip (?:it|this stage)\b/i;
+/** A stage's text speaking of leaving the stage out. */
+const SKIP_RE = /\bskip (?:it|this stage)\b/gi;
+
+/**
+ * What comes right before those words when the text forbids it ("Do not",
+ * "Never", "Nobody may") or leaves it to the user ("Only the user may"):
+ * a required stage may say either, since both are true of it.
+ */
+const SKIP_NOT_OFFERED_RE =
+  /(?:\b(?:not|never|cannot|nobody|no one|only the user|the user alone)|n['\u2019]t)(?:\s+(?:to|may|can|could|should|must|will|would|ever))*\s+$/i;
 
 /** The id of the stage every Workflow ends on. */
 const REPORT_STAGE_ID = 'report';
 
 /** The shortest brief that can say what a stage's owner does and what closes it. */
 const MIN_STAGE_BRIEF_CHARS = 40;
+
+/** Whether a stage's text tells its reader the stage may be left out. */
+function saysMaySkip(brief: string): boolean {
+  for (const said of brief.matchAll(SKIP_RE)) {
+    if (!SKIP_NOT_OFFERED_RE.test(brief.slice(0, said.index))) return true;
+  }
+  return false;
+}
 
 /** The Roles and Workflows the rules are asked about. */
 export interface KitsToCheck {
@@ -146,7 +162,7 @@ function workflowProblems(
         `${at}: stage "${stage.title}" must say what its owner does and what closes it`,
       );
     }
-    if (stage.required && SAYS_SKIP_RE.test(stage.brief)) {
+    if (stage.required && saysMaySkip(stage.brief)) {
       problems.push(
         `${at}: stage "${stage.title}" is required, and its text says it may be skipped: a run's lead cannot skip it`,
       );

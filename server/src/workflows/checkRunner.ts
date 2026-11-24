@@ -95,6 +95,22 @@ function endProcessTree(child: ChildProcess, force: boolean): void {
   }
 }
 
+/**
+ * Whether anything a Check started is still there (POSIX: its process group
+ * has a member left). Windows is never asked: taskkill took the whole tree by
+ * force the first time.
+ */
+function treeAlive(child: ChildProcess): boolean {
+  if (child.pid === undefined || process.platform === 'win32') return false;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: there, and not ours to signal. Anything else: gone.
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
 /** How long after the shell exits its pipes are still read: something it
  *  left running in the background may hold them open for ever. */
 const PIPE_DRAIN_MS = 1000;
@@ -153,12 +169,19 @@ export function startCheck(request: CheckRunRequest): RunningCheck {
 
   let ended: CheckEnd = 'exited';
   let settled = false;
+  /** Set from the office asking the tree to end until it ends it by force. */
   let killTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The result, when it waits for the tree to be ended by force. */
+  let afterKill: (() => void) | undefined;
   const end = (why: 'timedOut' | 'cancelled'): void => {
     if (ended !== 'exited' || settled) return;
     ended = why;
     endProcessTree(child, false);
-    killTimer = setTimeout(() => endProcessTree(child, true), CHECK_KILL_GRACE_MS);
+    killTimer = setTimeout(() => {
+      killTimer = undefined;
+      endProcessTree(child, true);
+      afterKill?.();
+    }, CHECK_KILL_GRACE_MS);
   };
 
   const result = new Promise<CheckResult>((resolve) => {
@@ -167,6 +190,14 @@ export function startCheck(request: CheckRunRequest): RunningCheck {
     const timeout = setTimeout(() => end('timedOut'), request.timeoutSeconds * 1000);
     const settle = (startError?: unknown): void => {
       if (settled) return;
+      // The office asked it to end, its shell did, and something it started
+      // did not (it ignores the ask): the result waits until that is ended by
+      // force, so nothing of a Check outlives its result, or runs beside the
+      // Check that comes next.
+      if (startError === undefined && killTimer !== undefined && treeAlive(child)) {
+        afterKill = () => settle();
+        return;
+      }
       settled = true;
       clearTimeout(timeout);
       clearTimeout(killTimer);
