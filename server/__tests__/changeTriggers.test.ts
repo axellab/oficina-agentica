@@ -102,6 +102,21 @@ describe('path patterns (what a stage is for, which branches a trigger watches)'
     expect(selects(['a|b'], 'a')).toBe(false);
   });
 
+  it('no character in a file name takes it out of a pattern: git allows a line break in one', () => {
+    for (const odd of ['a\nb.ts', 'a\rb.ts', 'a\u2028b.ts', 'a\u2029b.ts', '\n.ts']) {
+      expect(selects(['src/**'], `src/${odd}`)).toBe(true);
+      expect(selects(['src/'], `src/deep/${odd}`)).toBe(true);
+      expect(selects(['src/**/*.ts'], `src/de\nep/${odd}`)).toBe(true);
+      expect(selects(['*.ts'], `we\nb/${odd}`)).toBe(true);
+      expect(selects(['src/*.ts'], `src/${odd}`)).toBe(true);
+      // Left out like any other file, too.
+      expect(selects(['src/**', '!*.ts'], `src/${odd}`)).toBe(false);
+      expect(selects(['!src/'], `src/de\nep/${odd}`)).toBe(false);
+    }
+    expect(selects(['a?.ts'], 'a\n.ts')).toBe(true);
+    expect(pathSelected('release/2\n1', nameSelector(['release/**']))).toBe(true);
+  });
+
   it('a pattern with ! leaves out what it matches; with nothing else, everything else is taken in', () => {
     const notDocs = ['!*.md', '!docs/'];
     expect(touchesPaths(['README.md', 'docs/a.png'], notDocs)).toBe(false);
@@ -222,6 +237,20 @@ describe("a stage's paths (workflows.json) and the stages of a run a change star
     expect(
       initialStagesForChange(stages, ['README.md'], 'Left out.').map((stage) => stage.state),
     ).toEqual(['pending', 'skipped', 'skipped', 'skipped', 'pending']);
+  });
+
+  it('a file name with a line break in it leaves no stage out that is for its folder', () => {
+    const states = (files: string[]): string[] =>
+      initialStagesForChange(stages, files, 'Left out.').map((stage) => stage.state);
+    expect(states(['infra/net\nwork.yml'])).toEqual(Array(5).fill('pending'));
+    expect(states(['src/a\nb.ts'])).toEqual([
+      'pending',
+      'pending',
+      'pending',
+      'skipped',
+      'pending',
+    ]);
+    expect(changeHasWork([stages[3]], ['infra/net\nwork.yml'])).toBe(true);
   });
 
   it('a change that touches no file any stage is for gives the Workflow nothing to do', () => {
@@ -414,6 +443,20 @@ describe('what changed in a Directory (a real repository)', () => {
       'src/b.ts',
     ]);
   });
+
+  // Windows has no such file name.
+  it.skipIf(process.platform === 'win32')(
+    'a file whose name holds a line break is read whole, and is in the patterns that name its folder',
+    async () => {
+      const first = committed({ 'README.md': '# app\n' });
+      const head = committed({ 'infra/net\nwork.tf': 'x\n' });
+      const files = (await changeSince(repo, first, head))?.files ?? [];
+      expect(files).toEqual(['infra/net\nwork.tf']);
+      expect(touchesPaths(files, ['infra/'])).toBe(true);
+      expect(touchesPaths(files, ['infra/**'])).toBe(true);
+      expect(touchesPaths(files, ['!infra/'])).toBe(false);
+    },
+  );
 
   it('nothing new when history stands or went back; from where they part after a rewrite', async () => {
     const first = committed({ 'a.txt': '1\n' });

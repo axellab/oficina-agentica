@@ -4,12 +4,16 @@
  */
 
 // A terminal escape sequence: CSI (colours, cursor moves), OSC (titles,
-// links: ended by BEL or ESC \) and the two-character ones.
+// links: ended by BEL or the string terminator) and the two-character ones.
+// Each opens with ESC and a second character, or with the one C1 control
+// character that stands for the pair (U+009B for CSI, U+009D for OSC, U+009C
+// for the terminator): a terminal reading UTF-8 obeys both forms.
 const ESCAPE_SEQUENCE_RE =
-  /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g;
+  /(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]|(?:\u001b\]|\u009d)[^\u0007\u001b\u009c]*(?:\u0007|\u001b\\|\u009c)|\u001b[@-Z\\-_]/g;
 
-// Every control character but tab and line feed.
-const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
+// Every control character but tab and line feed: the C0 ones, DEL and the C1
+// ones (U+0080 to U+009F).
+const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
 
 /**
  * Output as plain lines: escape sequences gone, a carriage return taken as

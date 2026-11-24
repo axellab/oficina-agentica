@@ -84,7 +84,11 @@ function globRegex(glob: string, whole: boolean): RegExp {
       source += char.replace(REGEX_SPECIAL, '\\$&');
     }
   }
-  return new RegExp(`^${source}$`);
+  // `s`: a `**` crosses every character a path may hold. Git allows a line
+  // break in a file's name, and one must never take a file out of a pattern
+  // that names its folder: a stage left out for it would be a review that a
+  // file's name switched off.
+  return new RegExp(`^${source}$`, 's');
 }
 
 /** Patterns read once: the ones that take a path in, the ones that leave it out. */
