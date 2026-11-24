@@ -20,11 +20,11 @@ Run your Technical design playbook for the feature: read the code it touches and
 
 Build the plan on a branch of its own, in small commits, with the unit tests each step needs. Launch the Developer into a new Worktree (launch_agent with `worktree`) so the change stays apart from the main checkout. Closed when the code builds, the checks the repository runs (types, lint, tests) pass, and the commits are on the branch.
 
-## 4. Testing (qa-engineer)
+## 4. Testing (qa-engineer) {required} {check=tests}
 
 Test the change against the acceptance criteria: the cases a user would hit, the edges and the failures, and the suites the repository already has. A defect goes back to the Developer (start the implementation stage again) with the steps to reproduce it. Closed when every criterion has a test or a recorded check that passes on the branch's last commit.
 
-## 4. Security review (security-engineer)
+## 4. Security review (security-engineer) {required} {check=security-scan}
 
 Review the change for what it exposes: new inputs and how they are validated, authentication and authorization on every new path, secrets, dependencies added. Closed when each finding is fixed, or accepted by the user in so many words.
 

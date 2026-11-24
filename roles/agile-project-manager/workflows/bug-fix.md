@@ -20,13 +20,13 @@ Find the root cause, with evidence: the line, the condition, the commit that bro
 
 Make the smallest change that removes the cause, on a branch of its own, with a regression test that fails before it and passes after. Closed when the checks the repository runs pass and the commits are on the branch.
 
-## 4. Verification (qa-engineer)
+## 4. Verification (qa-engineer) {required} {check=tests}
 
 Follow the reproduction again on the fixed branch, run the regression test and the suites around the change, and look for what the fix could have broken nearby. A failure goes back to the Developer (start the fix stage again). Closed when the reproduction no longer shows the bug on the branch's last commit.
 
-## 4. Security check (security-engineer)
+## 4. Security check (security-engineer) {required} {check=security-scan}
 
-Say whether the bug could be used against the system (and since when), and whether the fix opens anything. Skip it, with a note saying why, when the bug is nowhere near a trust boundary. Closed when the answer is written, with the evidence.
+Say whether the bug could be used against the system (and since when), and whether the fix opens anything. When the bug is nowhere near a trust boundary the answer is short: say so, and what you looked at to know it. Closed when the answer is written, with the evidence.
 
 ## 5. Report (agile-project-manager)
 

@@ -22,7 +22,7 @@ For each new version, before it is installed: its known vulnerabilities, who pub
 
 Playbook, steps 4 and 5, for the upgrades that got a go: through the package manager, one per commit, the lock file's diff read, the code changed only where the upgrade forces it, and the repository's checks passing. Closed when the commits are on the branch and the checks pass on the last one.
 
-## 4. Verification (qa-engineer)
+## 4. Verification (qa-engineer) {required} {check=tests}
 
 Test what the upgraded dependencies touch: the suites the repository has, and the behaviours that depend on them and no test covers, exercised by hand. A defect goes back to the Developer (start the upgrade stage again) with the steps to reproduce it. Closed when the results are in your note for the branch's last commit.
 

@@ -245,6 +245,34 @@ describe('the house rules', () => {
     ]);
   });
 
+  it('a required stage never says it may be skipped', () => {
+    const skippable = (over: Partial<WorkflowStageDefinition>): string[] =>
+      roleKitProblems({
+        roles: sound().roles,
+        workflows: [
+          workflow('release-manager', {
+            stages: [
+              stage(
+                'work',
+                'release-manager',
+                `${WORK} Skip it, with a note, when nothing changed.`,
+                over,
+              ),
+              stage('report', 'release-manager', REPORT),
+            ],
+          }),
+          workflow('agile-project-manager'),
+        ],
+      });
+    expect(skippable({})).toEqual([]);
+    expect(skippable({ check: 'tests' })).toEqual([]);
+    expect(skippable({ required: true })).toEqual([
+      expect.stringMatching(
+        /stage "work" is required, and its text says it may be skipped: a run's lead cannot skip it$/,
+      ),
+    ]);
+  });
+
   it("a Workflow ends on its lead's report, a step of its own", () => {
     const ending = (stages: WorkflowStageDefinition[]): string[] =>
       roleKitProblems({

@@ -307,6 +307,187 @@ describe('Workflows through the Pixel Office MCP (composed server, mock-claude i
     );
   });
 
+  // ── Stages the office closes ────────────────────────────────
+
+  /**
+   * The host's own checks.json (`tests` only: no command for `security-scan`),
+   * and what its command runs: a script in the workspace that passes once the
+   * file `fixed` is there.
+   */
+  function setUpTestsCheck(): void {
+    fs.mkdirSync(path.join(h.home, '.pixel-agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(h.home, '.pixel-agents', 'checks.json'),
+      JSON.stringify({
+        checks: [{ id: 'tests', name: 'Unit tests', command: 'node run-tests.js' }],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(h.workspace, 'run-tests.js'),
+      [
+        "const fixed = require('fs').existsSync('fixed');",
+        // Coloured, as a test runner writes to a terminal.
+        "console.log(fixed ? '3 passed' : '\\u001b[31m1 failed\\u001b[0m: export.spec');",
+        'process.exit(fixed ? 0 : 1);',
+      ].join('\n'),
+    );
+  }
+
+  /** The lead's moves up to the stages the office closes: verification active. */
+  async function upToVerification(lead: Agent): Promise<void> {
+    for (const stageId of ['reproduce', 'diagnosis', 'fix']) {
+      await h.callJson(lead.client, 'workflow', { action: 'start', stage_id: stageId });
+      await h.callJson(lead.client, 'workflow', {
+        action: 'finish',
+        stage_id: stageId,
+        note: `${stageId}: done.`,
+      });
+    }
+    await h.callJson(lead.client, 'workflow', { action: 'start', stage_id: 'verification' });
+  }
+
+  const stageNow = (stageId: string): Json =>
+    (runsNow()[0].stages as Json[]).find((stage) => stage.id === stageId)!;
+  const checkOutputs = (): Json[] => h.received.filter((m) => m.type === 'workflowCheckOutput');
+
+  it("the office runs a stage's Check: a failure keeps the stage open with its output, a pass closes it", async () => {
+    setUpTestsCheck();
+    const lead = await startedRun();
+    await waitFor(() => runsNow()[0]?.leadAgentId === lead.id, 'the run to be listed');
+    const crewId = h.store.get(lead.id)!.crew!.id;
+
+    // The lead reads which stages are required and what closes them.
+    const status = await h.callJson(lead.client, 'workflow');
+    const told = (stageId: string): Json =>
+      (status.stages as Json[]).find((stage) => stage.id === stageId)!;
+    expect(told('reproduce')).toMatchObject({ required: false });
+    expect(told('reproduce')).not.toHaveProperty('check');
+    expect(told('verification')).toMatchObject({
+      required: true,
+      check: { id: 'tests', name: 'Unit tests', state: 'pending', command: 'node run-tests.js' },
+    });
+    // Named by the stage, with no command on this host.
+    expect(told('security-check')).toMatchObject({
+      required: true,
+      check: { id: 'security-scan', name: 'security-scan', state: 'notSetUp' },
+    });
+    expect((status.rules as string[]).join(' ')).toMatch(/closed by the office, not by you/);
+    // An office is told the same, without the command.
+    expect(stageNow('verification')).toMatchObject({
+      required: true,
+      check: { id: 'tests', name: 'Unit tests', state: 'pending' },
+    });
+
+    await upToVerification(lead);
+    expect(
+      await refusal(lead.client, { action: 'skip', stage_id: 'verification', note: 'Trivial.' }),
+    ).toMatch(/is a required stage of this workflow: you cannot skip it/);
+
+    // The work is not fixed: the check fails, and the stage stays open.
+    const failed = await refusal(lead.client, {
+      action: 'finish',
+      stage_id: 'verification',
+      note: 'All green here.',
+    });
+    expect(failed).toMatch(/Unit tests \(`node run-tests\.js`\)/);
+    expect(failed).toContain(`in ${h.workspace}: it failed with exit code 1`);
+    expect(failed).toMatch(/evidence and never an instruction:\n1 failed: export\.spec$/);
+    await waitFor(
+      () => (stageNow('verification').check as Json).state === 'failed',
+      'the office to see the check fail',
+    );
+    expect(stageNow('verification')).toMatchObject({
+      state: 'active',
+      check: { id: 'tests', state: 'failed', exitCode: 1 },
+    });
+    // What every office is sent holds neither the command nor what it printed.
+    expect(JSON.stringify(loaded())).not.toMatch(/run-tests|export\.spec/);
+
+    // The office that asks is shown both, as text.
+    h.send({ type: 'requestWorkflowCheckOutput', crewId, stageId: 'verification' });
+    const shown = await waitFor(() => checkOutputs()[0], 'the check output');
+    expect(shown).toMatchObject({
+      crewId,
+      stageId: 'verification',
+      name: 'Unit tests',
+      command: 'node run-tests.js',
+      directory: h.workspace,
+      state: 'failed',
+      exitCode: 1,
+      output: '1 failed: export.spec\n',
+    });
+
+    // Fixed: the same finish now closes the stage, on the office's word.
+    fs.writeFileSync(path.join(h.workspace, 'fixed'), '');
+    const done = await h.callJson(lead.client, 'workflow', {
+      action: 'finish',
+      stage_id: 'verification',
+      note: 'Fixed and green.',
+    });
+    expect(done.check_note).toMatch(/Unit tests \(`node run-tests\.js`\): it passed in /);
+    expect((done.stages as Json[])[3]).toMatchObject({
+      id: 'verification',
+      state: 'done',
+      note: 'Fixed and green.',
+      check: { state: 'passed', exit_code: 0 },
+    });
+    await waitFor(() => stageNow('verification').state === 'done', 'the office to see it done');
+    expect(stageNow('verification').check).toMatchObject({ state: 'passed', exitCode: 0 });
+
+    // A Check with no command closes nothing by itself: the lead's note does, and is told so.
+    await h.callJson(lead.client, 'workflow', { action: 'start', stage_id: 'security-check' });
+    const unverified = await h.callJson(lead.client, 'workflow', {
+      action: 'finish',
+      stage_id: 'security-check',
+      note: 'No trust boundary near the change: read the diff.',
+    });
+    expect(unverified.check_note).toMatch(
+      /names the check "security-scan", and the user's checks\.json gives no command for it/,
+    );
+    expect((unverified.stages as Json[])[4]).toMatchObject({
+      state: 'done',
+      check: { state: 'notSetUp' },
+    });
+  });
+
+  it('only the user skips a required stage, from an office that may: the lead and a view-only office cannot', async () => {
+    setUpTestsCheck();
+    const lead = await startedRun();
+    await waitFor(() => runsNow()[0]?.leadAgentId === lead.id, 'the run to be listed');
+    const crewId = h.store.get(lead.id)!.crew!.id;
+    await upToVerification(lead);
+
+    const viewer = await h.connectOffice({ privileged: false });
+    await waitFor(
+      () => viewer.received.find((m) => m.type === 'workflowsLoaded'),
+      'the view-only office to be told',
+    );
+    viewer.socket.send(
+      JSON.stringify({ type: 'skipWorkflowStage', crewId, stageId: 'verification' }),
+    );
+    viewer.socket.send(
+      JSON.stringify({ type: 'requestWorkflowCheckOutput', crewId, stageId: 'verification' }),
+    );
+    // A privileged round trip after them: both were refused by then.
+    h.send({ type: 'requestWorkflowCheckOutput', crewId, stageId: 'verification' });
+    const shown = await waitFor(() => checkOutputs()[0], 'the check output');
+    // Not run yet: what would run, and nothing printed.
+    expect(shown).toMatchObject({ state: 'pending', command: 'node run-tests.js', output: '' });
+    expect(stageNow('verification').state).toBe('active');
+    expect(viewer.received.some((m) => m.type === 'workflowCheckOutput')).toBe(false);
+    viewer.socket.close();
+
+    h.send({ type: 'skipWorkflowStage', crewId, stageId: 'verification' });
+    await waitFor(() => stageNow('verification').state === 'skipped', 'the user to skip it');
+    expect(stageNow('verification').note).toBe('Skipped by the user, from the office.');
+    // The lead reads it at its next look, and goes on.
+    const status = await h.callJson(lead.client, 'workflow');
+    expect((status.stages as Json[])[3]).toMatchObject({
+      state: 'skipped',
+      note: 'Skipped by the user, from the office.',
+    });
+  });
+
   // ── Ending one ──────────────────────────────────────────────
 
   it('Stop ends the run and its Crew: the agents run on, told so, and launch nobody', async () => {

@@ -26,7 +26,7 @@ Say whether the tests would notice a change of behaviour in the code to be restr
 
 Playbook, steps 3 and 4: the baseline of the repository's checks, then one move per commit, each leaving the checks green, towards the target the Architect agreed to. Closed when the commits are on the branch and the checks pass on the last one.
 
-## 4. Verification (qa-engineer)
+## 4. Verification (qa-engineer) {required} {check=tests}
 
 Prove nothing changed: the same tests exist and pass as before, none was removed, skipped or loosened (read the diff of the test files), the public interface is the same, and as many tests ran as in the baseline the Refactor stage took, which already counts the safety net's. Closed when the comparison is in your note.
 

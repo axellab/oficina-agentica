@@ -7,12 +7,15 @@
 
 import type {
   Workflow,
+  WorkflowCheckState,
   WorkflowRun,
   WorkflowRunStage,
+  WorkflowStageCheck,
   WorkflowStageState,
 } from '../../../core/src/messages.js';
 import {
   closedStageCount,
+  isStageClosed,
   MAX_WORKFLOW_REQUEST_CHARS,
   stageSteps,
 } from '../../../core/src/workflows.js';
@@ -35,18 +38,75 @@ export function panelCount(runs: readonly WorkflowRun[]): string {
   return runs.length === 1 ? runProgress(runs[0]) : `${runs.length}`;
 }
 
+/** How long a Check ran, as the office writes it: "under 1 s", "42 s", "3 min 5 s". */
+export function checkSpan(seconds: number): string {
+  if (seconds < 1) return 'under 1 s';
+  if (seconds < 60) return `${seconds} s`;
+  const rest = seconds % 60;
+  return rest === 0
+    ? `${Math.floor(seconds / 60)} min`
+    : `${Math.floor(seconds / 60)} min ${rest} s`;
+}
+
+/** What a stage's Check has to say for itself, after its name. */
+const CHECK_STATE_WORDS: Record<WorkflowCheckState, string> = {
+  notSetUp: 'not set up',
+  pending: 'not run yet',
+  running: 'running',
+  passed: 'passed',
+  failed: 'failed',
+};
+
+/**
+ * A stage's Check on one line: "Tests · passed in 42 s", "Tests · failed
+ * (exit 1) in 3 s", "tests · not set up". The office ran it, so the line
+ * says how it went, never what anyone said of it.
+ */
+export function checkLine(check: WorkflowStageCheck): string {
+  const words = CHECK_STATE_WORDS[check.state];
+  if (check.state === 'passed' && check.seconds !== undefined) {
+    return `${check.name} · ${words} in ${checkSpan(check.seconds)}`;
+  }
+  if (check.state === 'failed') {
+    const exit = check.exitCode !== undefined ? ` (exit ${check.exitCode})` : '';
+    const span = check.seconds !== undefined ? ` in ${checkSpan(check.seconds)}` : '';
+    return `${check.name} · ${words}${exit}${span}`;
+  }
+  return `${check.name} · ${words}`;
+}
+
+/** Whether a Check has an output an office can ask for: it ran, or is running. */
+export function checkHasOutput(check: WorkflowStageCheck | undefined): boolean {
+  return check !== undefined && check.state !== 'notSetUp' && check.state !== 'pending';
+}
+
+/** Whether the user may still skip a stage: one that is not closed. */
+export function canSkipStage(stage: Pick<WorkflowRunStage, 'state'>): boolean {
+  return !isStageClosed(stage.state);
+}
+
 /** A stage's tooltip: everything the row says, on one line. */
 export function stageTitle(stage: WorkflowRunStage): string {
   const parts = [stage.title, stage.roleName, STAGE_STATE_LABEL[stage.state]];
+  if (stage.required) parts.push('Required');
   if (stage.note) parts.push(stage.note);
+  if (stage.check) parts.push(`Check: ${checkLine(stage.check)}`);
   return parts.join(' · ');
 }
 
 /** A Workflow's stages as the request dialog lists them: numbered by step, so
  *  stages that run at the same time share a number. */
-export function numberedStages(
-  workflow: Pick<Workflow, 'stages'>,
-): Array<{ id: string; step: number; title: string; roleName: string; parallel: boolean }> {
+export function numberedStages(workflow: Pick<Workflow, 'stages'>): Array<{
+  id: string;
+  step: number;
+  title: string;
+  roleName: string;
+  parallel: boolean;
+  /** Its lead cannot skip it. */
+  required: boolean;
+  /** The id of the Check the office runs to close it. */
+  check?: string;
+}> {
   const steps = stageSteps(workflow.stages);
   return workflow.stages.map((stage, index) => ({
     id: stage.id,
@@ -54,7 +114,24 @@ export function numberedStages(
     title: stage.title,
     roleName: stage.roleName,
     parallel: stage.parallel === true && index > 0,
+    required: stage.required === true,
+    ...(stage.check ? { check: stage.check } : {}),
   }));
+}
+
+/** What the request dialog says of a stage's marks, in its tooltip. */
+export function stageMarksTitle(stage: {
+  parallel: boolean;
+  required: boolean;
+  check?: string;
+}): string | undefined {
+  const parts: string[] = [];
+  if (stage.parallel) parts.push('Runs at the same time as the stage above');
+  if (stage.required) parts.push('Required: only you can skip it');
+  if (stage.check) {
+    parts.push(`Closed by the office running your "${stage.check}" check, where you set one up`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
 /** The Workflows one Role leads, as the drawer lists them together. */

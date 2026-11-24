@@ -113,6 +113,44 @@ describe('parseWorkflows (workflows.json)', () => {
     ]);
   });
 
+  it('a stage may be required and name the check that closes it; neither takes anything else', () => {
+    const parsed = parseWorkflows({
+      workflows: [
+        entry({
+          stages: [
+            { id: 'fix', title: 'Fix it', role: 'developer', required: false },
+            { id: 'check', title: 'Check it', role: 'qa-engineer', required: true, check: 'tests' },
+          ],
+        }),
+        entry({
+          id: 'wordy',
+          stages: [{ id: 'fix', title: 'Fix it', role: 'developer', required: 'yes' }],
+        }),
+        entry({
+          id: 'command',
+          // A stage names a check, it never carries a command.
+          stages: [{ id: 'fix', title: 'Fix it', role: 'developer', check: 'npm test' }],
+        }),
+      ],
+    });
+    expect(parsed.workflows).toHaveLength(1);
+    expect(parsed.workflows[0].stages).toEqual([
+      { id: 'fix', title: 'Fix it', role: 'developer', brief: '' },
+      {
+        id: 'check',
+        title: 'Check it',
+        role: 'qa-engineer',
+        brief: '',
+        required: true,
+        check: 'tests',
+      },
+    ]);
+    expect(parsed.problems).toEqual([
+      'workflows[1]: stages[0]: "required" must be true or false',
+      expect.stringMatching(/workflows\[2\]: stages\[0\]: "check" must be the id of a check/),
+    ]);
+  });
+
   it("a Workflow may name its lead's model and a stage its owner's; one that is no model name is refused", () => {
     const parsed = parseWorkflows({
       workflows: [
@@ -483,9 +521,44 @@ describe('the order of the stages', () => {
     expect(!unknown.ok && unknown.reason).toBe(
       `There is no stage deploy in this workflow: its stages are ${ids.join(', ')}.`,
     );
-    const all = after(...ids.map((id): ['skip', string] => ['skip', id]));
+    // The user skips what a lead may not (a required stage).
+    const all = ids.reduce((stages, id) => {
+      const outcome = moveStage(definition, stages, 'skip', id, 'Not needed.', 'user');
+      if (!outcome.ok) throw new Error(outcome.reason);
+      return outcome.stages;
+    }, initialStages(definition));
     expect(isRunFinished(all)).toBe(true);
     expect(closedStageCount(all)).toBe(ids.length);
+  });
+
+  it('a required stage is skipped by the user alone: its lead is told to do it or ask them', () => {
+    const required = definition.filter((stage) => stage.required).map((stage) => stage.id);
+    expect(required).toEqual(['testing', 'security-review']);
+    const refused = moveStage(definition, initialStages(definition), 'skip', 'testing', 'No time.');
+    expect(!refused.ok && refused.reason).toMatch(
+      /testing is a required stage of this workflow: you cannot skip it\..*only they can skip it, from the office/,
+    );
+    // Not for want of a note, and whatever state it is in.
+    const active = after(
+      ['skip', 'requirements'],
+      ['skip', 'design'],
+      ['skip', 'implementation'],
+      ['start', 'testing'],
+    );
+    expect(moveStage(definition, active, 'skip', 'testing', 'No time.')).toMatchObject({
+      ok: false,
+    });
+    const byUser = moveStage(definition, active, 'skip', 'testing', 'Skipped by the user.', 'user');
+    if (!byUser.ok) throw new Error(byUser.reason);
+    expect(byUser.stages[3]).toEqual({
+      id: 'testing',
+      state: 'skipped',
+      note: 'Skipped by the user.',
+    });
+    // A stage that is not required is still the lead's to skip.
+    expect(moveStage(definition, active, 'skip', 'delivery', 'Nothing to ship.')).toMatchObject({
+      ok: true,
+    });
   });
 });
 
@@ -744,7 +817,7 @@ describe('Workflows (the runs)', () => {
     expect(workflows.stageModel(lead, 'security-engineer')).toBeUndefined();
     workflows.move(lead, 'start', 'look');
     expect(workflows.stageModel(lead, 'qa-engineer')).toMatchObject({ model: 'haiku' });
-    workflows.move(lead, 'finish', 'look', 'Seen it fail.');
+    await workflows.finish(lead, 'look', 'Seen it fail.');
     expect(workflows.stageModel(lead, 'qa-engineer')).toEqual({
       model: 'opus',
       stageTitle: 'Look again',
@@ -892,7 +965,7 @@ describe('Workflows (the runs)', () => {
     );
     expect(sent.slice(before).map((m) => m.type)).toEqual(['workflowsLoaded']);
     const note = `Fails on Safari 17.\n${'x'.repeat(WORKFLOW_SHOWN_TEXT_MAX_CHARS)}`;
-    expect(workflows.move(lead, 'finish', 'reproduce', note)).toMatchObject({ ok: true });
+    expect(await workflows.finish(lead, 'reproduce', note)).toMatchObject({ ok: true });
     const stage = runs()[0].stages[0];
     expect(stage.state).toBe('done');
     // The office's copy of a note is one line, cut short; the lead keeps it whole.
@@ -939,8 +1012,12 @@ describe('Workflows (the runs)', () => {
 
   it('a run with every stage closed stays listed, finished, until it is stopped', async () => {
     const lead = await started();
+    const crewId = store.get(lead)!.crew!.id;
     for (const stage of runs()[0].stages) {
-      expect(workflows.move(lead, 'skip', stage.id, 'Not needed.')).toMatchObject({ ok: true });
+      // A required stage is the user's to skip (the panel), the rest the lead's.
+      if (stage.required) expect(workflows.skipByUser(crewId, stage.id)).toBe(true);
+      else
+        expect(workflows.move(lead, 'skip', stage.id, 'Not needed.')).toMatchObject({ ok: true });
     }
     expect(runs()[0]).toMatchObject({ finished: true });
     const view = workflows.view(lead);
@@ -1025,7 +1102,7 @@ describe('Workflows (the runs)', () => {
 
   it('answers only its own messages, and a refused start goes back to its sender', async () => {
     const replies: Array<Record<string, unknown>> = [];
-    const reply = (message: Record<string, unknown>) => replies.push(message);
+    const reply = (message: object) => replies.push({ ...message });
     expect(workflows.handleMessage({ type: 'endCrew', crewId: 'x' }, reply)).toBe(false);
     expect(workflows.handleMessage({ type: 'launchAgent' }, reply)).toBe(false);
 

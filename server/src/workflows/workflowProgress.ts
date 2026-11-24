@@ -6,9 +6,13 @@
  *   every stage of the steps before it is done or skipped (core's stageSteps:
  *   a `parallel` stage shares the step of the stage listed before it);
  * - `finish`: an active stage is done, with a note of what was done;
- * - `skip`: a stage the request does not need, with a note saying why.
+ * - `skip`: a stage the request does not need, with a note saying why. A
+ *   `required` stage is skipped by the user alone (`by: 'user'`, from the
+ *   office): its lead is refused.
  *
  * A refusal says what to do instead: its reader is the run's lead, an agent.
+ * What closes a stage that names a Check (the office running it) is the run's
+ * own business (workflows.ts): here a finish is only allowed or not.
  */
 
 import type { WorkflowStageState } from '../../../core/src/messages.js';
@@ -27,6 +31,10 @@ export interface StageProgress {
 }
 
 export type StageMove = 'start' | 'finish' | 'skip';
+
+/** Who moves a stage: the run's lead (through the tool), or the user (from
+ *  the office), who alone skips a required stage. */
+export type StageMover = 'lead' | 'user';
 
 export type StageMoveOutcome =
   { ok: true; stages: StageProgress[] } | { ok: false; reason: string };
@@ -52,6 +60,7 @@ export function moveStage(
   move: StageMove,
   stageId: string,
   note?: string,
+  by: StageMover = 'lead',
 ): StageMoveOutcome {
   const index = stages.findIndex((stage) => stage.id === stageId);
   if (index < 0) {
@@ -107,6 +116,12 @@ export function moveStage(
     case 'skip': {
       if (isStageClosed(stage.state)) {
         return { ok: false, reason: `${stageId} is already ${stage.state}.` };
+      }
+      if (by === 'lead' && definition[index]?.required) {
+        return {
+          ok: false,
+          reason: `${stageId} is a required stage of this workflow: you cannot skip it. Hand it to its owner and finish it when its work is done. If it truly cannot be done here, say why to the user in your own terminal and wait: only they can skip it, from the office.`,
+        };
       }
       if (!said) {
         return {

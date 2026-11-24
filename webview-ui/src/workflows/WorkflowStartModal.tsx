@@ -6,7 +6,7 @@ import { Modal } from '../components/ui/Modal.js';
 import { PixelText } from '../components/ui/PixelText.js';
 import { WORKFLOW_REQUEST_ROWS } from '../constants.js';
 import type { WorkflowAsking } from './useWorkflowStart.js';
-import { numberedStages, requestProblem } from './workflowView.js';
+import { numberedStages, requestProblem, stageMarksTitle } from './workflowView.js';
 
 interface WorkflowStartModalProps {
   /** The Workflow picked in the drawer and the Directory pressed; null while shut. */
@@ -90,13 +90,27 @@ function RequestForm({
           <li
             key={stage.id}
             className="flex items-baseline gap-8 min-w-0"
-            title={stage.parallel ? 'Runs at the same time as the stage above' : undefined}
+            title={stageMarksTitle(stage)}
+            data-stage-id={stage.id}
           >
             <span className="shrink-0 w-12 text-text-muted">
               <PixelText text={`${stage.step}`} />
             </span>
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">{stage.title}</span>
             <span className="shrink-0 text-xs text-text-muted">{stage.roleName}</span>
+            {stage.required && (
+              <span className="shrink-0 text-xs text-warning" data-testid="workflow-start-required">
+                required
+              </span>
+            )}
+            {stage.check && (
+              <span
+                className="shrink-0 text-xs text-status-active"
+                data-testid="workflow-start-check"
+              >
+                check: {stage.check}
+              </span>
+            )}
           </li>
         ))}
       </ol>
