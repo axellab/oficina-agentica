@@ -239,12 +239,39 @@ export function parsePlaybookFile(id: string, text: string): KitPlaybook | strin
   return { playbook: { id, name, description, tools, instructions: doc.body }, order };
 }
 
-/** A stage's heading: its step, its title, the Role that owns it and, when the
- *  title's own words would not make its id, the id (`{#id}`); last, the model
- *  its owner is launched on when the stage names one (`{model=<name>}`: what
- *  is a model name is core's to say). */
-const STAGE_HEADING_RE =
-  /^## (\d{1,2})\. (.+?) \(([a-z][a-z0-9-]*)\)(?: \{#([a-z][a-z0-9-]*)\})?(?: \{model=([^\s{}]+)\})?$/;
+/** A stage's heading: its step, its title, the Role that owns it, then what
+ *  it marks the stage with, each in braces (`STAGE_MARKS`). */
+const STAGE_HEADING_RE = /^## (\d{1,2})\. (.+?) \(([a-z][a-z0-9-]*)\)((?: \{[^\s{}]+\})*)$/;
+
+/**
+ * What a stage's heading may mark it with, after the Role, in any order and
+ * each once: `{#id}` (its id, when the title's own words would not make it),
+ * `{required}` (a run's lead cannot skip it), `{check=<id>}` (the Check the
+ * office runs to close it) and `{model=<name>}` (the model its owner is
+ * launched on). What an id or a model name is, is core's to say.
+ */
+function stageMarks(marks: string): Record<string, unknown> | string {
+  const fields: Record<string, unknown> = {};
+  const mark = (key: string, value: unknown, written: string): string | undefined => {
+    if (key in fields) return `"${written}" is written twice`;
+    fields[key] = value;
+    return undefined;
+  };
+  for (const written of marks.trim().split(' ').filter(Boolean)) {
+    const text = written.slice(1, -1);
+    const problem = text.startsWith('#')
+      ? mark('id', text.slice(1), written)
+      : text === 'required'
+        ? mark('required', true, written)
+        : text.startsWith('check=')
+          ? mark('check', text.slice('check='.length), written)
+          : text.startsWith('model=')
+            ? mark('model', text.slice('model='.length), written)
+            : `"${written}" is not a mark a stage's heading takes: {#id}, {required}, {check=<id>} or {model=<name>}`;
+    if (problem !== undefined) return problem;
+  }
+  return fields;
+}
 
 /** An id from a title: its words in lower case, joined by hyphens (a stage's
  *  id from its heading, a Playbook's from the name a new Role gives it). */
@@ -271,7 +298,8 @@ export interface KitWorkflow {
  * whose text is the stage's brief. Steps count from 1 and never skip; stages
  * that share a step run at the same time (the later ones are `parallel`). The
  * front matter's `model` is the model a run's lead is launched on; a heading
- * ending in `{model=<name>}` names the one its stage's owner is launched on.
+ * may end in marks (`stageMarks`): `{required}`, `{check=<id>}`,
+ * `{model=<name>}`, `{#id}`.
  */
 export function parseWorkflowFile(id: string, lead: string, text: string): KitWorkflow | string {
   const doc = readFrontMatter(text, ['name', 'description', 'order', 'model']);
@@ -299,14 +327,15 @@ export function parseWorkflowFile(id: string, lead: string, text: string): KitWo
     if (!match) {
       return `"${line.trim()}" is not a stage heading: write "## <step>. <Title> (<role id>)"`;
     }
-    const [, stepText, title, role, givenId, model] = match;
+    const [, stepText, title, role, marksText] = match;
+    const marks = stageMarks(marksText);
+    if (typeof marks === 'string') return `stage "${title}": ${marks}`;
     const asked = Number(stepText);
     if (asked < 1 || (asked !== step && asked !== step + 1)) {
       return `stage "${title}" is step ${asked}, after step ${step}: steps count from 1 and never skip`;
     }
     close();
-    const stage: Record<string, unknown> = { id: givenId ?? slugOf(title), title, role };
-    if (model !== undefined) stage.model = model;
+    const stage: Record<string, unknown> = { id: slugOf(title), title, role, ...marks };
     if (asked === step) stage.parallel = true;
     step = asked;
     current = { stage, text: [] };

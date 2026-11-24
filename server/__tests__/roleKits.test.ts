@@ -305,6 +305,55 @@ describe('workflows/<id>.md', () => {
     ]);
   });
 
+  it('marks a stage required and names the Check that closes it, after its heading', () => {
+    const parsed = parseWorkflowFile(
+      'release',
+      'release-manager',
+      WORKFLOW.replace(
+        '## 2. Checks (devsecops-engineer)',
+        '## 2. Checks (devsecops-engineer) {required} {check=tests}',
+      )
+        // The marks in any order, the id among them.
+        .replace('{#smoke}', '{check=security-scan} {model=haiku} {#smoke} {required}'),
+    );
+    if (typeof parsed === 'string') throw new Error(parsed);
+    expect(
+      parsed.workflow.stages.map((stage) => [stage.id, stage.required, stage.check, stage.model]),
+    ).toEqual([
+      ['release-notes', undefined, undefined, undefined],
+      ['checks', true, 'tests', undefined],
+      ['smoke', true, 'security-scan', 'haiku'],
+      ['report', undefined, undefined, undefined],
+    ]);
+  });
+
+  it.each([
+    [
+      'a mark written twice',
+      '{required} {required}',
+      /stage "Checks": "\{required\}" is written twice/,
+    ],
+    [
+      'two Checks for one stage',
+      '{check=tests} {check=lint}',
+      /stage "Checks": "\{check=lint\}" is written twice/,
+    ],
+    [
+      'a mark there is none of',
+      '{optional}',
+      /stage "Checks": "\{optional\}" is not a mark a stage's heading takes/,
+    ],
+    ['a Check that is no id', '{check=Run_Tests}', /"check" must be/],
+    // A command is the user's own, in checks.json: a heading only names one.
+    ['a Check that is a command', '{check=npm test}', /is not a stage heading/],
+  ])('refuses %s', (_what, marks, problem) => {
+    const text = WORKFLOW.replace(
+      '## 2. Checks (devsecops-engineer)',
+      `## 2. Checks (devsecops-engineer) ${marks}`,
+    );
+    expect(parseWorkflowFile('release', 'release-manager', text)).toMatch(problem);
+  });
+
   it.each([
     [
       'a heading that names no Role',

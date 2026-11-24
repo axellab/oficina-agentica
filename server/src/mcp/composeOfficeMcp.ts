@@ -25,10 +25,13 @@ import {
 } from '../directories.js';
 import { catalogOf } from '../officeFacts.js';
 import type { AgentTerminals } from '../terminal/agentTerminals.js';
+import { inheritedEnv } from '../terminal/terminalEnv.js';
 import { writeOnboardingPlugin } from '../tutorial/onboardingPlugin.js';
 import { Tutorial, type TutorialSurface } from '../tutorial/tutorial.js';
 import { GUIDE_FALLBACK_NAME } from '../tutorial/tutorialCopy.js';
 import { layoutSignature } from '../tutorial/tutorialSightings.js';
+import { checkForDirectory } from '../workflows/checkCatalog.js';
+import { checkEnv, startCheck } from '../workflows/checkRunner.js';
 import { Workflows } from '../workflows/workflows.js';
 import { invalidateAttributionDirectories } from '../worktreeAttribution.js';
 import { isRepo } from '../worktreeGit.js';
@@ -268,6 +271,22 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
         // A run is a Crew's work: it can start where a Crew can.
         unavailable: crewUnavailable,
         launch: (request) => launch(request, officeMcp),
+        // The commands that close stages are the user's own (checks.json),
+        // run with the office's environment less the CLI's session markers.
+        checks: {
+          forDirectory: checkForDirectory,
+          start: (request) =>
+            startCheck({ ...request, env: checkEnv(inheritedEnv(facts.provider)) }),
+          // A Check is a command run on the host at an agent's call (the
+          // `workflow` tool changes nothing itself, so read-only lets it
+          // through): none starts once the user holds the tools back.
+          refused: () =>
+            getOfficeMcpConsent() !== 'granted'
+              ? 'The Pixel Agents Office MCP is off in Settings.'
+              : getOfficeMcpReadOnly()
+                ? 'The Pixel Agents Office MCP is read-only in Settings, and a check is a command the office runs.'
+                : null,
+        },
       })
     : undefined;
   const office: OfficeOperations = {

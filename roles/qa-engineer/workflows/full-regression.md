@@ -28,7 +28,7 @@ For each regression: the smallest change that removes it, on a branch of its own
 
 For the failures that come from how the suites are run: a service the pipeline does not start, a cache, a version that drifted, a runner too small. As code on a branch of its own, never by turning a check off. Skip it, with a note, when no failure was the environment's. Closed when the cause of each is named, and fixed or put to the user.
 
-## 4. Second run (qa-engineer)
+## 4. Second run (qa-engineer) {check=tests}
 
 Bring the changes together first: a branch for this run alone, from the commit under test, with each fix's branch merged into it (a conflict goes back to whoever wrote the fix). Run again what failed, then the whole suite once on it: the regressions are gone, nothing new failed, and no test was skipped, removed or loosened to get there (read the diff of the test files). Skip it, with a note, when nothing was changed. Closed when the result of the second run is in your note.
 

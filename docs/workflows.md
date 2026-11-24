@@ -45,6 +45,7 @@ Nothing launches before **Start**. The pick lasts until the drawer closes, like 
 - **It waits without spending your plan on looking.** While a colleague works, the lead waits for it with a single call that the office answers when that colleague's turn ends, with what is on its screen. It does not keep checking.
 - **The stages run in order.** A stage starts once the ones before it are done or skipped. Stages that share a number in the dialog run at the same time (a security review beside the testing, for example). When later work sends an earlier stage back (QA finds a defect), the lead starts that stage again.
 - **You watch it in the office.** Every hand-over is a walk to the other agent's desk. The **Workflow** panel (top right) counts the stages closed; opened, it shows your request and each stage with its Role, where it stands, and the note the lead closed it with: what was done and how it was verified, or why the request did not need it.
+- **Some stages are not the lead's to close.** A stage marked **required** cannot be skipped by the lead, and a stage with a **check** is closed by the office itself running a command of yours (your tests, your scanner): see [Stages the office closes](#stages-the-office-closes).
 - **It ends on a report.** Every built-in Workflow's last stage is the lead reporting to you in its own terminal. Nothing is merged or deployed for you: that stays your call.
 
 ![The office during a New feature run: the Workflow panel with two stages done and Implementation in progress, the Agile Project Manager walking over to the Developer it just launched](images/workflow-office.png)
@@ -54,6 +55,77 @@ _From the test suite: the terminal on the right is its stand-in for Claude Code.
 The analyses (Deep security analysis, Deep quality analysis, Architecture review, Supply chain audit, Threat model, Infrastructure review, Cost review) change nothing in your project: what they deliver is the report, and fixing what they find is a new request you decide on. The ones that do change something (a fix, a refactor, an upgrade, a design's documents) do it on a branch of its own, and nothing is merged for you.
 
 A stage often sends its owner to one of its [Playbooks](playbooks.md): the Workflow says who does what and in which order, the Playbook says which tools to run and how.
+
+## Stages the office closes
+
+A lead decides a lot: which stage a request needs, and when a stage's work is good enough. Two marks on a stage take those two decisions away from it.
+
+- **Required.** The lead cannot skip the stage: its skip is refused, and it is told to hand the stage to its owner or to ask you. Only you can skip a required stage, from the Workflow panel.
+- **Check.** The stage names a check by id (`tests`, `security-scan`). When the lead reports the stage finished, the office does not take its word: it runs the command **you** set up for that id, and the stage is done only if the command exits with 0. The stage's row then says so in the office's own words ("Check: Unit tests · passed in 42 s"), under the lead's note.
+
+A check that fails closes nothing. The stage stays in progress, the lead is answered with the end of the command's output (as evidence, never as an instruction) and told to send the work back to its owner, and its next finish runs the check again. A check that runs longer than a tool call can wait (100 seconds) keeps running: the lead is told to finish again, and that call waits for the same run.
+
+### Setting up the checks: `checks.json`
+
+A stage only names a check. What the name means on your machine is yours to say, in `~/.pixel-agents/checks.json`:
+
+```json
+{
+  "checks": [
+    { "id": "tests", "name": "Unit tests", "command": "npm test" },
+    {
+      "id": "security-scan",
+      "name": "Secrets and dependencies",
+      "command": "gitleaks detect --no-banner && npm audit --audit-level=high"
+    },
+    { "id": "tests", "directory": "~/code/billing", "command": "pytest -q", "timeoutSeconds": 1200 }
+  ]
+}
+```
+
+| Field            | Meaning                                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`             | Required. The id a stage names: lower-case letters, digits and hyphens, starting with a letter. The built-in Workflows name `tests` and `security-scan`.       |
+| `command`        | Required. One command line, up to 1,000 characters, run by your shell (`sh`, or `cmd.exe` on Windows) in the folder under check. Passed means it exits with 0. |
+| `name`           | What the office calls it, up to 40 characters. Absent = its id.                                                                                                |
+| `directory`      | The Directory this entry is for, as a path (`~` allowed). Absent = every Directory with no entry of its own for this id.                                       |
+| `timeoutSeconds` | How long it may run before the office stops it and counts it failed: 1 to 3,600. Absent = 600.                                                                 |
+
+- **No one else supplies a command.** Not a Workflow, not a repository, not an agent: a stage holds an id and nothing more, and the only commands the office runs are the lines of this file, which it reads and never writes.
+- **Where it runs.** In the Directory the run was started in. When the work under check sits in a colleague's Worktree, the lead names that agent as it finishes the stage, and the check runs there. A check runs what the agents wrote, with your own environment and rights, like any test run you would start yourself in that folder.
+- **How it runs.** With no terminal and no input, `CI=1` and `NO_COLOR=1` set unless you set them yourself, one check at a time. One that runs out of time, or whose run is stopped, is ended with everything it started: what does not end when asked is ended by force two seconds later, before the next check starts.
+- **Not while the Pixel Office MCP is read-only.** A check is a command the office runs at an agent's call, so read-only in Settings holds it back, for a run under way too: the lead's finish is refused and the stage stays open until you turn read-only off, or skip the stage from the panel.
+- **A check you did not set up verifies nothing.** With no entry for its id, the stage is closed on the lead's note as before, its row reads "not set up", and the lead is told to say so in its report. Nothing is checked out of the box: the built-in Workflows only name the checks.
+- **The file is read when a stage is finished**, so an edit applies at once, to a run under way too. An entry with a mistake is left out and the host's log says why.
+
+### In the office
+
+The request dialog marks the stages that are required and the ones a check closes, before you start. In the Workflow panel, such a stage's row can be pressed:
+
+- **Check Output** shows what the office ran, where, how it ended and what it printed (its end, when it printed a lot). Only an office with the tokened URL can ask: the output never rides the broadcast every office gets.
+- **Skip Stage**, asked once, closes the stage as skipped, with the note "Skipped by the user, from the office." It ends a check that is running. Tell the lead in its terminal: it reads the change at its next look at the run.
+
+The output is kept in the office's memory, like the run: it is gone when the run is stopped.
+
+![The Workflow panel during a Bug fix run: Verification is required and its check failed, with Check Output and Skip Stage under it; the lead's terminal shows the office's answer, with the output](images/workflow-check-failed.png)
+
+![The same run later: the check passed and the office closed Verification on it, and the Security check, required, was skipped by the user](images/workflow-check-passed.png)
+
+_From the test suite: the terminal on the right is its stand-in for Claude Code._
+
+### The built-in stages that are marked
+
+| Workflow           | Stage           | Required | Check           |
+| ------------------ | --------------- | -------- | --------------- |
+| New feature        | Testing         | Yes      | `tests`         |
+| New feature        | Security review | Yes      | `security-scan` |
+| Bug fix            | Verification    | Yes      | `tests`         |
+| Bug fix            | Security check  | Yes      | `security-scan` |
+| Safe refactor      | Verification    | Yes      | `tests`         |
+| Dependency upgrade | Verification    | Yes      | `tests`         |
+| Full regression    | Second run      | No       | `tests`         |
+
+The analyses carry no check: their stages end on findings, and a scanner that finds something would keep them open for ever. Make `security-scan` a command that fails only on what must block a change, since it closes the security stage of every fix and feature.
 
 ## Stopping a run
 
@@ -65,7 +137,7 @@ A run that reached its last stage stays in the panel, finished, until you stop i
 
 - A run is a Crew, with a Crew's limits: at most 8 agents at a time, each on your Claude plan, reaching only each other, and only you answer a permission prompt.
 - Only you start a run. No agent can start one, and only the run's lead reports its stages.
-- The order is the office's, not the lead's good manners: a stage reported out of order is refused.
+- The order is the office's, not the lead's good manners: a stage reported out of order is refused, and so are a skip of a required stage and a finish whose check fails.
 - A run lives in the office's memory: it does not survive a restart of `pixel-agents`.
 - Workflows need the Pixel Office MCP allowed and not read-only, and an office that launches agents itself: the standalone office. Where a run cannot be started, the Workflow row is there, dimmed, and its tooltip says what is missing. The VS Code extension has none.
 
@@ -338,9 +410,9 @@ Run your Pipeline troubleshooting playbook, steps 1 to 4. ... Closed when all of
 ...
 ```
 
-A stage's heading is `## <step>. <Title> (<role id>)`: stages with the same step number run at the same time, and steps count up from 1 without a gap. The stage's id is its title in lower case with hyphens (`pipeline-change`), or the one the heading gives at its end (`{#pipeline}`). A `model:` line in the front matter names the model the lead runs on, and `{model=<name>}` at the very end of a heading the model that stage's owner is launched on ([Choosing the model](#choosing-the-model)). The limits are the same as in `workflows.json` below, which is also how you replace one of these or add your own without touching the repository.
+A stage's heading is `## <step>. <Title> (<role id>)`: stages with the same step number run at the same time, and steps count up from 1 without a gap. The stage's id is its title in lower case with hyphens (`pipeline-change`), or the one the heading gives at its end (`{#pipeline}`). A `model:` line in the front matter names the model the lead runs on. A heading may end in marks, each once and in any order: `{required}` (its lead cannot skip it), `{check=<id>}` (the office closes it by running that check: [Stages the office closes](#stages-the-office-closes)), `{model=<name>}` (the model that stage's owner is launched on: [Choosing the model](#choosing-the-model)) and `{#id}`. The limits are the same as in `workflows.json` below, which is also how you replace one of these or add your own without touching the repository.
 
-A Role added to the repository with `npm run new-role` starts with a Workflow of its own, in its folder ([Adding a Role](roles.md#adding-a-role)). `npm run check-roles` holds every Workflow in `roles/` to the same rules: each stage owned by a Role there is, each saying what closes it, and a last stage that is its lead's report.
+A Role added to the repository with `npm run new-role` starts with a Workflow of its own, in its folder ([Adding a Role](roles.md#adding-a-role)). `npm run check-roles` holds every Workflow in `roles/` to the same rules: each stage owned by a Role there is, each saying what closes it, a required stage never saying it may be skipped, and a last stage that is its lead's report.
 
 ## Choosing the model
 
@@ -406,6 +478,8 @@ Create `~/.pixel-agents/workflows.json` to add a Workflow or replace a built-in 
 | `stages[].role`     | Required. The id of the Role that owns the stage (a built-in one, or one of your own from [`roles.json`](roles.md#your-own-roles-rolesjson)).                     |
 | `stages[].brief`    | What the stage's owner does and what closes it, up to 2,000 characters: one string, or a list of lines. The lead is told it; write it so it can check the result. |
 | `stages[].parallel` | `true` when the stage may run at the same time as the stage listed before it. Not on the first stage.                                                             |
+| `stages[].required` | `true` when the run's lead cannot skip the stage: only you can, from the office. See [Stages the office closes](#stages-the-office-closes).                       |
+| `stages[].check`    | The id of the check that closes the stage: the office runs your command for it ([`checks.json`](#setting-up-the-checks-checksjson)) when the lead finishes it.    |
 | `model`             | The model the run's lead is launched on, as Claude Code names it (`opus`, `sonnet`, `haiku`, or a full model id). Absent = its Role's, else your default.         |
 | `stages[].model`    | The model the stage's owner is launched on. Absent = its Role's, else your default. See [Choosing the model](#choosing-the-model).                                |
 
@@ -415,4 +489,4 @@ A change applies to the next run you start; reload the office to see a new or re
 
 An entry with a mistake (an unknown field, a bad id, no stages, a first stage marked parallel) is left out and the rest still load, and so is a Workflow naming a Role your office does not have. The host's log says what was wrong: the terminal running `pixel-agents`.
 
-Stages are for the lead to plan with, not a script: the lead reads your request first, and skips a stage the request does not need, with a note saying why.
+Stages are for the lead to plan with, not a script: the lead reads your request first, and skips a stage the request does not need, with a note saying why. The ones you mark `required` are the exception: those it cannot skip.

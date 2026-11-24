@@ -11,19 +11,32 @@
  * shows, never what a stage's owner is told.
  */
 
+import { isCheckId } from './checks.js';
 import { isRecord } from './isRecord.js';
 import type {
   Workflow,
+  WorkflowCheckOutput,
+  WorkflowCheckState,
   WorkflowRun,
   WorkflowRunStage,
   WorkflowsLoaded,
   WorkflowSource,
   WorkflowStage,
+  WorkflowStageCheck,
   WorkflowStageState,
 } from './messages.js';
 import { isModelName, isRoleId, MODEL_NAME_PROBLEM } from './roles.js';
 
-export type { Workflow, WorkflowRun, WorkflowRunStage, WorkflowSource, WorkflowStageState };
+export type {
+  Workflow,
+  WorkflowCheckOutput,
+  WorkflowCheckState,
+  WorkflowRun,
+  WorkflowRunStage,
+  WorkflowSource,
+  WorkflowStageCheck,
+  WorkflowStageState,
+};
 
 /** One stage of a Workflow, as the catalog holds it. */
 export interface WorkflowStageDefinition {
@@ -36,6 +49,13 @@ export interface WorkflowStageDefinition {
   brief: string;
   /** It may run at the same time as the stage listed before it. */
   parallel?: boolean;
+  /** A run cannot leave it out: its lead cannot skip it, only the user can. */
+  required?: boolean;
+  /** The id of the Check that closes it (core/src/checks.ts): the office runs
+   *  that command itself when the lead reports the stage finished, and the
+   *  stage is done only if it passes. What the id means is the host's
+   *  checks.json to say; where it says nothing, the lead's note closes it. */
+  check?: string;
   /** The model the agent its lead launches for it runs on, in the CLI's own
    *  names and aliases (absent = its Role's, else the user's default). An
    *  agent keeps the model it was launched with, so this counts for the stage
@@ -102,7 +122,16 @@ function briefOf(value: unknown, max: number): string | undefined {
   return brief.length > 0 && brief.length <= max ? brief : undefined;
 }
 
-const STAGE_KEYS = new Set(['id', 'title', 'role', 'brief', 'parallel', 'model']);
+const STAGE_KEYS = new Set([
+  'id',
+  'title',
+  'role',
+  'brief',
+  'parallel',
+  'required',
+  'check',
+  'model',
+]);
 const WORKFLOW_KEYS = new Set(['id', 'name', 'description', 'lead', 'brief', 'model', 'stages']);
 
 /** One stage of a workflows.json entry: the stage, or why not. */
@@ -132,6 +161,16 @@ function parseStage(value: unknown, first: boolean): WorkflowStageDefinition | s
       return '"parallel" means alongside the stage before it, and the first stage has none';
     }
     if (value.parallel) stage.parallel = true;
+  }
+  if (value.required !== undefined) {
+    if (typeof value.required !== 'boolean') return '"required" must be true or false';
+    if (value.required) stage.required = true;
+  }
+  if (value.check !== undefined) {
+    if (!isCheckId(value.check)) {
+      return '"check" must be the id of a check (lower-case letters, digits and hyphens, starting with a letter)';
+    }
+    stage.check = value.check;
   }
   if (value.model !== undefined) {
     if (!isModelName(value.model)) return MODEL_NAME_PROBLEM;
@@ -297,12 +336,36 @@ export function closedStageCount(stages: readonly { state: WorkflowStageState }[
 // ── The wire, as an office reads it ─────────────────────────
 
 const STAGE_STATES: readonly string[] = ['pending', 'active', 'done', 'skipped'];
+const CHECK_STATES: readonly string[] = ['notSetUp', 'pending', 'running', 'passed', 'failed'];
+
+/** A whole number that is not negative, or nothing. */
+function countOf(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function parseStageCheck(raw: unknown): WorkflowStageCheck | null {
+  if (!isRecord(raw) || typeof raw.id !== 'string' || !raw.id) return null;
+  if (typeof raw.state !== 'string' || !CHECK_STATES.includes(raw.state)) return null;
+  const check: WorkflowStageCheck = {
+    id: raw.id,
+    name: typeof raw.name === 'string' && raw.name ? raw.name : raw.id,
+    state: raw.state as WorkflowCheckState,
+  };
+  if (typeof raw.exitCode === 'number' && Number.isInteger(raw.exitCode)) {
+    check.exitCode = raw.exitCode;
+  }
+  const seconds = countOf(raw.seconds);
+  if (seconds !== undefined) check.seconds = seconds;
+  return check;
+}
 
 function parseListedStage(raw: unknown): WorkflowStage | null {
   if (!isRecord(raw) || typeof raw.id !== 'string' || !raw.id) return null;
   if (typeof raw.title !== 'string' || typeof raw.roleName !== 'string') return null;
   const stage: WorkflowStage = { id: raw.id, title: raw.title, roleName: raw.roleName };
   if (raw.parallel === true) stage.parallel = true;
+  if (raw.required === true) stage.required = true;
+  if (typeof raw.check === 'string' && raw.check) stage.check = raw.check;
   return stage;
 }
 
@@ -322,11 +385,21 @@ function parseListedWorkflow(raw: unknown): Workflow | null {
 }
 
 function parseRunStage(raw: unknown): WorkflowRunStage | null {
-  const listed = parseListedStage(raw);
-  if (!listed || !isRecord(raw)) return null;
+  if (!isRecord(raw) || typeof raw.id !== 'string' || !raw.id) return null;
+  if (typeof raw.title !== 'string' || typeof raw.roleName !== 'string') return null;
   if (typeof raw.state !== 'string' || !STAGE_STATES.includes(raw.state)) return null;
-  const stage: WorkflowRunStage = { ...listed, state: raw.state as WorkflowStageState };
+  const stage: WorkflowRunStage = {
+    id: raw.id,
+    title: raw.title,
+    roleName: raw.roleName,
+    state: raw.state as WorkflowStageState,
+  };
+  if (raw.parallel === true) stage.parallel = true;
+  if (raw.required === true) stage.required = true;
   if (typeof raw.note === 'string' && raw.note) stage.note = raw.note;
+  // A check that is not one is left out; the stage is still a stage.
+  const check = parseStageCheck(raw.check);
+  if (check) stage.check = check;
   return stage;
 }
 
@@ -367,4 +440,32 @@ export function parseWorkflowsLoaded(raw: unknown): WorkflowsLoaded | null {
     loaded.unavailableReason = raw.unavailableReason;
   }
   return loaded;
+}
+
+/**
+ * A `workflowCheckOutput` message as an office shows it, or null when it
+ * isn't one: the Check of one stage as the server last ran it.
+ */
+export function parseWorkflowCheckOutput(raw: unknown): WorkflowCheckOutput | null {
+  if (!isRecord(raw) || raw.type !== 'workflowCheckOutput') return null;
+  if (typeof raw.crewId !== 'string' || typeof raw.stageId !== 'string') return null;
+  if (typeof raw.state !== 'string' || !CHECK_STATES.includes(raw.state)) return null;
+  const output: WorkflowCheckOutput = {
+    type: 'workflowCheckOutput',
+    crewId: raw.crewId,
+    stageId: raw.stageId,
+    state: raw.state as WorkflowCheckState,
+    output: typeof raw.output === 'string' ? raw.output : '',
+  };
+  for (const key of ['name', 'command', 'directory'] as const) {
+    const value = raw[key];
+    if (typeof value === 'string' && value) output[key] = value;
+  }
+  if (typeof raw.exitCode === 'number' && Number.isInteger(raw.exitCode)) {
+    output.exitCode = raw.exitCode;
+  }
+  const seconds = countOf(raw.seconds);
+  if (seconds !== undefined) output.seconds = seconds;
+  if (raw.truncated === true) output.truncated = true;
+  return output;
 }

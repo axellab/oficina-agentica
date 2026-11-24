@@ -245,6 +245,53 @@ describe('the house rules', () => {
     ]);
   });
 
+  it('a required stage never says it may be skipped', () => {
+    const skippable = (
+      over: Partial<WorkflowStageDefinition>,
+      says = 'Skip it, with a note, when nothing changed.',
+    ): string[] =>
+      roleKitProblems({
+        roles: sound().roles,
+        workflows: [
+          workflow('release-manager', {
+            stages: [
+              stage('work', 'release-manager', `${WORK} ${says}`, over),
+              stage('report', 'release-manager', REPORT),
+            ],
+          }),
+          workflow('agile-project-manager'),
+        ],
+      });
+    const problem = [
+      expect.stringMatching(
+        /stage "work" is required, and its text says it may be skipped: a run's lead cannot skip it$/,
+      ),
+    ];
+    expect(skippable({})).toEqual([]);
+    expect(skippable({ check: 'tests' })).toEqual([]);
+    expect(skippable({ required: true })).toEqual(problem);
+    // Said to be left out, however the sentence gets there.
+    for (const offer of [
+      'When the user did not ask for it, skip this stage.',
+      'You may skip it when the change is to the docs alone.',
+      'Do not start it early. Skip it when nothing changed.',
+    ]) {
+      expect(skippable({ required: true }, offer), offer).toEqual(problem);
+    }
+    // Forbidding it, or leaving it to the user, is what a required stage is.
+    for (const rule of [
+      'Do not skip this stage.',
+      'Never skip it, whatever the change is.',
+      "Don't skip it: the office closes it.",
+      'You cannot skip it.',
+      'Nobody may skip this stage but the user.',
+      'Only the user may skip it, from the office.',
+      'It is not yours to skip: the user skips it from the office.',
+    ]) {
+      expect(skippable({ required: true }, rule), rule).toEqual([]);
+    }
+  });
+
   it("a Workflow ends on its lead's report, a step of its own", () => {
     const ending = (stages: WorkflowStageDefinition[]): string[] =>
       roleKitProblems({

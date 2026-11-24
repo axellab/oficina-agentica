@@ -150,6 +150,7 @@ components:
         # Workflows (one kind of request, handled by a Crew stage by stage)
         - $ref: '#/components/schemas/WorkflowsLoaded'
         - $ref: '#/components/schemas/WorkflowRejected'
+        - $ref: '#/components/schemas/WorkflowCheckOutput'
         - $ref: '#/components/schemas/ConversationsLoaded'
         - $ref: '#/components/schemas/ConversationSearchResults'
         # Worktrees
@@ -204,6 +205,8 @@ components:
         - $ref: '#/components/schemas/EndCrew'
         - $ref: '#/components/schemas/StartWorkflow'
         - $ref: '#/components/schemas/StopWorkflow'
+        - $ref: '#/components/schemas/SkipWorkflowStage'
+        - $ref: '#/components/schemas/RequestWorkflowCheckOutput'
         - $ref: '#/components/schemas/SetWatchAllSessions'
         - $ref: '#/components/schemas/ExportLayout'
         - $ref: '#/components/schemas/ImportLayout'
@@ -1824,7 +1827,10 @@ components:
       description: |
         One stage of a Workflow, as the office lists it: its title and the
         name of the Role that owns it. `parallel`: it may run at the same time
-        as the stage listed before it. What its owner is told never travels.
+        as the stage listed before it. `required`: a run's lead cannot skip
+        it, only the user can. `check`: the id of the Check that closes it
+        (a command of the host's `checks.json`, run by the office itself).
+        What its owner is told never travels.
       type: object
       additionalProperties: false
       required: [id, title, roleName]
@@ -1837,6 +1843,10 @@ components:
           type: string
         parallel:
           type: boolean
+        required:
+          type: boolean
+        check:
+          type: string
 
     Workflow:
       description: |
@@ -1874,10 +1884,45 @@ components:
       type: string
       enum: [pending, active, done, skipped]
 
+    WorkflowCheckState:
+      description: |
+        Where the Check of one stage of a Workflow run stands: `notSetUp` (the
+        host's `checks.json` gives no command for it in the run's Directory,
+        so the stage is closed on its lead's note), `pending` (not run yet),
+        `running`, `passed` (it exited with 0: the office closed the stage) or
+        `failed` (anything else: the stage stays open).
+      type: string
+      enum: [notSetUp, pending, running, passed, failed]
+
+    WorkflowStageCheck:
+      description: |
+        The Check that closes a stage of a Workflow run, and how its last run
+        went: `exitCode` (absent while none ended, and when the office ended
+        it itself) and `seconds` (how long it ran). Neither its command nor
+        its output travels here: an office asks for them
+        (`requestWorkflowCheckOutput`).
+      type: object
+      additionalProperties: false
+      required: [id, name, state]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        state:
+          $ref: '#/components/schemas/WorkflowCheckState'
+        exitCode:
+          type: integer
+        seconds:
+          type: integer
+          minimum: 0
+
     WorkflowRunStage:
       description: |
         One stage of a Workflow run and where it stands. `note` is what the
-        run's lead said when it finished or skipped it, cut short.
+        run's lead said when it finished or skipped it (or that the user
+        skipped it), cut short. `required`: its lead cannot skip it. `check`:
+        the Check the office runs to close it, when the stage names one.
       type: object
       additionalProperties: false
       required: [id, title, roleName, state]
@@ -1890,10 +1935,14 @@ components:
           type: string
         parallel:
           type: boolean
+        required:
+          type: boolean
         state:
           $ref: '#/components/schemas/WorkflowStageState'
         note:
           type: string
+        check:
+          $ref: '#/components/schemas/WorkflowStageCheck'
 
     WorkflowRun:
       description: |
@@ -1968,6 +2017,43 @@ components:
           const: workflowRejected
         reason:
           type: string
+
+    WorkflowCheckOutput:
+      description: |
+        The Check of one stage of a Workflow run as the office last ran it, to
+        the office that asked (`requestWorkflowCheckOutput`) alone: the
+        `command` it ran and the folder it ran it in (`directory`), how it
+        went, and its `output` (standard output and error together, control
+        characters removed; the end of it when it was long: `truncated`).
+        While the Check is running, the output so far. A stage with no Check,
+        or one that has not run, answers with an empty `output`.
+      type: object
+      additionalProperties: false
+      required: [type, crewId, stageId, state, output]
+      properties:
+        type:
+          const: workflowCheckOutput
+        crewId:
+          type: string
+        stageId:
+          type: string
+        name:
+          type: string
+        command:
+          type: string
+        directory:
+          type: string
+        state:
+          $ref: '#/components/schemas/WorkflowCheckState'
+        exitCode:
+          type: integer
+        seconds:
+          type: integer
+          minimum: 0
+        output:
+          type: string
+        truncated:
+          type: boolean
 
     ConversationsLoaded:
       description: |
@@ -2728,6 +2814,43 @@ components:
         crewId:
           type: string
           description: The run's Crew (`WorkflowRun.crewId`).
+
+    SkipWorkflowStage:
+      description: |
+        The user skips a stage of a Workflow run that is not closed yet (its
+        row in the Workflow panel): it is skipped with a note saying the user
+        did it, and a Check running for it is ended. The one way a `required`
+        stage is left out, and the way past a Check that cannot pass: the
+        run's lead can do neither. Answered with a `workflowsLoaded`
+        broadcast.
+      type: object
+      additionalProperties: false
+      required: [type, crewId, stageId]
+      properties:
+        type:
+          const: skipWorkflowStage
+        crewId:
+          type: string
+          description: The run's Crew (`WorkflowRun.crewId`).
+        stageId:
+          type: string
+
+    RequestWorkflowCheckOutput:
+      description: |
+        Ask for the Check of one stage of a Workflow run as the office last
+        ran it: its command and its output. Answered with
+        `workflowCheckOutput` to the sender (nothing when there is no such
+        run or stage).
+      type: object
+      additionalProperties: false
+      required: [type, crewId, stageId]
+      properties:
+        type:
+          const: requestWorkflowCheckOutput
+        crewId:
+          type: string
+        stageId:
+          type: string
 
     OfficeMcpChoice:
       description: |

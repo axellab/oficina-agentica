@@ -82,10 +82,11 @@ import { useTutorial } from './tutorial/useTutorial.js';
 import { UsageBars } from './usage/UsageBars.js';
 import { useUsageBridge } from './usage/useUsageBridge.js';
 import { useWorkflowStart } from './workflows/useWorkflowStart.js';
+import { WorkflowCheckOutputModal } from './workflows/WorkflowCheckOutputModal.js';
 import { WorkflowPanel } from './workflows/WorkflowPanel.js';
 import { WorkflowRejectedModal } from './workflows/WorkflowRejectedModal.js';
 import { WorkflowStartModal } from './workflows/WorkflowStartModal.js';
-import { useWorkflows } from './workflows/workflowStore.js';
+import { openCheckOutput, useWorkflows } from './workflows/workflowStore.js';
 import { useNewWorktree } from './worktrees/useNewWorktree.js';
 
 // Game state lives outside React — updated imperatively by message handlers
@@ -389,6 +390,25 @@ function App() {
   const stopWorkflow = useCallback(
     (crewId: string) => transport.send({ type: 'stopWorkflow', crewId }),
     [],
+  );
+  // The user's own move on a stage: the only way a required one is left out.
+  const skipWorkflowStage = useCallback(
+    (crewId: string, stageId: string) =>
+      transport.send({ type: 'skipWorkflowStage', crewId, stageId }),
+    [],
+  );
+  // A stage's Check as the office ran it (WorkflowCheckOutputModal shows the answer).
+  const requestCheckOutput = useCallback(
+    (crewId: string, stageId: string) =>
+      transport.send({ type: 'requestWorkflowCheckOutput', crewId, stageId }),
+    [],
+  );
+  const showCheckOutput = useCallback(
+    (crewId: string, stageId: string) => {
+      openCheckOutput(crewId, stageId);
+      requestCheckOutput(crewId, stageId);
+    },
+    [requestCheckOutput],
   );
   // The office's top-right panels (OfficePanels): the tutorial's checklist
   // while a run is under way, the Workflow runs, the Crews while one has agents.
@@ -797,6 +817,8 @@ function App() {
                 <WorkflowPanel
                   runs={shownRuns}
                   onStop={officeReadOnly ? undefined : stopWorkflow}
+                  onSkipStage={officeReadOnly ? undefined : skipWorkflowStage}
+                  onShowCheckOutput={officeReadOnly ? undefined : showCheckOutput}
                 />
               )}
               {shownCrews && (
@@ -1130,6 +1152,8 @@ function App() {
         onClose={workflowStart.close}
       />
       <WorkflowRejectedModal />
+      {/* The output of a stage's Check, asked for from its row in the Workflow panel. */}
+      <WorkflowCheckOutputModal onRefresh={requestCheckOutput} />
       {/* A Worktree its agent left with uncommitted changes: asked in every
           privileged office, both shells (read-only offices are never sent
           any, and the server refuses their answers). */}

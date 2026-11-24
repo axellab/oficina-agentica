@@ -243,6 +243,133 @@ test.describe('Standalone / workflows', () => {
       timeout: 90_000,
     });
   });
+
+  test('a stage the office closes: its Check fails and the stage stays open with the output, passes and closes it, and the user skips a required one @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    test.setTimeout(150_000);
+    await waitForClaudeHookSetup(standalone.tmpHome);
+
+    // The user's own checks.json says what "tests" means on this host: a script
+    // of the workspace that passes once the file `fixed` is there. Nothing
+    // says what "security-scan" means.
+    fs.writeFileSync(
+      path.join(standalone.tmpHome, '.pixel-agents', 'checks.json'),
+      JSON.stringify({
+        checks: [{ id: 'tests', name: 'Unit tests', command: 'node run-tests.js' }],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(standalone.workspaceDir, 'run-tests.js'),
+      [
+        "const fixed = require('fs').existsSync('fixed');",
+        "console.log(fixed ? '3 passed' : '1 failed: export.spec');",
+        'process.exit(fixed ? 0 : 1);',
+      ].join('\n'),
+    );
+
+    // The lead: it takes the run to Verification, says it is done while the
+    // tests fail, and says so again much later (the test "fixed" the work
+    // meanwhile).
+    const lead = claudeScenario('workflow lead closing stages')
+      .at(1_000)
+      .callOfficeMcp('workflow', {}, { saveAs: 'run' });
+    let at = 1_500;
+    for (const stageId of ['reproduce', 'diagnosis', 'fix']) {
+      lead
+        .at(at)
+        .callOfficeMcp('workflow', { action: 'start', stage_id: stageId })
+        .at(at + 500)
+        .callOfficeMcp('workflow', { action: 'finish', stage_id: stageId, note: 'Done.' });
+      at += 1_000;
+    }
+    await arrangeNextClaudeInvocation(
+      standalone.tmpHome,
+      lead
+        .at(5_000)
+        .callOfficeMcp('workflow', { action: 'start', stage_id: 'verification' })
+        .at(12_000)
+        .callOfficeMcp('workflow', {
+          action: 'finish',
+          stage_id: 'verification',
+          note: 'All green here.',
+        })
+        .at(45_000)
+        .callOfficeMcp('workflow', {
+          action: 'finish',
+          stage_id: 'verification',
+          note: 'Fixed and green.',
+        })
+        .holdOpenFor(120_000)
+        .build(),
+    );
+
+    const drawer = await openLaunchDrawer(page);
+    await workflowPicker(drawer).click();
+    await drawer.locator('[data-testid="workflow-option"][data-workflow-id="bug-fix"]').click();
+    await drawer
+      .getByRole('button', { name: path.basename(standalone.workspaceDir), exact: true })
+      .click();
+    // The request dialog says which stages are required, and which a check closes.
+    const modal = page.getByTestId('workflow-start-modal');
+    const listed = modal.getByTestId('workflow-start-stages').locator('li');
+    await expect(listed.filter({ hasText: 'Verification' })).toContainText('required');
+    await expect(
+      listed.filter({ hasText: 'Verification' }).getByTestId('workflow-start-check'),
+    ).toHaveText('check: tests');
+    await expect(listed.filter({ hasText: 'Reproduce' })).not.toContainText('required');
+    await modal.getByTestId('workflow-request-input').fill('The export button does nothing.');
+    await modal.getByTestId('workflow-start').click();
+
+    const panel = page.getByTestId('workflow-panel');
+    await expect(panel).toBeVisible({ timeout: 30_000 });
+    await panel.getByRole('button', { name: 'Show the workflow' }).click();
+    const verification = stageRow(panel, 'verification');
+    const check = verification.getByTestId('workflow-stage-check');
+    await expect(verification.getByTestId('workflow-stage-required')).toBeVisible();
+    // A check with no command is said to be so, before anything runs.
+    await expect(stageRow(panel, 'security-check').getByTestId('workflow-stage-check')).toHaveText(
+      'Check: security-scan · not set up',
+    );
+
+    // The lead said the stage was done; the office ran the tests, and they failed.
+    await expect(check).toHaveAttribute('data-check-state', 'failed', { timeout: 40_000 });
+    await expect(check).toContainText('Check: Unit tests · failed (exit 1)');
+    await expect(verification).toHaveAttribute('data-state', 'active');
+    await expect(verification.getByTestId('workflow-stage-note')).toHaveCount(0);
+
+    // What it ran and what that printed, on request.
+    await verification.getByTestId('workflow-stage-toggle').click();
+    await verification.getByTestId('workflow-stage-output').click();
+    const output = page.getByTestId('workflow-check-output');
+    await expect(output).toHaveAttribute('data-check-state', 'failed');
+    await expect(output.getByTestId('workflow-check-command')).toContainText('node run-tests.js');
+    await expect(output.getByTestId('workflow-check-output-text')).toContainText(
+      '1 failed: export.spec',
+    );
+    await output.getByRole('button', { name: 'Close' }).click();
+    await expect(output).toHaveCount(0);
+
+    // Fixed: the lead's next finish closes the stage, on the office's own run.
+    fs.writeFileSync(path.join(standalone.workspaceDir, 'fixed'), '');
+    await expect(check).toHaveAttribute('data-check-state', 'passed', { timeout: 60_000 });
+    await expect(verification).toHaveAttribute('data-state', 'done');
+    await expect(verification.getByTestId('workflow-stage-note')).toHaveText('Fixed and green.');
+
+    // A required stage is the user's to skip: asked once, then it is skipped.
+    const security = stageRow(panel, 'security-check');
+    await security.getByTestId('workflow-stage-toggle').click();
+    await security.getByTestId('workflow-stage-skip').click();
+    await expect(security).toContainText('Skip this stage?');
+    await expect(security).toHaveAttribute('data-state', 'pending');
+    await security.getByTestId('workflow-stage-skip-confirm').click();
+    await expect(security).toHaveAttribute('data-state', 'skipped');
+    await expect(security.getByTestId('workflow-stage-note')).toHaveText(
+      'Skipped by the user, from the office.',
+    );
+    await expect(panel).toContainText('5 / 6');
+  });
 });
 
 test.describe("Standalone / a Role's own workflows", () => {

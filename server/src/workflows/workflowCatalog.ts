@@ -116,6 +116,8 @@ export function workflowListing(workflow: CatalogWorkflow): Workflow {
       title: stage.title,
       roleName: roleNameOf(stage.role),
       ...(stage.parallel ? { parallel: true } : {}),
+      ...(stage.required ? { required: true } : {}),
+      ...(stage.check !== undefined ? { check: stage.check } : {}),
     })),
   };
 }

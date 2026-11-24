@@ -1,6 +1,7 @@
 /**
  * The Workflows and their runs as the server last listed them
- * (`workflowsLoaded`), and a start it refused (`workflowRejected`), outside
+ * (`workflowsLoaded`), a start it refused (`workflowRejected`) and the output
+ * of a stage's Check this office asked for (`workflowCheckOutput`), outside
  * React like crews/crewStore.ts: the launch drawer's Workflow row, the request
  * dialog and the Workflow panel read the same list with nothing threaded
  * through the shells' props. Null until the server sends one, and for good
@@ -10,20 +11,29 @@
 
 import { useSyncExternalStore } from 'react';
 
-import type { WorkflowsLoaded } from '../../../core/src/messages.js';
-import { parseWorkflowsLoaded } from '../../../core/src/workflows.js';
+import type { WorkflowCheckOutput, WorkflowsLoaded } from '../../../core/src/messages.js';
+import { parseWorkflowCheckOutput, parseWorkflowsLoaded } from '../../../core/src/workflows.js';
 
 /** A start this office asked for and the server refused. */
 export interface WorkflowRejection {
   reason: string;
 }
 
+/** The stage whose Check's output this office is looking at: what it asked
+ *  for, and the server's answer once it came. */
+export interface CheckOutputView {
+  crewId: string;
+  stageId: string;
+  output: WorkflowCheckOutput | null;
+}
+
 interface WorkflowStoreState {
   loaded: WorkflowsLoaded | null;
   rejected: WorkflowRejection | null;
+  checkOutput: CheckOutputView | null;
 }
 
-let state: WorkflowStoreState = { loaded: null, rejected: null };
+let state: WorkflowStoreState = { loaded: null, rejected: null, checkOutput: null };
 const listeners = new Set<() => void>();
 
 function set(next: WorkflowStoreState): void {
@@ -44,7 +54,36 @@ export function handleWorkflowsMessage(msg: { type?: unknown; [key: string]: unk
     set({ ...state, rejected: { reason } });
     return true;
   }
+  if (msg.type === 'workflowCheckOutput') {
+    const parsed = parseWorkflowCheckOutput(msg);
+    const asked = state.checkOutput;
+    // Only the answer to what is on screen: one that comes after the dialog
+    // shut, or for another stage, is dropped.
+    if (parsed && asked && parsed.crewId === asked.crewId && parsed.stageId === asked.stageId) {
+      set({ ...state, checkOutput: { ...asked, output: parsed } });
+    }
+    return true;
+  }
   return false;
+}
+
+/** This office asks for a stage's Check output: the dialog opens, waiting. */
+export function openCheckOutput(crewId: string, stageId: string): void {
+  set({ ...state, checkOutput: { crewId, stageId, output: null } });
+}
+
+export function closeCheckOutput(): void {
+  if (state.checkOutput) set({ ...state, checkOutput: null });
+}
+
+/** The Check output on screen, if any. */
+export function checkOutputView(): CheckOutputView | null {
+  return state.checkOutput;
+}
+
+/** The Check output on screen, re-rendering when it is asked for, answered or shut. */
+export function useCheckOutput(): CheckOutputView | null {
+  return useSyncExternalStore(subscribe, checkOutputView);
 }
 
 function subscribe(listener: () => void): () => void {
@@ -78,5 +117,5 @@ export function dismissWorkflowRejection(): void {
 
 /** Tests only: forget the list and the rejection. */
 export function resetWorkflowStoreForTests(): void {
-  state = { loaded: null, rejected: null };
+  state = { loaded: null, rejected: null, checkOutput: null };
 }

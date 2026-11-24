@@ -357,7 +357,23 @@ export interface TutorialOps {
  *  (workflows/workflows.ts). Only a surface whose office starts Crews has it. */
 export interface WorkflowOps {
   view(caller: number): WorkflowView;
-  move(caller: number, move: StageMove, stageId: string, note?: string): WorkflowMoveOutcome;
+  /** Start or skip a stage. */
+  move(
+    caller: number,
+    move: Exclude<StageMove, 'finish'>,
+    stageId: string,
+    note?: string,
+  ): WorkflowMoveOutcome;
+  /** Report a stage finished: the office closes it, running its Check first
+   *  when it names one the user set up (the call waits for it, as long as a
+   *  tool call may be held). `agentId`: the Crew's agent whose work it is,
+   *  for a Check that runs in that agent's Worktree. */
+  finish(
+    caller: number,
+    stageId: string,
+    note?: string,
+    options?: { agentId?: number; signal?: AbortSignal },
+  ): Promise<WorkflowMoveOutcome>;
 }
 
 /** Everything the tools may call, by capability: a tool names the ones it uses

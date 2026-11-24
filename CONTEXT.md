@@ -73,8 +73,16 @@ How one kind of request is handled: an ordered list of stages, each owned by a R
 _Avoid_: pipeline (that's CI), process, playbook (that's one Role's procedure), plan (an agent's own plan for its turn)
 
 **Workflow run**:
-One request of the user's, handled by a Crew following a Workflow. The user starts it from the office, choosing the Workflow and writing the request in their own words; that launches the Workflow's lead Role with a new Crew, and the run is that Crew's work. The lead hands each stage to an agent of the Role that owns it and reports each stage as it starts, is done or is skipped; the office keeps the order and shows the user every stage. It ends when the user stops it (which ends its Crew), ends its Crew, or its lead leaves. No agent starts a run.
+One request of the user's, handled by a Crew following a Workflow. The user starts it from the office, choosing the Workflow and writing the request in their own words; that launches the Workflow's lead Role with a new Crew, and the run is that Crew's work. The lead hands each stage to an agent of the Role that owns it and reports each stage as it starts, is done or is skipped; the office keeps the order, refuses the skip of a Required stage, runs the Check of a stage that names one before it counts as done, and shows the user every stage. It ends when the user stops it (which ends its Crew), ends its Crew, or its lead leaves. No agent starts a run.
 _Avoid_: job, task (a CLI's own word), session (an agent's), sprint (the Agile Project Manager's own planning word)
+
+**Required stage**:
+A stage of a Workflow that its run's lead cannot skip. The lead decides which stages a request needs, and skips the others with a note; a required stage is not its to leave out. Only the user skips one, from the office. Required says nothing about how the stage is closed: that is its Check's, where it names one, and otherwise the lead's note.
+_Avoid_: mandatory step, gate (a gate is a pipeline's), blocking stage
+
+**Check**:
+A command the office itself runs to close a stage of a Workflow run: the stage names it by id (`tests`, `security-scan`), and the user's own `checks.json` says what that id means on this machine, for every Directory or for one. When the lead reports the stage finished, the office runs the command in the folder the work is in, and the stage is done only if it exits with 0; what it printed is kept as the Check's output, for the user to read in the office and, when it failed, for the lead. No Workflow, repository or agent supplies the command. A Check with no command for its id is not set up: it verifies nothing, and the stage is closed on the lead's note, said to be so.
+_Avoid_: gate, test (a Check may be a scanner or a linter), hook (a CLI's), verification (a stage of some Workflows is called that), validator
 
 ## Agent Lifecycle
 

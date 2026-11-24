@@ -322,6 +322,27 @@ export const WORKFLOW_NOTE_MAX_CHARS = 1000;
  *  (one line, cut): the panel shows a line, and a view-only office is told no
  *  more than that. The run's own agents read the whole text from the tool. */
 export const WORKFLOW_SHOWN_TEXT_MAX_CHARS = 240;
+/** What closes a required stage the user skipped from the office. */
+export const WORKFLOW_USER_SKIP_NOTE = 'Skipped by the user, from the office.';
+
+// ── Checks (server/src/workflows/checkCatalog.ts, checkRunner.ts) ──
+/** The commands the office runs to close a stage, in the persistence dir (the user's file). */
+export const CHECKS_FILE_NAME = 'checks.json';
+/** How long a `finish` holds its request open for the stage's Check: under
+ *  the two minutes after which Claude Code moves a tool call to the
+ *  background (WAIT_FOR_AGENTS_MAX_SECONDS says why). A Check that runs
+ *  longer is waited for by finishing again. */
+export const CHECK_FINISH_HOLD_SECONDS = 100;
+/** How much of a Check's output is kept: its end, where a test run says what failed. */
+export const CHECK_OUTPUT_KEPT_CHARS = 200_000;
+/** How much of it the run's lead is given with a failed Check (a tool reply
+ *  should not flood its context). */
+export const CHECK_OUTPUT_FOR_LEAD_CHARS = 4000;
+/** How much of it an office is sent when it asks. */
+export const CHECK_OUTPUT_FOR_OFFICE_CHARS = 60_000;
+/** After a Check is ended (its time ran out, its run stopped), how long its
+ *  processes get to leave by themselves before they are killed. */
+export const CHECK_KILL_GRACE_MS = 2000;
 
 // ── Recent conversations (the sidebar) ──────────────────────
 /** What each conversation's agent wore and where it sat, in the persistence dir. */

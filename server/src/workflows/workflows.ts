@@ -13,6 +13,12 @@
  *   lead moves a stage; the Crew's other agents read where things stand.
  * - The order is held HERE (workflowProgress.ts), whatever the lead was told:
  *   a stage starts once the stages before it are closed.
+ * - A stage may be `required` (its lead cannot skip it: only the user can,
+ *   from the office) and may name a Check (CONTEXT.md "Check"): then the
+ *   OFFICE closes it, not its lead. A `finish` runs the Check's command (the
+ *   user's own, from checks.json) and the stage is done only if it passes;
+ *   its output stays with the stage. Where the user's file gives no command
+ *   for it, the lead's note closes the stage as before, and the run says so.
  * - Ended when the user stops it (`stopWorkflow`, which ends its Crew), when
  *   the user ends its Crew, or when its lead leaves the office. A run whose
  *   stages are all closed stays listed, finished, until then.
@@ -22,19 +28,39 @@
  * message only sends it to the tool (workflowCopy.ts).
  */
 
-import type { WorkflowRun, WorkflowsLoaded } from '../../../core/src/messages.js';
+import type { CheckDefinition } from '../../../core/src/checks.js';
+import type {
+  WorkflowCheckOutput,
+  WorkflowCheckState,
+  WorkflowRun,
+  WorkflowsLoaded,
+  WorkflowStageCheck,
+} from '../../../core/src/messages.js';
 import {
   type CatalogWorkflow,
   isStageClosed,
   MAX_WORKFLOW_REQUEST_CHARS,
 } from '../../../core/src/workflows.js';
 import type { AgentStateStore } from '../agentStateStore.js';
-import { WORKFLOW_SHOWN_TEXT_MAX_CHARS } from '../constants.js';
+import {
+  CHECK_FINISH_HOLD_SECONDS,
+  CHECK_OUTPUT_FOR_LEAD_CHARS,
+  CHECK_OUTPUT_FOR_OFFICE_CHARS,
+  WORKFLOW_SHOWN_TEXT_MAX_CHARS,
+  WORKFLOW_USER_SKIP_NOTE,
+} from '../constants.js';
 import type { CrewPlace } from '../crews.js';
 import type { AgentLaunch, AgentLaunchOutcome } from '../mcp/officeOperations.js';
 import type { AgentState } from '../types.js';
+import { outputTail } from './checkOutput.js';
+import type { CheckResult, RunningCheck } from './checkRunner.js';
 import { roleNameOf, workflowCatalog, workflowListing } from './workflowCatalog.js';
 import {
+  checkFailedReason,
+  checkNotSetUpNote,
+  checkPassedNote,
+  checkRefusedReason,
+  checkRunningNote,
   NO_WORKFLOW_NOTE,
   WORKFLOW_FIRST_MESSAGE,
   WORKFLOW_LEAD_RULES,
@@ -61,6 +87,19 @@ export interface WorkflowsDeps {
   unavailable(): string | null;
   /** Launch the lead, resolving once it has joined (launch_agent's launch). */
   launch(request: AgentLaunch): Promise<AgentLaunchOutcome>;
+  /** The Checks that close stages: what the user's checks.json says Check
+   *  `id` is for a run started in a Directory (read as it stands now, so a
+   *  corrected file counts for the next finish), and the running of one.
+   *  Absent = this office closes no stage itself: every stage is closed on its
+   *  lead's note. */
+  checks?: {
+    forDirectory(id: string, directoryPath: string): CheckDefinition | undefined;
+    start(request: { command: string; cwd: string; timeoutSeconds: number }): RunningCheck;
+    /** Why the office runs no command now, in plain words; null (or absent)
+     *  when it does. Asked as each Check is about to start, not once per run:
+     *  the user can make the office's tools read-only while a run is under way. */
+    refused?(): string | null;
+  };
 }
 
 /** What an office asks a start with (`startWorkflow`), unchecked. */
@@ -94,6 +133,10 @@ export type WorkflowView =
         brief: string;
         /** The model its owner is launched on, when the stage names one. */
         model?: string;
+        /** Its lead cannot skip it. */
+        required: boolean;
+        /** The Check the office runs to close it, when the stage names one. */
+        check?: WorkflowStageCheck & { command?: string };
         state: StageProgress['state'];
         note?: string;
       }>;
@@ -103,7 +146,32 @@ export type WorkflowView =
       note?: string;
     };
 
-export type WorkflowMoveOutcome = { ok: true; view: WorkflowView } | { ok: false; reason: string };
+/** A move's outcome. `note`: what the office did about the stage's Check,
+ *  for the lead to read with the stages. */
+export type WorkflowMoveOutcome =
+  { ok: true; view: WorkflowView; note?: string } | { ok: false; reason: string };
+
+/** A stage's Check as the office last ran it, or is running it. */
+interface StageCheckRun {
+  id: string;
+  name: string;
+  command: string;
+  /** The folder it runs in. */
+  cwd: string;
+  /** What the stage is closed with if it passes: its lead's latest note. */
+  note: string;
+  /** Its process, while it runs (absent while it waits its turn). */
+  process?: RunningCheck;
+  /** How it ended; absent while it has not. */
+  result?: CheckResult;
+  /** The lead was told how it ended. */
+  reported: boolean;
+  /** The office ended it, or will not start it: its run stopped, its stage
+   *  was skipped. Its end then moves nothing. */
+  cancelled: boolean;
+  /** Settles once it has ended and its stage was moved. */
+  ended: Promise<void>;
+}
 
 interface RunRecord {
   crewId: string;
@@ -115,9 +183,32 @@ interface RunRecord {
   /** Each stage's Role by name, as the catalog had it then. */
   roleNames: string[];
   request: string;
+  /** The Directory the run was started in: where its Checks run, and the one
+   *  checks.json is asked about. */
+  directory: string;
   /** Absent while the lead is still launching. */
   leadAgentId?: number;
   stages: StageProgress[];
+  /** Each stage's Check as it last ran or is running (same order as the
+   *  stages); none where it has not run since the stage last started. */
+  checks: Array<StageCheckRun | undefined>;
+}
+
+/** Wait `ms`, or until `signal` aborts, leaving no timer behind. */
+function holdFor(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const done = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done);
+  });
 }
 
 /** A text as every office is shown it: one line, cut short. */
@@ -133,6 +224,9 @@ export class Workflows {
   /** The Crews whose run the user stopped: their agents are told so. */
   private readonly stopped = new Set<string>();
   private nextOrder = 1;
+  /** One Check at a time, in the order they were asked for: each is a build
+   *  or a test run, and two at once would fight over one machine. */
+  private checkQueue: Promise<void> = Promise.resolve();
   private readonly detach: () => void;
 
   constructor(private readonly deps: WorkflowsDeps) {
@@ -149,6 +243,7 @@ export class Workflows {
       for (const run of this.runs.values()) {
         if (run.leadAgentId !== id) continue;
         this.runs.delete(run.crewId);
+        this.cancelChecks(run);
         console.log(`[Pixel Agents] Workflows: ${run.workflow.name} ended, its lead left`);
         this.broadcast();
         return;
@@ -164,6 +259,8 @@ export class Workflows {
 
   dispose(): void {
     this.detach();
+    // No Check outlives the office that ran it.
+    for (const run of this.runs.values()) this.cancelChecks(run);
   }
 
   // ── The wire ──────────────────────────────────────────────
@@ -181,13 +278,16 @@ export class Workflows {
         finished: isRunFinished(run.stages),
         stages: run.workflow.stages.map((stage, index) => {
           const { state, note } = run.stages[index];
+          const check = this.checkOf(run, index);
           return {
             id: stage.id,
             title: stage.title,
             roleName: run.roleNames[index],
             ...(stage.parallel ? { parallel: true } : {}),
+            ...(stage.required ? { required: true } : {}),
             state,
             ...(note ? { note: shown(note) } : {}),
+            ...(check ? { check: check.listed } : {}),
           };
         }),
       }));
@@ -208,7 +308,7 @@ export class Workflows {
   /** Answer an office's Workflow message; false when it isn't one. */
   handleMessage(
     msg: Record<string, unknown>,
-    reply: (message: { type: 'workflowRejected'; reason: string }) => void,
+    reply: (message: { type: 'workflowRejected'; reason: string } | WorkflowCheckOutput) => void,
   ): boolean {
     switch (msg.type) {
       case 'startWorkflow':
@@ -224,6 +324,19 @@ export class Workflows {
       case 'stopWorkflow':
         if (typeof msg.crewId === 'string') this.stop(msg.crewId);
         return true;
+      case 'skipWorkflowStage':
+        if (typeof msg.crewId === 'string' && typeof msg.stageId === 'string') {
+          this.skipByUser(msg.crewId, msg.stageId);
+        }
+        return true;
+      case 'requestWorkflowCheckOutput': {
+        const output =
+          typeof msg.crewId === 'string' && typeof msg.stageId === 'string'
+            ? this.checkOutput(msg.crewId, msg.stageId)
+            : undefined;
+        if (output) reply(output);
+        return true;
+      }
       default:
         return false;
     }
@@ -280,7 +393,9 @@ export class Workflows {
       workflow,
       roleNames: workflow.stages.map((stage) => roleNameOf(stage.role)),
       request,
+      directory: asked.directoryPath,
       stages: initialStages(workflow.stages),
+      checks: workflow.stages.map(() => undefined),
     });
     this.broadcast();
 
@@ -368,6 +483,7 @@ export class Workflows {
       finished: isRunFinished(run.stages),
       stages: workflow.stages.map((stage, index) => {
         const { state, note } = run.stages[index];
+        const check = this.checkOf(run, index);
         return {
           id: stage.id,
           title: stage.title,
@@ -375,6 +491,15 @@ export class Workflows {
           parallel: stage.parallel === true,
           brief: stage.brief,
           ...(stage.model !== undefined ? { model: stage.model } : {}),
+          required: stage.required === true,
+          ...(check
+            ? {
+                check: {
+                  ...check.listed,
+                  ...(check.command !== undefined ? { command: check.command } : {}),
+                },
+              }
+            : {}),
           state,
           ...(note ? { note } : {}),
         };
@@ -400,8 +525,8 @@ export class Workflows {
     return stage?.model === undefined ? undefined : { model: stage.model, stageTitle: stage.title };
   }
 
-  /** The lead moves a stage of its run (workflowProgress.ts holds the rules). */
-  move(caller: number, move: StageMove, stageId: string, note?: string): WorkflowMoveOutcome {
+  /** The run `caller` leads, or why it moves no stage. */
+  private ledBy(caller: number): { ok: true; run: RunRecord } | { ok: false; reason: string } {
     const crewId = this.crewIdOf(caller);
     const run = crewId !== undefined ? this.runs.get(crewId) : undefined;
     if (!run) {
@@ -414,15 +539,355 @@ export class Workflows {
         reason: `Only this workflow's lead${run.leadAgentId !== undefined ? ` (agent ${run.leadAgentId})` : ''} reports its stages: tell it what you did and how you verified it (send_message), and it will.`,
       };
     }
-    const outcome = moveStage(run.workflow.stages, run.stages, move, stageId, note);
-    if (!outcome.ok) return outcome;
+    return { ok: true, run };
+  }
+
+  /** A run's stages after a move that was allowed. */
+  private moved(run: RunRecord, stages: StageProgress[]): void {
     const wasFinished = isRunFinished(run.stages);
-    run.stages = outcome.stages;
+    run.stages = stages;
     if (!wasFinished && isRunFinished(run.stages)) {
       console.log(`[Pixel Agents] Workflows: ${run.workflow.name} finished`);
     }
+  }
+
+  /**
+   * The lead starts or skips a stage of its run (workflowProgress.ts holds the
+   * rules; a finish is `finish`, since the office may have a Check to run).
+   */
+  move(
+    caller: number,
+    move: Exclude<StageMove, 'finish'>,
+    stageId: string,
+    note?: string,
+  ): WorkflowMoveOutcome {
+    const led = this.ledBy(caller);
+    if (!led.ok) return led;
+    const { run } = led;
+    const outcome = moveStage(run.workflow.stages, run.stages, move, stageId, note);
+    if (!outcome.ok) return outcome;
+    // A stage that starts again, or is left out, has no Check to show for it.
+    this.dropCheck(
+      run,
+      run.workflow.stages.findIndex((stage) => stage.id === stageId),
+    );
+    this.moved(run, outcome.stages);
     this.broadcast();
     return { ok: true, view: this.view(caller) };
+  }
+
+  /**
+   * The lead reports a stage finished. A stage that names a Check the user
+   * set up is closed by the office: its command runs (in the run's Directory,
+   * or in the Worktree of the Crew's agent `agentId`, whose work the stage
+   * is), and the stage is done only if it passes. The call waits for it up to
+   * CHECK_FINISH_HOLD_SECONDS; a Check still running then is waited for by
+   * finishing again. Any other stage is closed on the lead's note.
+   */
+  async finish(
+    caller: number,
+    stageId: string,
+    note?: string,
+    options: { agentId?: number; signal?: AbortSignal } = {},
+  ): Promise<WorkflowMoveOutcome> {
+    const led = this.ledBy(caller);
+    if (!led.ok) return led;
+    const { run } = led;
+    const index = run.workflow.stages.findIndex((stage) => stage.id === stageId);
+    const under = index < 0 ? undefined : run.checks[index];
+    if (under && !under.cancelled) {
+      if (!under.result) {
+        // Under way: it closes the stage with the lead's latest note.
+        if (note?.trim()) under.note = note.trim();
+        return this.awaitCheck(caller, run, index, under, options.signal);
+      }
+      // It ended while nobody waited for it: the lead hears of it now.
+      if (!under.reported) return this.checkOutcome(caller, run, index, under);
+    }
+
+    const allowed = moveStage(run.workflow.stages, run.stages, 'finish', stageId, note);
+    if (!allowed.ok) return allowed;
+    const stage = run.workflow.stages[index];
+    const definition =
+      stage.check === undefined
+        ? undefined
+        : this.deps.checks?.forDirectory(stage.check, run.directory);
+    if (!definition) {
+      this.dropCheck(run, index);
+      this.moved(run, allowed.stages);
+      this.broadcast();
+      return {
+        ok: true,
+        view: this.view(caller),
+        ...(stage.check !== undefined ? { note: checkNotSetUpNote(stage.check) } : {}),
+      };
+    }
+    // A command on the host, at an agent's call: not while the user holds
+    // the office's tools back. The stage stays as it is, and nothing is run.
+    const refused = this.deps.checks?.refused?.() ?? null;
+    if (refused !== null) {
+      return { ok: false, reason: checkRefusedReason(stage.id, definition.name, refused) };
+    }
+    const folder = this.checkFolder(run, options.agentId);
+    if (!folder.ok) return folder;
+    const record = this.startCheck(run, index, definition, folder.path, note?.trim() ?? '');
+    this.broadcast();
+    return this.awaitCheck(caller, run, index, record, options.signal);
+  }
+
+  // ── The user's own moves (the Workflow panel) ─────────────
+
+  /**
+   * The user skips a stage that is not closed, from the office: the one way a
+   * required stage is left out, and the way past a Check that cannot pass. A
+   * Check running for it is ended; one that already ran stays on show.
+   */
+  skipByUser(crewId: string, stageId: string): boolean {
+    const run = this.runs.get(crewId);
+    if (!run) return false;
+    const outcome = moveStage(
+      run.workflow.stages,
+      run.stages,
+      'skip',
+      stageId,
+      WORKFLOW_USER_SKIP_NOTE,
+      'user',
+    );
+    if (!outcome.ok) return false;
+    const index = run.workflow.stages.findIndex((stage) => stage.id === stageId);
+    const under = run.checks[index];
+    if (under && !under.result) this.dropCheck(run, index);
+    this.moved(run, outcome.stages);
+    console.log(`[Pixel Agents] Workflows: the user skipped ${stageId} of ${run.workflow.name}`);
+    this.broadcast();
+    return true;
+  }
+
+  /** A stage's Check as the office last ran it, for the office that asks:
+   *  its command, where it ran and its output (so far, while it runs). */
+  checkOutput(crewId: string, stageId: string): WorkflowCheckOutput | undefined {
+    const run = this.runs.get(crewId);
+    const index = run ? run.workflow.stages.findIndex((stage) => stage.id === stageId) : -1;
+    const check = run && index >= 0 ? this.checkOf(run, index) : undefined;
+    if (!run || !check) return undefined;
+    const under = run.checks[index];
+    const whole = under?.result ?? under?.process?.output();
+    const text = under?.result ? under.result.output : (under?.process?.output().text ?? '');
+    const tail = outputTail(text, CHECK_OUTPUT_FOR_OFFICE_CHARS);
+    return {
+      type: 'workflowCheckOutput',
+      crewId,
+      stageId,
+      name: check.listed.name,
+      ...(check.command !== undefined ? { command: check.command } : {}),
+      ...(under ? { directory: under.cwd } : {}),
+      state: check.listed.state,
+      ...(check.listed.exitCode !== undefined ? { exitCode: check.listed.exitCode } : {}),
+      ...(check.listed.seconds !== undefined ? { seconds: check.listed.seconds } : {}),
+      output: tail.text,
+      ...(tail.truncated || whole?.truncated ? { truncated: true } : {}),
+    };
+  }
+
+  // ── Checks ────────────────────────────────────────────────
+
+  /**
+   * The Check of stage `index` as it stands: how its last run went, else
+   * whether the user's file gives it a command now. None for a stage that
+   * names no Check.
+   */
+  private checkOf(
+    run: RunRecord,
+    index: number,
+  ): { listed: WorkflowStageCheck; command?: string } | undefined {
+    const id = run.workflow.stages[index]?.check;
+    if (id === undefined) return undefined;
+    const under = run.checks[index];
+    if (under) {
+      const { result } = under;
+      const state: WorkflowCheckState = !result ? 'running' : result.passed ? 'passed' : 'failed';
+      return {
+        listed: {
+          id,
+          name: under.name,
+          state,
+          ...(result?.exitCode !== undefined ? { exitCode: result.exitCode } : {}),
+          ...(result ? { seconds: result.seconds } : {}),
+        },
+        command: under.command,
+      };
+    }
+    const definition = this.deps.checks?.forDirectory(id, run.directory);
+    return definition
+      ? { listed: { id, name: definition.name, state: 'pending' }, command: definition.command }
+      : { listed: { id, name: id, state: 'notSetUp' } };
+  }
+
+  /**
+   * Where a stage's Check runs: the run's Directory, or, when the lead names
+   * the colleague whose work the stage is and that agent works in a Worktree,
+   * that Worktree. Never a path an agent wrote: only a folder the office put
+   * an agent of this Crew in.
+   */
+  private checkFolder(
+    run: RunRecord,
+    agentId: number | undefined,
+  ): { ok: true; path: string } | { ok: false; reason: string } {
+    if (agentId === undefined) return { ok: true, path: run.directory };
+    if (this.crewIdOf(agentId) !== run.crewId) {
+      return {
+        ok: false,
+        reason: `Agent ${agentId} is not in your Crew: agent_id names the colleague whose work this stage is (list_agents shows them). Leave it out to check the workflow's own Directory.`,
+      };
+    }
+    return { ok: true, path: this.deps.store.get(agentId)?.worktree?.path ?? run.directory };
+  }
+
+  /** Run stage `index`'s Check, after the ones asked for before it. */
+  private startCheck(
+    run: RunRecord,
+    index: number,
+    definition: CheckDefinition,
+    cwd: string,
+    note: string,
+  ): StageCheckRun {
+    const record: StageCheckRun = {
+      id: definition.id,
+      name: definition.name,
+      command: definition.command,
+      cwd,
+      note,
+      reported: false,
+      cancelled: false,
+      ended: Promise.resolve(),
+    };
+    const turn = this.checkQueue.then(async () => {
+      if (record.cancelled) return;
+      try {
+        // Asked again now: the Checks before this one may have taken a while.
+        const refused = this.deps.checks?.refused?.() ?? null;
+        if (refused !== null) throw new Error(refused);
+        const process = this.deps.checks?.start({
+          command: definition.command,
+          cwd,
+          timeoutSeconds: definition.timeoutSeconds,
+        });
+        if (!process) throw new Error('this office runs no checks');
+        record.process = process;
+        record.result = await process.result;
+      } catch (err) {
+        record.result = {
+          passed: false,
+          ended: 'notStarted',
+          seconds: 0,
+          output: `The check could not be run: ${err instanceof Error ? err.message : String(err)}`,
+          truncated: false,
+        };
+      }
+      record.process = undefined;
+      this.checkEnded(run, index, record);
+    });
+    record.ended = turn;
+    this.checkQueue = turn;
+    run.checks[index] = record;
+    return record;
+  }
+
+  /** A Check ended: one that passed closes its stage, with the note its lead
+   *  finished it with. The office does it, whether or not anyone is waiting. */
+  private checkEnded(run: RunRecord, index: number, record: StageCheckRun): void {
+    // The run is over, or the stage moved on without it: nothing to close.
+    if (this.runs.get(run.crewId) !== run || run.checks[index] !== record || record.cancelled) {
+      return;
+    }
+    const stage = run.workflow.stages[index];
+    console.log(
+      `[Pixel Agents] Workflows: the ${record.name} check of ${stage.id} (${run.workflow.name}) ${record.result?.passed ? 'passed' : 'failed'}`,
+    );
+    if (record.result?.passed) {
+      const outcome = moveStage(run.workflow.stages, run.stages, 'finish', stage.id, record.note);
+      if (outcome.ok) this.moved(run, outcome.stages);
+    }
+    this.broadcast();
+  }
+
+  /** Wait for a Check under way, as long as a tool call may be held. */
+  private async awaitCheck(
+    caller: number,
+    run: RunRecord,
+    index: number,
+    record: StageCheckRun,
+    signal?: AbortSignal,
+  ): Promise<WorkflowMoveOutcome> {
+    const started = Date.now();
+    let ended = false;
+    await Promise.race([
+      record.ended.then(() => {
+        ended = true;
+      }),
+      holdFor(CHECK_FINISH_HOLD_SECONDS * 1000, signal),
+    ]);
+    if (this.runs.get(run.crewId) !== run) return { ok: false, reason: WORKFLOW_STOPPED_NOTE };
+    // The stage moved on without it (the user skipped it): the stages say so.
+    if (run.checks[index] !== record || record.cancelled) {
+      return { ok: true, view: this.view(caller) };
+    }
+    if (!ended || !record.result) {
+      const waited = Math.round((Date.now() - started) / 1000);
+      return {
+        ok: true,
+        view: this.view(caller),
+        note: checkRunningNote(record.name, run.workflow.stages[index].id, waited),
+      };
+    }
+    return this.checkOutcome(caller, run, index, record);
+  }
+
+  /** How an ended Check went, told to the lead (once). */
+  private checkOutcome(
+    caller: number,
+    run: RunRecord,
+    index: number,
+    record: StageCheckRun & { result?: CheckResult },
+  ): WorkflowMoveOutcome {
+    record.reported = true;
+    const { result } = record;
+    if (result?.passed) {
+      return {
+        ok: true,
+        view: this.view(caller),
+        note: checkPassedNote(record.name, record.command, result.seconds),
+      };
+    }
+    const tail = outputTail(result?.output ?? '', CHECK_OUTPUT_FOR_LEAD_CHARS);
+    return {
+      ok: false,
+      reason: checkFailedReason({
+        stageId: run.workflow.stages[index].id,
+        name: record.name,
+        command: record.command,
+        folder: record.cwd,
+        ended: result?.ended ?? 'notStarted',
+        exitCode: result?.exitCode,
+        seconds: result?.seconds ?? 0,
+        output: tail.text,
+        truncated: tail.truncated || result?.truncated === true,
+      }),
+    };
+  }
+
+  /** Stage `index` has no Check to show any more; one under way is ended. */
+  private dropCheck(run: RunRecord, index: number): void {
+    const under = run.checks[index];
+    if (!under) return;
+    under.cancelled = true;
+    under.process?.cancel();
+    run.checks[index] = undefined;
+  }
+
+  /** A run that is over runs no Check. */
+  private cancelChecks(run: RunRecord): void {
+    run.checks.forEach((_, index) => this.dropCheck(run, index));
   }
 
   // ── Internals ─────────────────────────────────────────────
@@ -441,6 +906,7 @@ export class Workflows {
     const run = this.runs.get(crewId);
     if (!run) return false;
     this.runs.delete(crewId);
+    this.cancelChecks(run);
     this.stopped.add(crewId);
     console.log(`[Pixel Agents] Workflows: the user stopped ${run.workflow.name}`);
     this.broadcast();

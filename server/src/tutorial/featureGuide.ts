@@ -153,12 +153,22 @@ export const FEATURE_GUIDE: readonly FeatureGuideTopic[] = [
       '(launching the Roles the Crew lacks, without asking) and reports each stage there: start, finish with a note ' +
       'of what was done and how it was verified, or skip with a note saying why. The office keeps the order (a stage ' +
       'starts once the ones before it are done or skipped; stages marked parallel run together) and only the lead ' +
-      "moves a stage. The Workflow panel (top right) shows the request and every stage's state and note as they " +
-      'move, and the characters walk to each other as work is handed over. Stop Workflow in that panel ends the run ' +
+      'moves a stage. Two marks take a decision away from the lead. A required stage cannot be skipped by it: only ' +
+      'the user skips one, from the Workflow panel (press the stage, Skip Stage). A stage with a check is closed by ' +
+      'the office: when the lead finishes it, the office runs the command the user set up for that check id in ' +
+      '~/.pixel-agents/checks.json (entries with an id, a command, and optionally a name, a directory and ' +
+      'timeoutSeconds) and the stage is done only if it exits with 0; a failed check leaves the stage open and ' +
+      "gives the lead the output's end. No Workflow, repository or agent supplies a command, and a check with no " +
+      'entry verifies nothing (the stage is closed on the note, said to be not set up). The built-in Workflows name ' +
+      'the checks tests (New feature, Bug fix, Safe refactor, Dependency upgrade, Full regression) and ' +
+      'security-scan (New feature, Bug fix). ' +
+      "The Workflow panel (top right) shows the request and every stage's state and note as they " +
+      "move, with each check's result, and its output on request (press the stage, Check Output), " +
+      'and the characters walk to each other as work is handed over. Stop Workflow in that panel ends the run ' +
       'and its Crew: the agents keep running but no longer work with each other. No agent starts a run; only the ' +
       'user does. The user writes Workflows of their own, or replaces a built-in one, in ' +
       '~/.pixel-agents/workflows.json (a name, the lead Role, and stages each with an id, a title, a Role and a ' +
-      'brief); a change applies to the next start.',
+      'brief, and optionally required and a check id); a change applies to the next start.',
   },
   {
     id: 'conversations',

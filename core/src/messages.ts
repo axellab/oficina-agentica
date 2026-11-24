@@ -62,6 +62,7 @@ export type ServerMessage =
   | CrewsLoaded
   | WorkflowsLoaded
   | WorkflowRejected
+  | WorkflowCheckOutput
   | ConversationsLoaded
   | ConversationSearchResults
   | WorktreeRejected
@@ -110,6 +111,8 @@ export type ClientMessage =
   | EndCrew
   | StartWorkflow
   | StopWorkflow
+  | SkipWorkflowStage
+  | RequestWorkflowCheckOutput
   | SetWatchAllSessions
   | ExportLayout
   | ImportLayout
@@ -758,6 +761,8 @@ export interface WorkflowStage {
   title: string;
   roleName: string;
   parallel?: boolean;
+  required?: boolean;
+  check?: string;
 }
 
 export interface WorkflowRun {
@@ -775,15 +780,41 @@ export interface WorkflowRunStage {
   title: string;
   roleName: string;
   parallel?: boolean;
+  required?: boolean;
   state: WorkflowStageState;
   note?: string;
+  check?: WorkflowStageCheck;
 }
 
 export type WorkflowStageState = 'pending' | 'active' | 'done' | 'skipped';
 
+export interface WorkflowStageCheck {
+  id: string;
+  name: string;
+  state: WorkflowCheckState;
+  exitCode?: number;
+  seconds?: number;
+}
+
+export type WorkflowCheckState = 'notSetUp' | 'pending' | 'running' | 'passed' | 'failed';
+
 export interface WorkflowRejected {
   type: 'workflowRejected';
   reason: string;
+}
+
+export interface WorkflowCheckOutput {
+  type: 'workflowCheckOutput';
+  crewId: string;
+  stageId: string;
+  name?: string;
+  command?: string;
+  directory?: string;
+  state: WorkflowCheckState;
+  exitCode?: number;
+  seconds?: number;
+  output: string;
+  truncated?: boolean;
 }
 
 export interface ConversationsLoaded {
@@ -1121,6 +1152,18 @@ export interface StartWorkflow {
 export interface StopWorkflow {
   type: 'stopWorkflow';
   crewId: string;
+}
+
+export interface SkipWorkflowStage {
+  type: 'skipWorkflowStage';
+  crewId: string;
+  stageId: string;
+}
+
+export interface RequestWorkflowCheckOutput {
+  type: 'requestWorkflowCheckOutput';
+  crewId: string;
+  stageId: string;
 }
 
 export interface SetWatchAllSessions {
