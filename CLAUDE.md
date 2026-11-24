@@ -282,6 +282,7 @@ e2e/                                 Playwright suite (real VS Code + mock-claud
 scripts/
   generate-messages.ts               AsyncAPI → core/src/messages.ts
   role-kit.ts                        `npm run new-role` (a Role's folder from role-template/) and `npm run check-roles`
+  local-trial.mjs                    A measured run of the office with the real CLI and nobody at the keyboard: `sample <folder>` (a repo with planted defects), `reset-sample <folder>` (back on `main` after a run), `run --dir … --preset …` (results under trial-runs/)
   run-e2e.mjs                        Playwright wrapper
   generate-e2e-inventory.mjs         Splices the test list into e2e/README.md
   build-allure-report.mjs, assemble-vercel-output.mjs  Allure report
