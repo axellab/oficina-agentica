@@ -126,10 +126,11 @@ export const PLAIN_INPUT_MODES: InputModes = {
  * one write each, MESSAGE_KEY_DELAY_MS apart, in `modes`. Submitting text is
  * the caller's next step (`{ keys: ['enter'] }`, its own write, once the
  * paste has landed: see MESSAGE_SUBMIT_DELAY_MS) — taken only when its
- * delivery guard still allows it.
+ * delivery guard still allows it. A key's write names the key, for a writer
+ * that acts on one (an agent's Enter is work handed over).
  */
 export async function typeInto(
-  write: (bytes: string) => void,
+  write: (bytes: string, key?: ShellKey) => void,
   input: { text: string } | { keys: readonly ShellKey[] },
   modes: InputModes,
 ): Promise<void> {
@@ -139,7 +140,7 @@ export async function typeInto(
   }
   for (const [i, key] of input.keys.entries()) {
     if (i > 0) await pause(MESSAGE_KEY_DELAY_MS);
-    write(keyBytes(key, modes));
+    write(keyBytes(key, modes), key);
   }
 }
 

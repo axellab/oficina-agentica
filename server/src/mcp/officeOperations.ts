@@ -518,6 +518,9 @@ export interface WaitedAgent {
   /** Its status, and its screen once it is no longer working (as
    *  read_agent_terminal gives it); absent for an agent that left. */
   read?: AgentTerminalRead;
+  /** The Teammate of its own whose permission prompt is open in its terminal,
+   *  when that is why it is stopped (its own status does not say so). */
+  teammatePrompt?: number;
 }
 
 /** What a wait gives: how long it took, whether its time ran out, each agent. */

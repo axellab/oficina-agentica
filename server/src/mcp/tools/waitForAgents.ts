@@ -58,7 +58,7 @@ export const waitForAgents = defineTool({
       office.agents.listAgents().map((agent) => [agent.id, agent.activity] as const),
     );
     const working: number[] = [];
-    const agents = waited.agents.map(({ id, state, read }) => {
+    const agents = waited.agents.map(({ id, state, read, teammatePrompt }) => {
       if (state === 'left' || !read) return { agent_id: id, left: true };
       if (state === 'working') {
         working.push(id);
@@ -68,16 +68,24 @@ export const waitForAgents = defineTool({
           status: read.status,
           turn_ended: false,
           ...(activity ? { activity } : {}),
-          // Not `active`, yet nothing ended since it was handed work: it has not begun.
+          // Not `active`, yet the work it was handed is not answered: it has
+          // not begun, it is in a turn that has called no tool yet, or its
+          // turn's end is too fresh to be taken as one.
           ...(read.status === 'active'
             ? {}
-            : { note: 'It has not ended a turn since it was last handed work.' }),
+            : { note: 'No turn that answers the work it was last handed has ended yet.' }),
         };
       }
       return {
         agent_id: id,
-        status: read.status,
+        // A Teammate's prompt stops its Lead's terminal, whatever the Lead's own status reads.
+        status: state === 'permission request' ? state : read.status,
         turn_ended: state === 'turn ended',
+        ...(teammatePrompt !== undefined
+          ? {
+              note: `Its Teammate, agent ${teammatePrompt}, is waiting in this terminal for the user to allow something. Only the user answers that.`,
+            }
+          : {}),
         ...(read.screen
           ? { screen: read.screen.text, screen_token: read.screen.token }
           : { no_screen: read.noScreen }),

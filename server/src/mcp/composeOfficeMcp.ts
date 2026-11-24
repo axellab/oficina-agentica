@@ -290,7 +290,7 @@ export function composeOfficeMcp(surface: OfficeMcpSurface): OfficeMcpFeature {
             ({ fromId, toIds, gist }) =>
               store.broadcast({ type: 'agentMessageShow', fromId, toIds: [...toIds], gist }),
             // A first message is work handed to the agent it launches.
-            (id) => void waits.handedWork(id),
+            (id) => void waits.handedWork(id, 'launch'),
             (caller, roleId) => workflows?.stageModel(caller, roleId),
           ),
         }

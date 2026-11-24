@@ -49,8 +49,9 @@ export function createLaunching(
   crews: Crews,
   /** Show the launcher walking over to the agent it launched (messaging's show). */
   show: (show: MessageShow) => void,
-  /** A launch with a first message handed its agent work (agentWaits' record). */
-  handedWork: (id: number) => void = () => {},
+  /** A launch with a first message handed its agent work as it started
+   *  (agentWaits' record, `since` "launch"). */
+  launchedWithWork: (id: number) => void = () => {},
   /** The model the caller's Workflow names for an agent it launches as a Role
    *  (workflows.ts `stageModel`); none where the caller leads no run. */
   stageModel: (
@@ -143,8 +144,10 @@ export function createLaunching(
         return { ok: false, reason: outcome.reason };
       }
       release();
-      // Its first message is its first turn: a wait on it returns when that ends.
-      if (asks.firstMessage !== undefined) handedWork(outcome.id);
+      // Its first message is its first turn: a wait on it returns when that
+      // ends. It was handed as the agent started, so a short first turn that
+      // ended while the launch waited for the agent to join counts too.
+      if (asks.firstMessage !== undefined) launchedWithWork(outcome.id);
       const agent = store.get(outcome.id);
       const role = agent ? roleOf(agent) : null;
       if (roleId !== undefined && role?.id !== roleId) {

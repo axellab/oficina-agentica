@@ -455,6 +455,12 @@ export const WAIT_FOR_AGENTS_POLL_MS = 250;
  *  ended: a Message queued behind the turn starts the next one at once, and
  *  the TUI is still drawing its last rows when the turn's end is reported. */
 export const TURN_END_SETTLE_MS = 1000;
+/** A Message submitted into an agent mid-turn is either taken into that turn
+ *  or starts the next one as it ends, and a turn reports nothing until its
+ *  first tool call. Once the running turn has ended, this long with no sign of
+ *  another is taken as the first: the Message was answered in the turn that
+ *  ended. */
+export const QUEUED_HANDOVER_QUIET_MS = 20_000;
 
 // ── Messages (read_agent_terminal / send_message) ───────────
 /** A Message's gist (shown in the sender's speech bubble) is at most this long. */

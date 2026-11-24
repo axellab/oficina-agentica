@@ -30,12 +30,13 @@ import type { AgentMessageShow } from '../../../core/src/messages.js';
 import type { HookProvider } from '../../../core/src/provider.js';
 import type { AgentStateStore } from '../agentStateStore.js';
 import { MESSAGE_SUBMIT_DELAY_MS } from '../constants.js';
-import type { Crews } from '../crews.js';
+import { type Crews, promptHolderIn } from '../crews.js';
 import { pause } from '../pause.js';
 import {
   type AgentTerminals,
   type InputModes,
   PLAIN_INPUT_MODES,
+  type ShellKey,
   typeInto,
 } from '../terminal/agentTerminals.js';
 import type { AgentState } from '../types.js';
@@ -211,10 +212,20 @@ export function createMessaging(
       const stopped = withheld();
       if (stopped) return refused(stopped);
       let writes = 0;
-      const write = (bytes: string): void => {
+      const write = (bytes: string, key?: ShellKey): void => {
         const notNow = withheld();
         if (notNow) throw new Withheld(notNow);
-        terminals.write(id, bytes);
+        // An Enter may start a turn, and what it starts is what a wait is
+        // for. Recorded just before its own write, so the turn is never
+        // missed and nothing that ends before it counts, and taken back only
+        // when that write did not land.
+        const notHanded = key === 'enter' ? waits.handedWork(id) : undefined;
+        try {
+          terminals.write(id, bytes);
+        } catch (err) {
+          notHanded?.();
+          throw err;
+        }
         writes++;
       };
       const typed = async (input: Parameters<typeof typeInto>[1]): Promise<string | null> => {
@@ -227,11 +238,8 @@ export function createMessaging(
         }
       };
       if (!('text' in content)) {
-        // An Enter may start a turn: what it starts is what a wait is for.
-        const notHanded = content.keys.includes('enter') ? waits.handedWork(id) : undefined;
         const failed = await typed(content);
         if (!failed) return { id, delivered: true };
-        notHanded?.();
         // Keys land one write each: say how far they got before they stopped.
         const total = content.keys.length;
         return refused(
@@ -253,12 +261,8 @@ export function createMessaging(
       if (notNow) {
         return refused(`Your text was typed into agent ${id}'s input but not submitted: ${notNow}`);
       }
-      // Recorded before the Enter, so the turn it starts is never missed.
-      const notHanded = waits.handedWork(id);
       const enterFailed = await typed({ keys: ['enter'] });
-      if (!enterFailed) return { id, delivered: true };
-      notHanded();
-      return refused(enterFailed);
+      return enterFailed ? refused(enterFailed) : { id, delivered: true };
     });
   }
 
@@ -302,9 +306,16 @@ export function createMessaging(
           if (state === 'left' || !store.has(id)) return { id, state: 'left' as const };
           const read = await readAgentTerminal(id, caller);
           // One still working gives its status alone: its screen is mid-turn.
-          return state === 'working'
-            ? { id, state, read: { status: read.status, screen: null } }
-            : { id, state, read };
+          if (state === 'working')
+            return { id, state, read: { status: read.status, screen: null } };
+          // A prompt open in its terminal that is not its own is a Teammate's.
+          const holder = state === 'permission request' ? promptHolderIn(store, id) : undefined;
+          return {
+            id,
+            state,
+            read,
+            ...(holder !== undefined && holder !== id ? { teammatePrompt: holder } : {}),
+          };
         }),
       );
       return { ok: true, waitedMs, timedOut, agents };
